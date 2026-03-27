@@ -28,6 +28,16 @@ A high-performance, background macOS utility that provides advanced, fully custo
 
 ---
 
+## Recommended System Settings ⚙️
+
+To ensure Glide's gestures function smoothly and don't conflict with macOS's native behavior, we strongly recommend adjusting your **System Settings → Trackpad → More Gestures**:
+
+1. **Disable Mission Control**: Turn off the default 3/4 finger swipe up. Glide provides its own customizable Mission Control trigger.
+2. **Disable App Exposé**: Turn off the 3/4 finger swipe down.
+3. **Switch Between Desktops**: We recommend setting this to **4 Fingers**. By default, Glide uses **3-Finger Swipe** for its fluid app switcher, though this can be customized in Glide's preferences.
+
+---
+
 ## Build & Install
 
 ```bash
