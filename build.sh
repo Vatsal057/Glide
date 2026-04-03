@@ -1,57 +1,130 @@
 #!/bin/bash
-# ─────────────────────────────────────────────────────────────────────────────
-# build.sh  —  Compile ThreeFingerQuit and create a runnable .app bundle
-# Usage:  chmod +x build.sh && ./build.sh
-# ─────────────────────────────────────────────────────────────────────────────
-set -e
+# ─────────────────────────────────────────────────────────────
+#  GestureFlow — build.sh
+#  Compiles all Swift sources and produces GestureFlow.app
+#  Compatible with macOS 13+ (Apple Silicon & Intel)
+# ─────────────────────────────────────────────────────────────
 
-APP_NAME="Glide"
-BUNDLE_NAME="${APP_NAME}.app"
+set -euo pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}/build"
-APP_DIR="${BUILD_DIR}/${BUNDLE_NAME}"
-MACOS_DIR="${APP_DIR}/Contents/MacOS"
-RESOURCES_DIR="${APP_DIR}/Contents/Resources"
+APP_NAME="GestureFlow"
+BUILD_DIR="$SCRIPT_DIR/build"
+APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
+CONTENTS="$APP_BUNDLE/Contents"
+MACOS="$CONTENTS/MacOS"
+RESOURCES="$CONTENTS/Resources"
 
-echo "🔨 Building ${BUNDLE_NAME}…"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Building $APP_NAME"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# ── 1. Clean & scaffold ───────────────────────────────────────────────────────
-rm -rf "${BUILD_DIR}"
-mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
+# ── Check swiftc ──────────────────────────────
+if ! command -v swiftc &>/dev/null; then
+    echo "❌  swiftc not found. Install Xcode or Xcode Command Line Tools."
+    echo "    Run: xcode-select --install"
+    exit 1
+fi
 
-# ── 2. Compile ────────────────────────────────────────────────────────────────
-swiftc \
-    -O \
-    -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-    -target arm64-apple-macosx12.0 \
-    -framework Cocoa \
-    "${SCRIPT_DIR}/"*.swift \
-    -o "${MACOS_DIR}/${APP_NAME}"
+SWIFT_VERSION=$(swiftc --version 2>&1 | head -1)
+echo "Swift: $SWIFT_VERSION"
 
-# If you're on an Intel Mac, swap the -target line above for:
-#   -target x86_64-apple-macosx12.0
-# Or build a Universal binary (arm64 + x86_64):
-#   Remove -target entirely and add: -arch arm64 -arch x86_64
+# ── Clean previous build ─────────────────────
+rm -rf "$APP_BUNDLE"
+mkdir -p "$MACOS" "$RESOURCES"
 
-# ── 3. Copy Info.plist ────────────────────────────────────────────────────────
-cp "${SCRIPT_DIR}/Info.plist" "${APP_DIR}/Contents/Info.plist"
+# ── Copy Info.plist ──────────────────────────
+cp "$SCRIPT_DIR/Info.plist" "$CONTENTS/Info.plist"
 
-# ── 4. Create PkgInfo ─────────────────────────────────────────────────────────
-printf 'APPL????' > "${APP_DIR}/Contents/PkgInfo"
+# ── Copy app icon ────────────────────────────
+if [[ -f "$SCRIPT_DIR/assets/AppIcon.icns" ]]; then
+    cp "$SCRIPT_DIR/assets/AppIcon.icns" "$RESOURCES/AppIcon.icns"
+    echo "Icon: AppIcon.icns copied"
+fi
 
-# ── 5. Ad-hoc code sign (required for accessibility API) ─────────────────────
-echo "✍️  Signing…"
-codesign --force --deep --sign - "${APP_DIR}"
+# ── Collect Swift sources ────────────────────
+SOURCES=(
+    "$SCRIPT_DIR/Sources/main.swift"
+    "$SCRIPT_DIR/Sources/MultitouchBridge.swift"
+    "$SCRIPT_DIR/Sources/Settings.swift"
+    "$SCRIPT_DIR/Sources/ActionExecutor.swift"
+    "$SCRIPT_DIR/Sources/GestureEngine.swift"
+    "$SCRIPT_DIR/Sources/PreferencesWindow.swift"
+    "$SCRIPT_DIR/Sources/PreferencesUI.swift"
+    "$SCRIPT_DIR/Sources/AppDelegate.swift"
+)
 
+# Verify all sources exist
+for src in "${SOURCES[@]}"; do
+    if [[ ! -f "$src" ]]; then
+        echo "❌  Missing source: $src"
+        exit 1
+    fi
+done
+
+# ── Compile ──────────────────────────────────
+echo "Compiling…"
+
+SDK_PATH="$(xcrun --show-sdk-path)"
+ARCHS=(arm64 x86_64)
+BINARIES=()
+
+for arch in "${ARCHS[@]}"; do
+    out="$BUILD_DIR/$APP_NAME-$arch"
+    if swiftc \
+        -O \
+        -target "$arch-apple-macosx13.0" \
+        -sdk "$SDK_PATH" \
+        -framework Cocoa \
+        -framework SwiftUI \
+        -framework IOKit \
+        -framework CoreGraphics \
+        -framework UniformTypeIdentifiers \
+        -o "$out" \
+        "${SOURCES[@]}" \
+        2>&1; then
+        BINARIES+=("$out")
+    elif [[ "$arch" == "$(uname -m)" ]]; then
+        echo "❌  Native $arch build failed"
+        exit 1
+    else
+        echo "⚠️  Skipping optional $arch build on this machine"
+    fi
+done
+
+if [[ ${#BINARIES[@]} -eq 0 ]]; then
+    echo "❌  No app binary was produced"
+    exit 1
+elif [[ ${#BINARIES[@]} -eq 1 ]]; then
+    cp "${BINARIES[0]}" "$MACOS/$APP_NAME"
+else
+    lipo -create "${BINARIES[@]}" -output "$MACOS/$APP_NAME"
+fi
+
+echo "✅  Compile succeeded"
+
+# ── Ad-hoc code sign ─────────────────────────
+echo "Signing…"
+codesign --force --sign - \
+    --entitlements "$SCRIPT_DIR/GestureFlow.entitlements" \
+    "$APP_BUNDLE" 2>/dev/null || \
+codesign --force --sign - "$APP_BUNDLE"
+
+echo "✅  Signed"
+
+# ── Print result ─────────────────────────────
 echo ""
-echo "✅ Built successfully → ${APP_DIR}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  App bundle: $APP_BUNDLE"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "Next steps:"
-echo "  1. Copy ${BUNDLE_NAME} to your /Applications folder (optional)"
-echo "  2. Double-click it to launch"
-echo "  3. macOS will ask for Accessibility permission — grant it in:"
-echo "     System Settings → Privacy & Security → Accessibility"
-echo "  4. The 🖐️ icon will appear in your menu bar"
+echo "  1. Run:  open \"$APP_BUNDLE\""
+echo "  2. macOS will prompt for Accessibility permission."
+echo "  3. Go to System Settings → Privacy & Security → Accessibility"
+echo "     and enable GestureFlow."
+echo "  4. The hand icon will appear in your menu bar."
 echo ""
-echo "  Tip: To launch at login, open the app and go to:"
-echo "    System Settings → General → Login Items → add ThreeFingerQuit"
+echo "Optional — move to Applications:"
+echo "  cp -r \"$APP_BUNDLE\" /Applications/"
+echo ""
