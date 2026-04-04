@@ -819,248 +819,157 @@ struct TuningRow: View {
 // MARK: - Trackpad Margin Visual
 // ─────────────────────────────────────────────
 
-/// A photorealistic MacBook trackpad preview showing the edge margin dead zones
-/// as translucent overlays with rounded corners. The outer shell renders an
-/// aluminum casing with a subtle inset glass surface. The finger-notch (lid-lift
-/// indent) sits below the bottom border, as on real MacBooks.
+/// MacBook-style trackpad preview. Margin dead-zones fill their full edge area.
+/// The finger-notch groove sits inset into the bottom bezel.
 struct TrackpadMarginView: View {
     var marginLeft:   Double
     var marginRight:  Double
     var marginTop:    Double
     var marginBottom: Double
-    var fingerCount: Int
-    var centroidX: Float
-    var centroidY: Float   // 0 = bottom in MT coords — flipped for drawing
+    var fingerCount:  Int
+    var centroidX:    Float
+    var centroidY:    Float   // 0 = bottom in MT coords — flipped for drawing
 
-    // Outer casing dimensions
-    private let casingW: CGFloat = 280
-    private let casingH: CGFloat = 185
-    private let casingR: CGFloat = 18
+    private let W: CGFloat      = 294
+    private let H: CGFloat      = 190
+    private let outerR: CGFloat = 24
+    private let bezel: CGFloat  = 11
+    private var innerR: CGFloat { outerR - bezel * 0.55 }
 
-    // Glass inset dimensions
-    private let padInset: CGFloat = 10
-    private var padW: CGFloat { casingW - padInset * 2 }
-    private var padH: CGFloat { casingH - padInset * 2 }
-    private let padR: CGFloat = 10
-
-    // Notch dimensions (below the casing)
-    private let notchW: CGFloat = 52
-    private let notchH: CGFloat = 5
-    private let notchR: CGFloat = 3
+    private let notchW: CGFloat = 44
+    private let notchH: CGFloat = 7
+    private let notchR: CGFloat = 3.5
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                // ── Outer aluminum casing ──
-                RoundedRectangle(cornerRadius: casingR, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(white: 0.80),
-                                Color(white: 0.70),
-                                Color(white: 0.65)
-                            ],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: casingR, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [Color(white: 0.90), Color(white: 0.42)],
-                                    startPoint: .top, endPoint: .bottom),
-                                lineWidth: 1.2)
-                    )
-                    .shadow(color: .black.opacity(0.22), radius: 8, y: 4)
-                    .shadow(color: .black.opacity(0.10), radius: 2, y: 1)
+        ZStack {
+            // ── Outer casing ──
+            RoundedRectangle(cornerRadius: outerR, style: .continuous)
+                .fill(LinearGradient(
+                    colors: [Color(white: 0.29), Color(white: 0.22), Color(white: 0.18)],
+                    startPoint: .top, endPoint: .bottom))
+                .overlay(RoundedRectangle(cornerRadius: outerR, style: .continuous)
+                    .strokeBorder(LinearGradient(
+                        colors: [Color(white: 0.46), Color(white: 0.16)],
+                        startPoint: .top, endPoint: .bottom), lineWidth: 1.0))
+                .shadow(color: .black.opacity(0.50), radius: 14, y: 6)
+                .shadow(color: .black.opacity(0.20), radius: 3,  y: 1)
 
-                // ── Casing inner shadow (depth illusion) ──
-                RoundedRectangle(cornerRadius: casingR - 2, style: .continuous)
-                    .fill(Color.black.opacity(0.06))
-                    .padding(5)
+            // ── Glass surface (inset from casing) ──
+            RoundedRectangle(cornerRadius: innerR, style: .continuous)
+                .fill(LinearGradient(
+                    colors: [Color(white: 0.24), Color(white: 0.19)],
+                    startPoint: .top, endPoint: .bottom))
+                .overlay(RoundedRectangle(cornerRadius: innerR, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: [Color.white.opacity(0.06), .clear],
+                        startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.35))))
+                .overlay(RoundedRectangle(cornerRadius: innerR, style: .continuous)
+                    .strokeBorder(Color(white: 0.35), lineWidth: 0.5))
+                // ── Margin strips overlay on the glass ──
+                .overlay {
+                    GeometryReader { geo in
+                        let gW = geo.size.width
+                        let gH = geo.size.height
+                        let l  = CGFloat(marginLeft)   * gW
+                        let r  = CGFloat(marginRight)  * gW
+                        let t  = CGFloat(marginTop)    * gH
+                        let b  = CGFloat(marginBottom) * gH
+                        let fill   = Color(white: 0.08).opacity(0.55)
+                        let border = Color(white: 0.55).opacity(0.28)
 
-                // ── Glass surface ──
-                RoundedRectangle(cornerRadius: padR, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(white: 0.87), Color(white: 0.79)],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .overlay(
-                        // Top gloss sheen
-                        RoundedRectangle(cornerRadius: padR, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.30), Color.white.opacity(0.0)],
-                                    startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.45))
-                            )
-                    )
-                    .overlay(
-                        // Glass border — inner ring
-                        RoundedRectangle(cornerRadius: padR, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [Color(white: 0.55), Color(white: 0.38)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing),
-                                lineWidth: 0.8)
-                    )
-                    .padding(padInset)
-
-                // ── Margin overlays on the glass ──
-                GeometryReader { geo in
-                    let gx = padInset
-                    let gy = padInset
-                    let gw = geo.size.width  - padInset * 2
-                    let gh = geo.size.height - padInset * 2
-
-                    let l = CGFloat(marginLeft)   * gw
-                    let r = CGFloat(marginRight)  * gw
-                    let t = CGFloat(marginTop)    * gh
-                    let b = CGFloat(marginBottom) * gh
-
-                    let marginFill  = Color(white: 0.40).opacity(0.16)
-                    let marginEdge  = Color(white: 0.30).opacity(0.38)
-
-                    ZStack(alignment: .topLeading) {
-                        // ── Left margin ──
-                        if l > 1 {
-                            UnevenRoundedRectangle(
-                                topLeadingRadius:    padR,
-                                bottomLeadingRadius: padR,
-                                bottomTrailingRadius: 0,
-                                topTrailingRadius:   0,
-                                style: .continuous
-                            )
-                            .fill(marginFill)
-                            .overlay(alignment: .trailing) {
-                                Rectangle()
-                                    .fill(marginEdge)
-                                    .frame(width: 1)
+                        ZStack {
+                            // Left — full height, aligned to leading
+                            if l > 0.5 {
+                                fill
+                                    .frame(width: l, height: gH)
+                                    .frame(width: gW, height: gH, alignment: .leading)
+                                    .overlay(alignment: .leading) {
+                                        border.frame(width: 1).offset(x: l)
+                                    }
+                                    .animation(.easeInOut(duration: 0.13), value: l)
                             }
-                            .frame(width: l, height: gh)
-                            .offset(x: gx, y: gy)
-                            .animation(.easeInOut(duration: 0.15), value: marginLeft)
-                        }
-
-                        // ── Right margin ──
-                        if r > 1 {
-                            UnevenRoundedRectangle(
-                                topLeadingRadius:    0,
-                                bottomLeadingRadius: 0,
-                                bottomTrailingRadius: padR,
-                                topTrailingRadius:   padR,
-                                style: .continuous
-                            )
-                            .fill(marginFill)
-                            .overlay(alignment: .leading) {
-                                Rectangle()
-                                    .fill(marginEdge)
-                                    .frame(width: 1)
+                            // Right — full height, aligned to trailing
+                            if r > 0.5 {
+                                fill
+                                    .frame(width: r, height: gH)
+                                    .frame(width: gW, height: gH, alignment: .trailing)
+                                    .overlay(alignment: .trailing) {
+                                        border.frame(width: 1).offset(x: -r)
+                                    }
+                                    .animation(.easeInOut(duration: 0.13), value: r)
                             }
-                            .frame(width: r, height: gh)
-                            .offset(x: gx + gw - r, y: gy)
-                            .animation(.easeInOut(duration: 0.15), value: marginRight)
-                        }
-
-                        // ── Top margin ──
-                        if t > 1 {
-                            UnevenRoundedRectangle(
-                                topLeadingRadius:    padR,
-                                bottomLeadingRadius: 0,
-                                bottomTrailingRadius: 0,
-                                topTrailingRadius:   padR,
-                                style: .continuous
-                            )
-                            .fill(marginFill)
-                            .overlay(alignment: .bottom) {
-                                Rectangle()
-                                    .fill(marginEdge)
-                                    .frame(height: 1)
+                            // Top — full width, aligned to top
+                            if t > 0.5 {
+                                fill
+                                    .frame(width: gW, height: t)
+                                    .frame(width: gW, height: gH, alignment: .top)
+                                    .overlay(alignment: .top) {
+                                        border.frame(height: 1).offset(y: t)
+                                    }
+                                    .animation(.easeInOut(duration: 0.13), value: t)
                             }
-                            .frame(width: gw, height: t)
-                            .offset(x: gx, y: gy)
-                            .animation(.easeInOut(duration: 0.15), value: marginTop)
-                        }
-
-                        // ── Bottom margin ──
-                        if b > 1 {
-                            UnevenRoundedRectangle(
-                                topLeadingRadius:    0,
-                                bottomLeadingRadius: padR,
-                                bottomTrailingRadius: padR,
-                                topTrailingRadius:   0,
-                                style: .continuous
-                            )
-                            .fill(marginFill)
-                            .overlay(alignment: .top) {
-                                Rectangle()
-                                    .fill(marginEdge)
-                                    .frame(height: 1)
+                            // Bottom — full width, aligned to bottom
+                            if b > 0.5 {
+                                fill
+                                    .frame(width: gW, height: b)
+                                    .frame(width: gW, height: gH, alignment: .bottom)
+                                    .overlay(alignment: .bottom) {
+                                        border.frame(height: 1).offset(y: -b)
+                                    }
+                                    .animation(.easeInOut(duration: 0.13), value: b)
                             }
-                            .frame(width: gw, height: b)
-                            .offset(x: gx, y: gy + gh - b)
-                            .animation(.easeInOut(duration: 0.15), value: marginBottom)
-                        }
 
-                        // ── Live centroid dot ──
-                        if fingerCount >= 2 {
-                            let dotX = gx + CGFloat(centroidX) * gw
-                            let dotY = gy + (1.0 - CGFloat(centroidY)) * gh
+                            // ── Live centroid dot ──
+                            if fingerCount >= 2 {
+                                let dotX = CGFloat(centroidX) * gW
+                                let dotY = (1.0 - CGFloat(centroidY)) * gH
+                                let isMargin =
+                                    CGFloat(centroidX)       < CGFloat(marginLeft)        ||
+                                    CGFloat(centroidX)       > 1.0 - CGFloat(marginRight) ||
+                                    1.0 - CGFloat(centroidY) < CGFloat(marginTop)         ||
+                                    1.0 - CGFloat(centroidY) > 1.0 - CGFloat(marginBottom)
+                                let dot: Color = isMargin ? .orange : Color(red: 0.25, green: 0.88, blue: 0.50)
 
-                            // Determine if centroid is in the margin
-                            let inMargin = CGFloat(centroidX) < CGFloat(marginLeft)
-                                        || CGFloat(centroidX) > (1.0 - CGFloat(marginRight))
-                                        || (1.0 - CGFloat(centroidY)) < CGFloat(marginTop)
-                                        || (1.0 - CGFloat(centroidY)) > (1.0 - CGFloat(marginBottom))
-                            let dotColor: Color = inMargin ? .orange : Color(red: 0.20, green: 0.75, blue: 0.40)
-
-                            ZStack {
-                                Circle()
-                                    .fill(dotColor.opacity(0.22))
-                                    .frame(width: 26, height: 26)
-                                    .blur(radius: 4)
-                                Circle()
-                                    .fill(
-                                        RadialGradient(
-                                            colors: [dotColor.opacity(0.95), dotColor.opacity(0.60)],
-                                            center: .center,
-                                            startRadius: 0, endRadius: 7)
-                                    )
-                                    .frame(width: 13, height: 13)
-                                    .shadow(color: dotColor.opacity(0.60), radius: 5)
-                                Text("\(fingerCount)")
-                                    .font(.system(size: 7, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.white)
+                                ZStack {
+                                    Circle().fill(dot.opacity(0.20)).frame(width: 26, height: 26).blur(radius: 5)
+                                    Circle().fill(dot).frame(width: 12, height: 12)
+                                        .shadow(color: dot.opacity(0.75), radius: 6)
+                                    Text("\(fingerCount)")
+                                        .font(.system(size: 6.5, weight: .heavy, design: .rounded))
+                                        .foregroundStyle(.black.opacity(0.70))
+                                }
+                                .position(x: dotX, y: dotY)
+                                .animation(.interactiveSpring(response: 0.14, dampingFraction: 0.70), value: dotX)
+                                .animation(.interactiveSpring(response: 0.14, dampingFraction: 0.70), value: dotY)
                             }
-                            .position(x: dotX, y: dotY)
-                            .animation(.interactiveSpring(response: 0.15, dampingFraction: 0.7), value: dotX)
-                            .animation(.interactiveSpring(response: 0.15, dampingFraction: 0.7), value: dotY)
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: padR, style: .continuous).inset(by: padInset))
+                    .clipShape(RoundedRectangle(cornerRadius: innerR, style: .continuous))
                 }
-            }
-            .frame(width: casingW, height: casingH)
+                .padding(bezel)
 
-            // ── Finger notch (lid-lift indent below the casing) ──
-            ZStack {
-                // Notch shadow/depth
-                Capsule()
-                    .fill(Color(white: 0.48))
-                    .frame(width: notchW, height: notchH)
-                    .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
-                // Notch highlight top edge
-                Capsule()
-                    .fill(Color(white: 0.78))
-                    .frame(width: notchW - 4, height: 1.5)
-                    .offset(y: -(notchH / 2) + 1)
+            // ── Notch groove — recessed into the bottom bezel ──
+            VStack {
+                Spacer()
+                ZStack {
+                    RoundedRectangle(cornerRadius: notchR, style: .continuous)
+                        .fill(Color(white: 0.09))
+                        .frame(width: notchW, height: notchH)
+                        .shadow(color: .black.opacity(0.70), radius: 3, y: 1)
+                    RoundedRectangle(cornerRadius: notchR - 1, style: .continuous)
+                        .fill(Color(white: 0.40))
+                        .frame(width: notchW - 4, height: 1.0)
+                        .offset(y: -(notchH / 2) + 1.5)
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(Color(white: 0.13))
+                        .frame(width: notchW - 10, height: notchH - 3)
+                }
+                .offset(y: -3)
             }
-            .padding(.top, 5)
         }
+        .frame(width: W, height: H)
     }
 }
-
 
 // ─────────────────────────────────────────────
 // MARK: - Edge Margin Sliders Section
