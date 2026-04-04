@@ -1,78 +1,36 @@
 <p align="center">
-  <img src="assets/hero.png" alt="Glide" width="600"/>
+  <img src="assets/hero.png" alt="Glide" width="620"/>
 </p>
 
-<h1 align="center">Glide</h1>
+<br>
 
 <p align="center">
-  <b>Supercharge your trackpad. Control your Mac the way it was always meant to feel.</b><br>
-  Swipe with 2–5 fingers to manage windows, switch apps, and trigger system actions —<br>
-  at any speed, with zero false positives.
+  <img src="https://img.shields.io/badge/macOS-13%2B-007AFF?style=flat-square&logo=apple&logoColor=white"/>
+  &nbsp;
+  <img src="https://img.shields.io/badge/Swift-6.3-F05138?style=flat-square&logo=swift&logoColor=white"/>
+  &nbsp;
+  <img src="https://img.shields.io/badge/arch-Universal%20Binary-34C759?style=flat-square"/>
+  &nbsp;
+  <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square"/>
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square" alt="macOS 13+"/>
-  <img src="https://img.shields.io/badge/Swift-6.3-orange?style=flat-square" alt="Swift 6.3"/>
-  <img src="https://img.shields.io/badge/architecture-Universal-green?style=flat-square" alt="Universal"/>
-  <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="License"/>
-  <img src="https://img.shields.io/badge/dependencies-none-brightgreen?style=flat-square" alt="No Dependencies"/>
-</p>
+<br>
 
 ---
 
-> **"I've been using BetterTouchTool for years. Glide just... works better on the trackpad. The palm rejection alone is worth the switch."**
+Your Mac's trackpad is extraordinary hardware running mediocre software.
+
+The system gives you four fixed gestures you can't change. Third-party apps either charge a subscription, pull in giant dependencies, or randomly fire when your palm grazes the edge. You end up adjusting your grip just to avoid a misfiring gesture — on *your own laptop*.
+
+**Glide fixes this.** It's a free, open-source macOS utility that reads raw trackpad input and maps every combination of finger count, direction, and *speed* to whatever action you want — snapping windows, switching apps, locking your screen, taking screenshots, or anything else macOS can do. It lives in your menu bar, uses no CPU when idle, and gets out of your way.
+
+One `bash build.sh` and it's running. No Xcode. No package manager. No account required.
 
 ---
 
-## What Is Glide?
+<br>
 
-Glide is a free, open-source macOS menu bar app that replaces the built-in trackpad gesture system with one that's faster, smarter, and fully yours to configure.
-
-Instead of macOS's fixed four-finger gestures, Glide intercepts raw multitouch data directly from your trackpad hardware and maps every combination of **finger count**, **direction**, and **speed** to any action you choose — window snapping, app switching, fullscreen, screenshots, and more.
-
-It lives quietly in your menu bar, uses no background CPU when idle, and recovers automatically after sleep. There's no subscription, no cloud, no tracking. Just better trackpad control.
-
----
-
-## Table of Contents
-
-- [Why Glide?](#why-glide)
-- [Quick Start](#quick-start)
-- [How It Works](#how-it-works)
-- [Speed-Based Gestures](#speed-based-gestures)
-- [Palm Rejection & Safe Zones](#palm-rejection--safe-zones)
-- [Reciprocal Gestures](#reciprocal-gestures)
-- [Default Gesture Map](#default-gesture-map)
-- [All Available Actions](#all-available-actions)
-- [Customization & Preferences](#customization--preferences)
-- [Tuning Guide](#tuning-guide)
-- [App-Specific Rules](#app-specific-rules)
-- [Troubleshooting](#troubleshooting)
-- [Building from Source](#building-from-source)
-- [Architecture Overview](#architecture-overview)
-
----
-
-## Why Glide?
-
-Your Mac's trackpad is one of the best input devices ever made. The software controlling it, not so much.
-
-macOS ships with a handful of hard-coded gestures you can't change. Third-party tools either cost money, bloat your system, or trigger gestures accidentally when you rest your palm. Glide was built to solve all of that:
-
-| | macOS Built-in | Most Alternatives | **Glide** |
-|--|:--:|:--:|:--:|
-| Fully customizable | ❌ | ✅ | ✅ |
-| Speed-based actions | ❌ | ❌ | ✅ |
-| Intelligent palm rejection | ⚠️ | ⚠️ | ✅ |
-| Reciprocal (undo) gestures | ❌ | ❌ | ✅ |
-| App-specific rules | ❌ | ✅ | ✅ |
-| No subscription | ✅ | ❌ | ✅ |
-| Open source | ❌ | ❌ | ✅ |
-| Zero dependencies | — | ❌ | ✅ |
-
----
-
-## Quick Start
+## Getting Started
 
 ```bash
 git clone https://github.com/Vatsal057/Glide.git
@@ -81,313 +39,264 @@ bash build.sh
 open build/Glide.app
 ```
 
-macOS will prompt for **Accessibility** permission — Glide needs it to control windows and simulate keys. Grant it in **System Settings → Privacy & Security → Accessibility**, and you're done. Three-finger swipes work immediately.
+Grant the Accessibility permission when macOS asks (Glide needs it to move windows and simulate keys), and you're done. Your trackpad is already smarter.
 
-> **Optional:** Move Glide to your Applications folder and enable **Launch at Login** in Preferences so it's always there when you need it.
->
-> ```bash
-> cp -r build/Glide.app /Applications/
-> ```
-
----
-
-## How It Works
-
-Glide taps directly into Apple's `MultitouchSupport` private framework to receive raw per-finger contact data from your trackpad — the same low-level stream the system itself uses. This gives Glide access to finger position, velocity, pressure, and contact shape on every frame.
-
-When you place multiple fingers on the trackpad, here's what happens internally:
-
-```
-  Your Trackpad                     Glide Engine
-  ─────────────                     ─────────────────────────────────────
-  ● ● ●  ──────►     ──────►    1. Count fingers (3)
-                                 2. Check Safe Zones (palm rejection)
-                                 3. Verify swipe vs. pinch (coherence check)
-                                 4. Detect direction  (→ Right)
-                                 5. Classify speed    (Normal)
-                                 6. Look up matching rule
-                                 7. Fire action       (App Switcher: Next)
-                                 8. Issue haptic pulse
-```
-
-The entire pipeline runs on the main thread with a watchdog timer that automatically restarts the multitouch bridge if hardware goes stale — for example, right after your Mac wakes from sleep.
-
----
-
-## Speed-Based Gestures
-
-This is Glide's most distinctive feature, and once you start using it, you won't want to go back.
-
-The **same** gesture — say, 3 fingers swiping right — can trigger **three different actions** depending on how fast your fingers move. You get triple the control without learning any new gestures.
-
-| Speed | Feel | Velocity Threshold | Color |
-|-------|------|--------------------|-------|
-| 🔵 **Slow** | A deliberate, unhurried glide | ≤ 0.003 | Blue |
-| ⚪ **Normal** | Your everyday comfortable swipe | 0.003 – 0.008 | Gray |
-| 🟠 **Fast** | A sharp, snappy flick | ≥ 0.008 | Orange |
-
-Speed is measured by averaging the centroid velocity across the first three frames of movement — so your *starting* speed is what matters, not your peak speed. This makes it consistent and intentional.
-
-### Technique Tips
-
-**🟠 Fast — "The Flick":** Think of it like flicking a crumb off a table. Place your fingers and snap them. The whole motion should take under a quarter second.
-
-**⚪ Normal — "The Swipe":** Don't think about it. If you just swipe naturally, this is what fires.
-
-**🔵 Slow — "The Glide":** Move like you're adjusting a dimmer switch. Deliberate, smooth, fingers staying in full contact.
-
-> **Pro tip:** If you assign a Fast rule and a Normal rule to the same direction, the Normal rule acts as a fallback — it fires when the speed doesn't clearly match Fast. You can leave a direction without a Slow rule and it'll simply do nothing on a slow swipe.
-
----
-
-## Palm Rejection & Safe Zones
-
-Accidental gesture triggers from palm contact are the single biggest frustration with trackpad tools. Glide has a two-layer defense:
-
-### Layer 1: Lifecycle Blocker
-
-The instant any finger or palm touches the **outer margin** of the trackpad, Glide freezes gesture recognition entirely for that touch session. No gesture can start or continue once an edge contact is registered. You can rest your thumb on the corner of the trackpad and swipe freely with your other fingers — nothing will fire accidentally.
-
-### Layer 2: Configurable Dead Zones
-
-In **Preferences → Tuning**, four sliders let you define exactly how wide each edge margin is. The Preferences panel shows a live visual map of your trackpad with the safe area highlighted, so you can tune it precisely for your hand size and typing posture.
-
-Swipes that *start* inside the safe area and slide toward the edge are correctly processed. Only contact that originates in the margin is blocked.
-
----
-
-## Reciprocal Gestures
-
-Glide remembers what it just did and lets you immediately undo it.
-
-Swipe up to maximize a window — then swipe down and it restores to exactly the size it was before. Open Mission Control, then swipe down to dismiss it. Minimize all your apps, then swipe up to restore them. The reverse gesture has to happen while a **reciprocal token** is active (immediately after the original action, before you do anything else), so it never fires unexpectedly.
-
-Pairs that support reciprocals:
-
-| Action | Reverse |
-|--------|---------|
-| Maximize Window | Restore Window |
-| Enter Fullscreen | Exit Fullscreen |
-| Snap Left / Right / Corner | Restore Window |
-| Minimize All | Restore Minimized |
-| Mission Control | Dismiss |
-| App Exposé | Dismiss |
-| Show Desktop | Show Desktop (toggle) |
-
-Reciprocals are enabled per-rule and can be turned off individually in Preferences if you prefer strict one-way actions.
-
----
-
-## Default Gesture Map
-
-Out of the box, Glide comes loaded with a sensible starting set. Everything is Normal speed unless noted.
-
-### 3 Fingers
-
-| Gesture | Action |
-|---------|--------|
-| Swipe → | Next App (App Switcher) |
-| Swipe ← | Previous App (App Switcher) |
-| Swipe ↑ | Mission Control |
-| Swipe ↓ | Minimize All Apps |
-| Click (tap) | Quit App Under Cursor |
-
-### 4 Fingers
-
-| Gesture | Action |
-|---------|--------|
-| Swipe ↑ | Maximize Window |
-| Swipe ↓ | Restore / Un-maximize |
-| Swipe ← | Snap: Left Half |
-| Swipe → | Snap: Right Half |
-
-### 5 Fingers
-
-| Gesture | Action |
-|---------|--------|
-| Swipe ↑ | Enter Fullscreen |
-| Swipe ↓ | Exit Fullscreen |
-| Click (tap) | Lock Screen |
-
----
-
-## All Available Actions
-
-Glide covers the full range of things you'd want a gesture to do, organized into six categories. All actions fire with zero noticeable latency.
-
-**App Control**
-Quit App Under Cursor, Force Quit App Under Cursor, Quit Frontmost App, Hide App Under Cursor, Hide Other Apps, Open App (launch any app you choose)
-
-**App Switching**
-Next App (App Switcher), Previous App (App Switcher), Activate Next App, Activate Previous App
-
-**Window State**
-Minimize Window, Minimize All Apps, Restore Minimized Apps, Maximize Window, Restore Window, Close Window, Enter Fullscreen, Exit Fullscreen, Toggle Fullscreen, Cycle Windows (⌘`)
-
-**Window Snapping**
-Snap Left Half, Snap Right Half, Snap Top-Left, Snap Top-Right, Snap Bottom-Left, Snap Bottom-Right, Center Window, Move to Next Display
-
-**macOS System**
-Mission Control, App Exposé, Show Desktop, Launchpad, Spotlight, Notification Center, Lock Screen, Sleep, Screenshot (Area), Screenshot (Full)
-
-**Meta**
-Do Nothing (useful for intentionally disabling a direction)
-
----
-
-## Customization & Preferences
-
-Click the hand icon in your menu bar and open **Preferences** (or press ⌘,). The SwiftUI Preferences panel is divided into a few sections:
-
-**Gestures tab** shows your full rule list grouped by finger count. Each rule is a row: pick finger count, direction, speed, and action. You can add as many rules as you like — the only constraint is that each combination of (fingers + direction + speed + app filter) can only have one action. Add a rule with the **+** button, delete it with the trash icon, and drag to reorder.
-
-**Tuning tab** exposes the physics of gesture detection. You can adjust:
-- Velocity thresholds for Slow and Fast speed bands
-- Candidate frames (how many frames to analyze before committing)
-- Activation threshold (minimum travel to count as a swipe)
-- Pinch spread threshold (prevents zoom gestures from becoming swipes)
-- Edge margin sizes for all four sides
-
-**General tab** has haptic feedback toggle, window targeting mode (focused window vs. window under cursor), launch at login, and debug logging.
-
-A **live trackpad visualizer** in the Tuning tab shows your current finger positions and the active edge margins in real time, so you can verify your settings while tuning.
-
----
-
-## Tuning Guide
-
-The defaults work well for most people. Here's when you might want to adjust them:
-
-**"Fast gestures fire when I want Normal"**
-→ Raise `Fast Velocity Threshold` from 0.008 to 0.010–0.014. Gives you more room to swipe before it's classified as Fast.
-
-**"Slow never fires, everything is Normal"**
-→ Raise `Slow Velocity Threshold` from 0.003 to 0.005–0.007. Broadens the slow band.
-
-**"I don't care about speed, I just want reliable gestures"**
-→ Set all your rules to **Any Speed** in the speed picker. One rule covers all three bands.
-
-**"Gestures feel slightly delayed"**
-→ Lower `Candidate Frames` to 2 and lower `Activation Threshold` to 0.010–0.012.
-
-**"I get false swipes during pinch-to-zoom"**
-→ Raise `Candidate Frames` to 4 and lower `Pinch Spread Threshold`.
-
-**"Gestures fire when I rest my palm"**
-→ Increase the **edge margin** sliders in the Safe Zone section. Start by raising all four to 0.10 and see if the false triggers stop.
-
----
-
-## App-Specific Rules
-
-Every gesture rule has an optional **App Filter** field. When set, the rule only fires if that specific app is currently active (frontmost). This lets you build per-app gesture workflows:
-
-- 3-finger swipe right → "Next Tab" in Safari, "Next Track" in Spotify, "Next Slide" in Keynote
-- 4-finger swipe down → "Close Panel" in Final Cut, "Minimize" everywhere else
-
-To set an app filter, expand a rule in Preferences and click the **App** picker. Running apps appear in the list automatically. Rules without an app filter apply globally as fallbacks.
-
----
-
-## Troubleshooting
-
-### Gestures don't work at all
-1. Confirm Accessibility permission is granted: **System Settings → Privacy & Security → Accessibility → Glide** should be toggled ON.
-2. Try removing Glide from the list, re-adding it, and relaunching.
-3. Rebuild from scratch: `bash build.sh && open build/Glide.app`
-
-### Gestures stop working after sleep or display wake
-Glide automatically schedules a cascade of restarts at +0s, +2s, +5s, and +10s after any wake notification — because different Mac models reinitialize trackpad hardware at different speeds. In most cases this is transparent. If gestures stay broken, quit Glide from the menu bar and relaunch it.
-
-### Gestures fire in the wrong direction
-Enable debug logging in **Preferences → General**, then swipe and look at the Console output. You'll see `angle=X°` in the log. Use this map to verify: Right ≈ 0°/360°, Up ≈ 90°, Left ≈ 180°, Down ≈ 270°. If your angle is halfway between directions (e.g. 45°), try swiping more precisely along one axis.
-
-### Speed is always classified as Normal
-If you've verified your velocity thresholds are correct and speed still isn't classifying right, enable debug logging to see the raw velocity values during your gesture. Adjust thresholds to match your actual movement speeds.
-
-### App Switcher feels sticky or skips apps
-Adjust `App Switcher Step Threshold` in Tuning. A lower value makes it step on smaller horizontal movement.
-
----
-
-## Building from Source
-
-### Requirements
-
-- macOS 13 Ventura or later
-- Xcode Command Line Tools: `xcode-select --install`
-- Swift 5.9 or later (Swift 6.3 recommended)
-
-No package manager, no CocoaPods, no SPM dependencies. The entire project is eight Swift source files and a build script.
-
-### Build
-
-```bash
-git clone https://github.com/Vatsal057/Glide.git
-cd Glide
-bash build.sh
-```
-
-The build script compiles both `arm64` and `x86_64` slices and `lipo`s them into a universal binary, then bundles everything into `build/Glide.app`. The whole process takes under 30 seconds.
-
-### Install permanently
+**Want it in `/Applications` and at login?**
 
 ```bash
 cp -r build/Glide.app /Applications/
-open /Applications/Glide.app
 ```
 
-Then enable **Launch at Login** in Preferences so it starts automatically.
+Then open **Preferences → General** and flip on **Launch at Login**. That's the full installation.
 
-### Project structure
+---
+
+<br>
+
+## What Glide Can Do
+
+Here's the complete catalog of things you can bind to a gesture. Every single one fires instantly.
+
+### Window Management
+Move windows however you want without touching the mouse.
+
+| Action | What it does |
+|--------|-------------|
+| Maximize Window | Expands the frontmost window to fill the screen |
+| Restore Window | Snaps it back to where it was before you maximized |
+| Minimize Window | Sends the window to the Dock |
+| Minimize All Apps | Hides every visible window at once |
+| Restore Minimized Apps | Brings them all back |
+| Close Window | Same as ⌘W |
+| Center Window | Drops the window in the middle of your display |
+| Move to Next Display | Throws the window to your other monitor |
+| Cycle Windows | ⌘\` — cycles through open windows of the current app |
+
+### Window Snapping
+Snap to six positions without any third-party snap tool.
+
+| Action | Position |
+|--------|----------|
+| Snap: Left Half | Left 50% |
+| Snap: Right Half | Right 50% |
+| Snap: Top-Left | Top-left quadrant |
+| Snap: Top-Right | Top-right quadrant |
+| Snap: Bottom-Left | Bottom-left quadrant |
+| Snap: Bottom-Right | Bottom-right quadrant |
+
+### Fullscreen
+
+| Action | What it does |
+|--------|-------------|
+| Enter Fullscreen | True macOS fullscreen (not just maximized) |
+| Exit Fullscreen | Drops back out |
+| Toggle Fullscreen | Switches between fullscreen and normal |
+
+### App Switching
+
+| Action | What it does |
+|--------|-------------|
+| Next App (App Switcher) | Opens ⌘Tab and steps forward — hold your swipe to keep scrolling |
+| Previous App (App Switcher) | Steps backward through the switcher |
+| Activate Next App | Directly focuses the next app in the Dock order |
+| Activate Previous App | Directly focuses the previous app |
+
+### App Control
+
+| Action | What it does |
+|--------|-------------|
+| Quit App Under Cursor | Quits whichever app your cursor is over |
+| Force Quit App Under Cursor | Hard-kills it |
+| Quit Frontmost App | Quits whatever's active |
+| Hide App Under Cursor | ⌘H for the app under your cursor |
+| Hide Other Apps | Hides everything except the active app |
+| Open App… | Launches any app you pick — assign one per rule |
+
+### System Actions
+
+| Action | What it does |
+|--------|-------------|
+| Mission Control | Full overview of all windows and Spaces |
+| App Exposé | Scatters all windows of the current app |
+| Show Desktop | Clears everything to the Desktop |
+| Launchpad | Opens the Launchpad overlay |
+| Spotlight | ⌘Space |
+| Notification Center | Opens the right-side notification panel |
+| Screenshot (Area) | ⌘⇧4 — drag to select |
+| Screenshot (Full) | ⌘⇧3 — captures everything |
+| Lock Screen | Locks immediately |
+| Sleep | Sleeps the Mac |
+
+---
+
+<br>
+
+## The Part That Makes It Different
+
+### One gesture. Three possible actions.
+
+Most gesture tools treat every swipe as identical regardless of how fast you move. Glide doesn't.
+
+The same gesture — three fingers swiping right, say — can do something different depending on whether you *flick*, *swipe*, or *glide*. That's three behaviors from one hand movement, no extra fingers required.
 
 ```
-Glide/
-├── Sources/
-│   ├── main.swift               — Entry point
-│   ├── AppDelegate.swift        — Menu bar, permissions, sleep/wake handling
-│   ├── MultitouchBridge.swift   — Raw trackpad access via private MT framework
-│   ├── GestureEngine.swift      — Core gesture pipeline (candidate → lock → fire)
-│   ├── ActionExecutor.swift     — Window/app/system action dispatch
-│   ├── Settings.swift           — Persistent settings, gesture rules, tuning params
-│   ├── PreferencesUI.swift      — Full SwiftUI preferences panel
-│   └── PreferencesWindow.swift  — NSWindow wrapper for SwiftUI panel
-├── assets/
-│   ├── hero.png
-│   └── AppIcon.icns
-├── Info.plist
-├── Glide.entitlements
-└── build.sh                     — Universal binary build script
+3 fingers →   slow    ──►  Snap: Right Half
+3 fingers →   normal  ──►  App Switcher: Next
+3 fingers →   fast    ──►  Move to Next Display
+```
+
+Speed is measured by averaging centroid velocity across the first three frames of movement. Your *starting* speed locks in the classification — it doesn't matter how fast you finish. This makes it consistent and deliberate.
+
+| Speed | How it feels | Velocity |
+|-------|-------------|----------|
+| 🔵 Slow | Deliberate. Like nudging a slider. | ≤ 0.003 |
+| ⚪ Normal | Just a swipe. Don't think about it. | 0.003 – 0.008 |
+| 🟠 Fast | A flick. Over in a quarter second. | ≥ 0.008 |
+
+Speed thresholds are adjustable in Preferences if the defaults don't match your touch style. And if you just want reliable gestures without speed detection, set any rule to **Any Speed** — it matches all three bands.
+
+---
+
+### Palm rejection that actually works
+
+Touch the outer margin of the trackpad and gesture recognition freezes completely for that touch session. Not slowed down — frozen.
+
+This means you can rest your thumb in the corner, type normally, and use the trackpad with other fingers without a single accidental gesture firing. Margins are configurable per-side (left, right, top, bottom) with live sliders in Preferences. A trackpad visualizer shows you exactly which area is "safe" as you adjust.
+
+Swipes that start inside the safe zone and drift toward the edge are tracked correctly. Only contact that *originates* in the margin is blocked. The moment an edge touch is registered, it latches onto the entire touch session and nothing fires until all fingers lift.
+
+---
+
+### Undo your last gesture
+
+Perform an action, then immediately reverse it with the opposite swipe.
+
+- Maximize a window → swipe back to restore it to its exact original size
+- Enter fullscreen → swipe back to exit
+- Snap left → swipe back to restore
+- Open Mission Control → swipe back to dismiss it
+- Minimize everything → swipe back to restore it all
+
+This works because Glide stores a **reciprocal token** after every undoable action — a record of what inverse to fire if the next gesture is the exact reverse. The token expires the moment you do anything else (click, switch apps, let time pass), so it never fires unexpectedly. Reciprocals can be disabled per-rule if you prefer strict one-way behavior.
+
+---
+
+### App Switcher with continuous scroll
+
+When you bind a gesture to **Next App (App Switcher)** and hold the swipe, Glide keeps scrolling through your open apps as your fingers move horizontally. Each step fires a haptic click. Release to commit. Swipe back to change your mind. It's the same feel as a scroll wheel, except it's your trackpad.
+
+---
+
+<br>
+
+## Making It Yours
+
+Click the hand icon in your menu bar and open **Preferences**.
+
+The **Gestures** tab lists all your rules grouped by finger count. Each rule is: fingers + direction + speed + action. The combinations are almost unlimited — 2, 3, 4, or 5 fingers × 5 directions (up, down, left, right, click-tap) × 3 speeds = 75 possible slots, and you can leave most of them empty. Add a rule with **+**, drag to reorder, trash to delete.
+
+The **Tuning** tab exposes the physics layer:
+
+- **Activation Threshold** — how far fingers need to travel before a swipe locks in
+- **Candidate Frames** — how many MT frames to analyze before committing to a gesture
+- **Fast / Slow Velocity Thresholds** — tune the speed band boundaries to match your hands
+- **Pinch Spread Threshold** — controls how aggressively pinch gestures are filtered out
+- **Edge Margins** — the four Safe Zone sliders, with a live trackpad map
+
+The **General** tab has haptic feedback, window targeting (focused window vs. window under cursor), and launch at login.
+
+### App-specific rules
+
+Every rule has an optional **App Filter**. When set, that rule only fires when the specified app is frontmost. This lets you build context-aware workflows — the same swipe does different things in Safari vs. Figma vs. your terminal. Global (unfiltered) rules act as fallbacks for any app without its own rule.
+
+---
+
+<br>
+
+## Under the Hood
+
+For anyone who wants to read, fork, or contribute.
+
+Glide is eight Swift source files, roughly 190KB of code. Zero dependencies. No Xcode project — just `swiftc` and the system SDK.
+
+**`MultitouchBridge.swift`** loads `MultitouchSupport.framework` via `dlopen` at runtime (it's a private Apple framework). Enumerates all multitouch devices, registers a C callback, and handles retry logic for cases where the device list is empty right after wake. Properly unregisters callbacks and releases device references on stop.
+
+**`GestureEngine.swift`** is the core pipeline. Runs a five-phase state machine: `idle → candidate → lockedSwipe → fired → idle`, with `ignored` as a dead end for non-swipe touch sequences (pinches, single-finger contacts, etc.). The candidate phase samples velocity, checks finger-to-centroid coherence to reject chaotic multi-finger contacts, and measures spread delta to veto pinch gestures before they can lock. A hardware watchdog timer detects when the MT callback goes silent (stale device) and automatically restarts the bridge.
+
+**`ActionExecutor.swift`** dispatches the ~40 supported actions via Accessibility API for window frame manipulation, CGEvent for keyboard simulation, NSWorkspace for app control, and private notification names for things like Notification Center. Maintains a `savedFrames` dictionary keyed by (pid, window identity) so maximize/restore can return windows to their exact prior dimensions.
+
+**`Settings.swift`** defines all enums (`GestureAction`, `GestureDirection`, `GestureSpeed`, `GestureFingers`), the `GestureRule` codable struct, and the `GestureTuning` struct. Persists everything to `UserDefaults` as JSON with rule deduplication, schema migration between versions, and bounds-clamping on all tuning parameters.
+
+**`PreferencesUI.swift`** is a full SwiftUI panel built with `NavigationSplitView`: sidebar for rule selection, detail pane for editing. The Tuning tab uses a live-updating trackpad visualizer drawn with Canvas. Engine state (current phase, finger count, centroid position) is pushed from `GestureEngine` via a callback closure rather than polling on a timer.
+
+**`AppDelegate.swift`** handles the menu bar item, Accessibility permission checking with polling fallback, sleep/wake observers, and a cascade restart strategy at +0s, +2s, +5s, +10s after wake — because different Mac models reinitialize trackpad hardware at different speeds.
+
+---
+
+<br>
+
+## Build Requirements
+
+- macOS 13 Ventura or later
+- Xcode Command Line Tools: `xcode-select --install`
+- Swift 5.9+ (Swift 6.3 recommended)
+
+The build script compiles `arm64` and `x86_64` slices and merges them with `lipo` into a universal binary inside `build/Glide.app`. Total build time is under 30 seconds on most machines.
+
+```bash
+bash build.sh
+```
+
+If you only want to build for your current architecture:
+
+```bash
+# Apple Silicon
+swiftc -O -target arm64-apple-macosx13.0 \
+  Sources/main.swift Sources/MultitouchBridge.swift \
+  Sources/Settings.swift Sources/ActionExecutor.swift \
+  Sources/GestureEngine.swift Sources/PreferencesWindow.swift \
+  Sources/PreferencesUI.swift Sources/AppDelegate.swift \
+  -framework Cocoa -framework SwiftUI -framework IOKit \
+  -o build/Glide
 ```
 
 ---
 
-## Architecture Overview
+<br>
 
-For contributors and the curious:
+## Troubleshooting
 
-**MultitouchBridge** loads `MultitouchSupport.framework` at runtime via `dlopen` and registers a C callback for every multitouch frame. It handles device enumeration, retries when no devices are found (common right after wake), and proper callback unregistration on stop.
+**Nothing happens when I swipe**
+Go to System Settings → Privacy & Security → Accessibility. Glide must appear in the list with its toggle on. If it's already there but gestures still don't work, remove it from the list, relaunch Glide, and re-add it — macOS sometimes holds stale permission state.
 
-**GestureEngine** runs a state machine with five phases: `idle → candidate → lockedSwipe → fired → idle` (with `ignored` as a dead-end for non-swipe gestures). The candidate phase collects multi-frame evidence before committing — this is where pinch detection, coherence checking, edge blocking, and speed sampling happen. Once locked as a swipe, the engine watches for direction threshold crossing and fires the matched action.
+**Gestures stop working after waking from sleep**
+Glide schedules automatic restarts at 0, 2, 5, and 10 seconds after any wake notification, since different Mac models reinitialize the trackpad at different speeds. If gestures are still broken after ~15 seconds, quit Glide from the menu bar and relaunch it.
 
-**ActionExecutor** handles the actual macOS API calls: Accessibility API for window manipulation, CGEvent for key simulation, NSWorkspace for app control, and a saved-frame dictionary so maximize/restore can remember original window sizes.
+**Fast swipes always register as Normal**
+Open Preferences → Tuning and lower the Fast Velocity Threshold. Or enable debug logging (Preferences → General) and check Console — Glide prints raw velocity values on every gesture so you can see exactly what your swipe speed measures as.
 
-**Settings** persists gesture rules and tuning parameters to `UserDefaults` as JSON, with a migration system for rule schema changes between versions.
+**Gestures fire when I rest my palm**
+Increase the edge margin sliders in Preferences → Tuning. The live trackpad map updates instantly as you drag the sliders. Start by setting all four margins to 0.10 and test from there.
+
+**A swipe direction feels backwards**
+Enable debug logging and watch for `angle=X°` in Console. The mapping is: Right ≈ 0°, Up ≈ 90°, Left ≈ 180°, Down ≈ 270°. If the angle lands between two directions, try swiping more decisively along one axis.
 
 ---
+
+<br>
 
 ## Contributing
 
-Pull requests are welcome. If you're adding a new action, the minimal diff is: add a case to `GestureAction` in `Settings.swift`, handle it in `ActionExecutor.execute()`, and add it to `inverseAction` if it has a natural reverse.
+The codebase is intentionally small and meant to stay that way. To add a new action: add a case to `GestureAction` in `Settings.swift`, handle it in `ActionExecutor.execute()`, and optionally add an inverse in `GestureAction.inverseAction` if it's reversible.
 
-For gesture engine changes, the debug logging system (enable in Preferences → General) is your best friend — it prints every phase transition, velocity sample, and classification decision to stdout.
+For gesture detection changes in `GestureEngine`, enable debug logging first — every phase transition, velocity sample, and classification decision is logged to stdout.
+
+PRs are welcome. Keep dependencies at zero.
 
 ---
 
+<br>
+
 <p align="center">
-  <sub>
-    Glide uses Apple's private <code>MultitouchSupport</code> framework for raw trackpad access.<br>
-    Velocity-based speed detection inspired by <a href="https://github.com/taj-ny/InputActions">InputActions</a> by taj-ny.<br>
-    MIT licensed — use it, fork it, make it yours.
-  </sub>
+  <sub>MIT licensed &nbsp;·&nbsp; Uses Apple's private <code>MultitouchSupport</code> framework for raw trackpad access &nbsp;·&nbsp; Velocity detection inspired by <a href="https://github.com/taj-ny/InputActions">InputActions</a></sub>
 </p>
