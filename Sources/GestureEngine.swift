@@ -539,19 +539,6 @@ final class GestureEngine {
     func processClick(fingerCount n: Int) {
         if case .switchingApps = phase { return }
 
-        // ── Edge margin guard ──
-        if tuning.edgeMarginEnabled {
-            let m = tuning.edgeMargin
-            let inEdge = currentCentroidX < m.left
-                      || currentCentroidX > (1.0 - m.right)
-                      || currentCentroidY < m.bottom
-                      || currentCentroidY > (1.0 - m.top)
-            if inEdge {
-                AppLogger.debug("[Engine] Click ignored — inside edge margin")
-                return
-            }
-        }
-
         // Dedup: if this click was already processed within 100ms, skip.
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastClickProcessedTime > 0.1 else { return }
@@ -1273,12 +1260,10 @@ private var glideLastDispatchedCount: Int32 = 0
 private var glideLastDispatchedCx: Float = 0
 private var glideLastDispatchedCy: Float = 0
 
-/// True if the current multitouch sequence has touched the margin at any point.
-/// Blocks all gestures until all fingers are lifted.
-var glideLifecycleBlocked: Bool = false
-
 /// The MT callback. Computes per-frame evidence (centroid, spread, coherence)
 /// and dispatches to the engine on main via TouchFrameData.
+/// Margin fingers are silently excluded — they don't count toward gesture
+/// recognition but do NOT block safe-zone fingers from forming gestures.
 let glideMTCallback: MTContactCallback = { _, data, count, _, _ in
     // Record that the MT callback is alive (for the watchdog)
     glideLastMTTimestamp = ProcessInfo.processInfo.systemUptime
@@ -1288,33 +1273,26 @@ let glideMTCallback: MTContactCallback = { _, data, count, _, _ in
         let n = Int(count)
         let rawTouches = data.assumingMemoryBound(to: MTTouch.self)
         let tuning = Settings.shared.tuning
-        
-        var anyInMargin = false
+
         if tuning.edgeMarginEnabled {
+            // Smart exclusion: only pass safe-zone fingers downstream.
+            // Margin fingers are simply dropped — 1 margin + 3 safe = 3-finger gesture.
             let m = tuning.edgeMargin
             for i in 0..<n {
                 let t = rawTouches[i]
                 let x = t.normalizedPosition.x
                 let y = t.normalizedPosition.y
-                if x < m.left || x > (1.0 - m.right) || y < m.bottom || y > (1.0 - m.top) {
-                    anyInMargin = true
-                    break
+                let inMargin = x < m.left || x > (1.0 - m.right)
+                            || y < m.bottom || y > (1.0 - m.top)
+                if !inMargin {
+                    validTouches.append(t)
                 }
             }
-        }
-        
-        if anyInMargin {
-            glideLifecycleBlocked = true
-        }
-        
-        if !glideLifecycleBlocked {
+        } else {
             for i in 0..<n {
                 validTouches.append(rawTouches[i])
             }
         }
-    } else {
-        // All fingers lifted, reset the lifecycle block
-        glideLifecycleBlocked = false
     }
 
     let validCount = Int32(validTouches.count)
