@@ -174,6 +174,21 @@ struct GestureRule: Codable, Identifiable, Equatable {
     }
 }
 
+// ─────────────────────────────────────────────
+// MARK: - EdgeMargin
+// ─────────────────────────────────────────────
+
+/// Per-side dead zones expressed as fractions of the normalised trackpad space (0.0–1.0).
+/// Gestures whose starting centroid falls within these margins are silently ignored.
+struct EdgeMargin: Codable, Equatable {
+    var left:   Float = 0.05
+    var right:  Float = 0.05
+    var top:    Float = 0.05
+    var bottom: Float = 0.05
+
+    static let range: ClosedRange<Float> = 0.0...0.20
+}
+
 struct GestureTuning: Codable, Equatable {
     /// How far (normalised coords) a finger must travel before a swipe locks in.
     var initialThreshold: Float = 0.018
@@ -217,6 +232,10 @@ struct GestureTuning: Codable, Equatable {
     /// 45° = full quadrants (no dead zones); lower = narrower wedges with diagonal dead zones.
     var swipeAngleTolerance: Float = 45
 
+    // ── Edge margin (dead zone near trackpad bezel) ──
+    var edgeMarginEnabled: Bool = true
+    var edgeMargin: EdgeMargin = EdgeMargin()
+
     init() {}
 
     init(from decoder: Decoder) throws {
@@ -233,6 +252,8 @@ struct GestureTuning: Codable, Equatable {
         pinchFrameSpreadThreshold = try c.decodeIfPresent(Float.self,        forKey: .pinchFrameSpreadThreshold) ?? 0.008
         swipeCoherenceThreshold  = try c.decodeIfPresent(Float.self,         forKey: .swipeCoherenceThreshold)  ?? 0.3
         swipeAngleTolerance      = try c.decodeIfPresent(Float.self,         forKey: .swipeAngleTolerance)      ?? 45
+        edgeMarginEnabled        = try c.decodeIfPresent(Bool.self,          forKey: .edgeMarginEnabled)        ?? true
+        edgeMargin               = try c.decodeIfPresent(EdgeMargin.self,    forKey: .edgeMargin)               ?? EdgeMargin()
     }
 }
 
@@ -460,6 +481,12 @@ final class Settings {
         n.swipeCoherenceThreshold = max(0.0, min(n.swipeCoherenceThreshold, 0.95))
         // Direction detection
         n.swipeAngleTolerance = max(20, min(n.swipeAngleTolerance, 45))
+        // Edge margin clamping
+        let clamp = { (v: Float) in max(EdgeMargin.range.lowerBound, min(v, EdgeMargin.range.upperBound)) }
+        n.edgeMargin.left   = clamp(n.edgeMargin.left)
+        n.edgeMargin.right  = clamp(n.edgeMargin.right)
+        n.edgeMargin.top    = clamp(n.edgeMargin.top)
+        n.edgeMargin.bottom = clamp(n.edgeMargin.bottom)
         return n
     }
 

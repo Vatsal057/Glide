@@ -14,7 +14,7 @@ final class PreferencesWindowController: NSWindowController {
             styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: true)   // FIX: Defer backing-store allocation until window is first shown
-        win.title = "GestureFlow"
+        win.title = "Glide"
         win.minSize = NSSize(width: 860, height: 520)
         win.center()
         win.titlebarAppearsTransparent = false

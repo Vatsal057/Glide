@@ -1,14 +1,14 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────
-#  GestureFlow — build.sh
-#  Compiles all Swift sources and produces GestureFlow.app
+#  Glide — build.sh
+#  Compiles all Swift sources and produces Glide.app
 #  Compatible with macOS 13+ (Apple Silicon & Intel)
 # ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="GestureFlow"
+APP_NAME="Glide"
 BUILD_DIR="$SCRIPT_DIR/build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 CONTENTS="$APP_BUNDLE/Contents"
@@ -106,7 +106,7 @@ echo "✅  Compile succeeded"
 # ── Ad-hoc code sign ─────────────────────────
 echo "Signing…"
 codesign --force --sign - \
-    --entitlements "$SCRIPT_DIR/GestureFlow.entitlements" \
+    --entitlements "$SCRIPT_DIR/Glide.entitlements" \
     "$APP_BUNDLE" 2>/dev/null || \
 codesign --force --sign - "$APP_BUNDLE"
 
@@ -122,7 +122,7 @@ echo "Next steps:"
 echo "  1. Run:  open \"$APP_BUNDLE\""
 echo "  2. macOS will prompt for Accessibility permission."
 echo "  3. Go to System Settings → Privacy & Security → Accessibility"
-echo "     and enable GestureFlow."
+echo "     and enable Glide."
 echo "  4. The hand icon will appear in your menu bar."
 echo ""
 echo "Optional — move to Applications:"

@@ -22,20 +22,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             if enabled {
                 try SMAppService.mainApp.register()
-                AppLogger.debug("[GestureFlow] Launch at Login registered")
+                AppLogger.debug("[Glide] Launch at Login registered")
             } else {
                 try SMAppService.mainApp.unregister()
-                AppLogger.debug("[GestureFlow] Launch at Login unregistered")
+                AppLogger.debug("[Glide] Launch at Login unregistered")
             }
         } catch {
-            print("[GestureFlow] Launch at Login error: \(error.localizedDescription)")
+            print("[Glide] Launch at Login error: \(error.localizedDescription)")
         }
         buildMenu()
     }
 
     // MARK: Launch
     func applicationDidFinishLaunching(_ notification: Notification) {
-        AppLogger.debug("[GestureFlow] Launching")
+        AppLogger.debug("[Glide] Launching")
         setupStatusBar()
         checkPermissions()
 
@@ -61,10 +61,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         )
         if trusted {
-            AppLogger.debug("[GestureFlow] Accessibility granted — starting engine")
+            AppLogger.debug("[Glide] Accessibility granted — starting engine")
             engine.start()
         } else {
-            print("[GestureFlow] Accessibility not granted — polling")
+            print("[Glide] Accessibility not granted — polling")
             showPermissionsAlert()
             pollForAccessibility()
         }
@@ -74,10 +74,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let a = NSAlert()
         a.messageText     = "Accessibility Permission Required"
         a.informativeText = """
-        GestureFlow needs Accessibility access to detect trackpad gestures and control windows.
+        Glide needs Accessibility access to detect trackpad gestures and control windows.
 
         1. macOS has opened System Settings → Privacy & Security → Accessibility.
-        2. Find "GestureFlow" in the list and toggle it ON.
+        2. Find "Glide" in the list and toggle it ON.
         3. The app will start automatically once permission is granted.
         """
         a.addButton(withTitle: "Open System Settings")
@@ -91,7 +91,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func pollForAccessibility() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             if AXIsProcessTrusted() {
-                AppLogger.debug("[GestureFlow] Accessibility granted — starting engine")
+                AppLogger.debug("[Glide] Accessibility granted — starting engine")
                 self?.engine.start()
                 self?.refreshIcon()
             } else {
@@ -108,7 +108,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func systemDidWake() {
         guard enabled else { return }
-        AppLogger.debug("[GestureFlow] System woke — scheduling restart cascade")
+        AppLogger.debug("[Glide] System woke — scheduling restart cascade")
 
         // Cancel any pending restarts from a previous wake
         wakeRestartItems.forEach { $0.cancel() }
@@ -120,7 +120,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for delay in delays {
             let item = DispatchWorkItem { [weak self] in
                 guard let self, self.enabled else { return }
-                AppLogger.debug("[GestureFlow] Wake restart at +\(delay)s")
+                AppLogger.debug("[Glide] Wake restart at +\(delay)s")
                 self.engine.stop()
                 self.engine.start()
             }
@@ -135,7 +135,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func systemWillSleep() {
         guard enabled else { return }
-        AppLogger.debug("[GestureFlow] System going to sleep — stopping engine")
+        AppLogger.debug("[Glide] System going to sleep — stopping engine")
         engine.stop()
     }
 
@@ -164,7 +164,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildMenu() {
         let menu = NSMenu()
 
-        let header = NSMenuItem(title: "GestureFlow", action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: "Glide", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
@@ -183,7 +183,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Preferences…", action: #selector(showPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Help",          action: #selector(showHelp),        keyEquivalent: "h"))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit GestureFlow", action: #selector(quitApp),      keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Glide", action: #selector(quitApp),      keyEquivalent: "q"))
 
         // Wire targets
         for item in menu.items { item.target = self }
@@ -195,7 +195,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         enabled ? engine.start() : engine.stop()
         refreshIcon()
         buildMenu()
-        AppLogger.debug("[GestureFlow] Engine \(enabled ? "enabled" : "disabled")")
+        AppLogger.debug("[Glide] Engine \(enabled ? "enabled" : "disabled")")
     }
 
     @objc private func toggleLaunchAtLogin() {
@@ -208,9 +208,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showHelp() {
         let a = NSAlert()
-        a.messageText = "How to Use GestureFlow"
+        a.messageText = "How to Use Glide"
         a.informativeText = """
-        GestureFlow intercepts raw trackpad input and maps multi-finger gestures to macOS actions.
+        Glide intercepts raw trackpad input and maps multi-finger gestures to macOS actions.
 
         Default gestures:
         • 3-finger click       → Quit app under cursor
@@ -224,7 +224,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         Reciprocal gestures:
         • Immediate reverse swipe closes Mission Control
-        • Immediate reverse swipe restores apps minimized by GestureFlow
+        • Immediate reverse swipe restores apps minimized by Glide
         • Slow / Normal / Fast speeds can map to different actions
 
         You can add, remove, or customise all gestures in Preferences.

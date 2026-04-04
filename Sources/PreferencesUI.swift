@@ -27,10 +27,13 @@ final class PreferencesStore: ObservableObject {
     @Published private(set) var diagnostics = RuleDiagnostics()
     @Published private(set) var launchAtLoginEnabled = false
 
-    // Engine state (for live readout — push-based, no polling timer)
+    // Engine state (push-based — no polling timer)
     @Published private(set) var enginePhase: String = "Idle"
     @Published private(set) var fingerCount: Int = 0
     @Published private(set) var reciprocalActive: Bool = false
+    /// Live centroid coordinates from MT callback (0–1 normalised, cy=0 bottom).
+    @Published private(set) var centroidX: Float = 0.5
+    @Published private(set) var centroidY: Float = 0.5
 
     private init() { reload() }
 
@@ -47,15 +50,13 @@ final class PreferencesStore: ObservableObject {
     }
 
     /// Subscribe to engine state changes via push callback.
-    /// Replaces the old 0.1s polling timer — now fires only when state
-    /// actually changes, saving ~10 timer wake-ups/sec while prefs are open.
     func startPollingEngineState() {
         let engine = GestureEngine.shared
-        // Read initial state
         enginePhase = engine.currentPhaseName
         fingerCount = engine.currentFingerCount
         reciprocalActive = engine.isReciprocalActive
-        // Subscribe to state changes pushed from the engine
+        centroidX = engine.currentCentroidX
+        centroidY = engine.currentCentroidY
         engine.onStateChange = { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -63,6 +64,8 @@ final class PreferencesStore: ObservableObject {
                 self.enginePhase = engine.currentPhaseName
                 self.fingerCount = engine.currentFingerCount
                 self.reciprocalActive = engine.isReciprocalActive
+                self.centroidX = engine.currentCentroidX
+                self.centroidY = engine.currentCentroidY
             }
         }
     }
@@ -222,6 +225,11 @@ final class PreferencesStore: ObservableObject {
         n.pinchFrameSpreadThreshold = max(0.001, n.pinchFrameSpreadThreshold)
         n.swipeCoherenceThreshold = max(0.0, min(n.swipeCoherenceThreshold, 0.95))
         n.swipeAngleTolerance = max(20, min(n.swipeAngleTolerance, 45))
+        let clamp = { (v: Float) in max(EdgeMargin.range.lowerBound, min(v, EdgeMargin.range.upperBound)) }
+        n.edgeMargin.left   = clamp(n.edgeMargin.left)
+        n.edgeMargin.right  = clamp(n.edgeMargin.right)
+        n.edgeMargin.top    = clamp(n.edgeMargin.top)
+        n.edgeMargin.bottom = clamp(n.edgeMargin.bottom)
         return n
     }
 
@@ -287,7 +295,7 @@ struct PreferencesRootView: View {
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(Color.accentColor)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("GestureFlow")
+                        Text("Glide")
                             .font(.system(size: 12, weight: .semibold))
                         Text(store.accessibilityGranted ? "Active" : "Needs Permission")
                             .font(.system(size: 11))
@@ -442,7 +450,6 @@ struct RuleRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Gesture direction badge
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(badgeColor(rule.fingers).opacity(0.12))
@@ -617,7 +624,7 @@ struct RuleDetailView: View {
 }
 
 // ─────────────────────────────────────────────
-// MARK: - Tuning form (time-based speed bands)
+// MARK: - Tuning form
 // ─────────────────────────────────────────────
 
 struct TuningFormView: View {
@@ -809,6 +816,404 @@ struct TuningRow: View {
 }
 
 // ─────────────────────────────────────────────
+// MARK: - Trackpad Margin Visual
+// ─────────────────────────────────────────────
+
+/// A realistic-looking trackpad preview that renders the four edge margins
+/// as animated translucent shadow overlays. The overlays resize live as the
+/// user drags the sliders. An optional live centroid dot shows the current
+/// touch position when fingers are on the trackpad.
+struct TrackpadMarginView: View {
+    /// Margin fractions (0–0.20) for each edge.
+    var marginLeft:   Double
+    var marginRight:  Double
+    var marginTop:    Double
+    var marginBottom: Double
+    /// Whether to show the live centroid dot.
+    var fingerCount: Int
+    var centroidX: Float
+    var centroidY: Float   // 0 = bottom in MT coords — we flip for drawing
+
+    // Fixed visual size (points)
+    private let padW: CGFloat = 260
+    private let padH: CGFloat = 155
+    private let cornerR: CGFloat = 14
+
+    var body: some View {
+        ZStack {
+            // ── Trackpad body ──
+            RoundedRectangle(cornerRadius: cornerR, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(white: 0.82), Color(white: 0.74)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerR, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [Color(white: 0.55), Color(white: 0.45)],
+                                startPoint: .top, endPoint: .bottom),
+                            lineWidth: 1.5)
+                )
+                .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+
+            // ── Surface texture gloss ──
+            RoundedRectangle(cornerRadius: cornerR - 1, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.18), Color.white.opacity(0.0)],
+                        startPoint: .top, endPoint: .center)
+                )
+
+            // ── Margin overlays ──
+            GeometryReader { geo in
+                let w = geo.size.width
+                let h = geo.size.height
+                let l = CGFloat(marginLeft)  * w
+                let r = CGFloat(marginRight) * w
+                let t = CGFloat(marginTop)   * h
+                let b = CGFloat(marginBottom) * h
+
+                // Shadow tint for margin zones
+                let shadowColor = Color(red: 0.2, green: 0.5, blue: 1.0).opacity(0.28)
+                let borderColor = Color(red: 0.2, green: 0.5, blue: 1.0).opacity(0.55)
+
+                ZStack(alignment: .topLeading) {
+                    // Left
+                    if l > 0 {
+                        marginOverlay(shadowColor)
+                            .frame(width: max(1, l), height: h)
+                            .overlay(alignment: .trailing) {
+                                Rectangle()
+                                    .fill(borderColor)
+                                    .frame(width: 1.5)
+                            }
+                    }
+                    // Right
+                    if r > 0 {
+                        marginOverlay(shadowColor)
+                            .frame(width: max(1, r), height: h)
+                            .offset(x: w - r)
+                            .overlay(alignment: .leading) {
+                                Rectangle()
+                                    .fill(borderColor)
+                                    .frame(width: 1.5)
+                                    .offset(x: w - r)
+                            }
+                    }
+                    // Top
+                    if t > 0 {
+                        marginOverlay(shadowColor)
+                            .frame(width: w, height: max(1, t))
+                            .overlay(alignment: .bottom) {
+                                Rectangle()
+                                    .fill(borderColor)
+                                    .frame(height: 1.5)
+                            }
+                    }
+                    // Bottom
+                    if b > 0 {
+                        marginOverlay(shadowColor)
+                            .frame(width: w, height: max(1, b))
+                            .offset(y: h - b)
+                            .overlay(alignment: .top) {
+                                Rectangle()
+                                    .fill(borderColor)
+                                    .frame(height: 1.5)
+                                    .offset(y: h - b)
+                            }
+                    }
+
+                    // ── Live centroid dot ──
+                    // Only visible when fingers are on the trackpad (fingerCount >= 2)
+                    if fingerCount >= 2 {
+                        // MT cy=0 is bottom → flip to screen coords
+                        let dotX = CGFloat(centroidX) * w
+                        let dotY = (1.0 - CGFloat(centroidY)) * h
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.3))
+                                .frame(width: 22, height: 22)
+                                .blur(radius: 3)
+                            Circle()
+                                .fill(
+                                    RadialGradient(
+                                        colors: [Color(red: 0.4, green: 0.75, blue: 1.0),
+                                                 Color(red: 0.15, green: 0.45, blue: 0.9)],
+                                        center: .center,
+                                        startRadius: 0, endRadius: 7)
+                                )
+                                .frame(width: 14, height: 14)
+                                .shadow(color: Color(red: 0.2, green: 0.5, blue: 1.0).opacity(0.7), radius: 5)
+                        }
+                        .position(x: dotX, y: dotY)
+                        .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.75), value: dotX)
+                        .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.75), value: dotY)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: cornerR - 1, style: .continuous))
+            }
+
+            // ── Click bar hint at the bottom ──
+            VStack {
+                Spacer()
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color(white: 0.55).opacity(0.35))
+                    .frame(width: 44, height: 3)
+                    .padding(.bottom, 7)
+            }
+        }
+        .frame(width: padW, height: padH)
+    }
+
+    @ViewBuilder
+    private func marginOverlay(_ color: Color) -> some View {
+        color
+            .animation(.easeInOut(duration: 0.18), value: marginLeft)
+            .animation(.easeInOut(duration: 0.18), value: marginRight)
+            .animation(.easeInOut(duration: 0.18), value: marginTop)
+            .animation(.easeInOut(duration: 0.18), value: marginBottom)
+    }
+}
+
+// ─────────────────────────────────────────────
+// MARK: - Edge Margin Sliders Section
+// ─────────────────────────────────────────────
+
+struct EdgeMarginSectionView: View {
+    @ObservedObject var store: PreferencesStore
+
+    private var m: EdgeMargin { store.tuning.edgeMargin }
+
+    var body: some View {
+        Section {
+            // ── Enable / Disable toggle ──
+            Toggle("Enable Edge Margin", isOn: Binding(
+                get: { store.tuning.edgeMarginEnabled },
+                set: { v in store.updateTuning { $0.edgeMarginEnabled = v } }))
+            .padding(.bottom, 2)
+
+            if store.tuning.edgeMarginEnabled {
+                // ── Trackpad visual ──
+                HStack {
+                    Spacer()
+                    TrackpadMarginView(
+                        marginLeft:   Double(m.left),
+                        marginRight:  Double(m.right),
+                        marginTop:    Double(m.top),
+                        marginBottom: Double(m.bottom),
+                        fingerCount:  store.fingerCount,
+                        centroidX:    store.centroidX,
+                        centroidY:    store.centroidY
+                    )
+                    Spacer()
+                }
+                .padding(.vertical, 10)
+
+                // ── Per-side sliders ──
+                marginSlider("Left Margin",   value: Binding(
+                    get: { Double(m.left) },
+                    set: { v in store.updateTuning { $0.edgeMargin.left = Float(v) } }))
+                marginSlider("Right Margin",  value: Binding(
+                    get: { Double(m.right) },
+                    set: { v in store.updateTuning { $0.edgeMargin.right = Float(v) } }))
+                marginSlider("Top Margin",    value: Binding(
+                    get: { Double(m.top) },
+                    set: { v in store.updateTuning { $0.edgeMargin.top = Float(v) } }))
+                marginSlider("Bottom Margin", value: Binding(
+                    get: { Double(m.bottom) },
+                    set: { v in store.updateTuning { $0.edgeMargin.bottom = Float(v) } }))
+
+                // ── Reset button ──
+                HStack {
+                    Spacer()
+                    Button("Reset Margins") {
+                        withAnimation {
+                            store.updateTuning {
+                                $0.edgeMargin = EdgeMargin()
+                            }
+                        }
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11))
+                }
+            }
+
+        } header: {
+            HStack(spacing: 6) {
+                Image(systemName: "rectangle.dashed.badge.record")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.blue)
+                Text("Trackpad Edge Margin")
+            }
+        } footer: {
+            Text("Gestures starting within the shaded margin zones near the trackpad bezel are ignored — preventing accidental triggers when resting fingers near the edges.")
+        }
+    }
+
+    @ViewBuilder
+    private func marginSlider(_ label: String, value: Binding<Double>) -> some View {
+        LabeledContent(label) {
+            HStack(spacing: 10) {
+                Slider(value: value,
+                       in: Double(EdgeMargin.range.lowerBound)...Double(EdgeMargin.range.upperBound),
+                       step: 0.005)
+                    .frame(width: 160)
+                Text("\(Int((value.wrappedValue * 100).rounded()))%")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────
+// MARK: - Accessibility Card
+// ─────────────────────────────────────────────
+
+struct AccessibilityStatusCard: View {
+    let granted: Bool
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 16) {
+            // Animated ring indicator
+            ZStack {
+                Circle()
+                    .fill(granted ? Color.green.opacity(0.12) : Color.orange.opacity(0.12))
+                    .frame(width: 46, height: 46)
+                    .scaleEffect(pulse ? 1.15 : 1.0)
+                    .animation(
+                        granted
+                            ? .easeInOut(duration: 1.8).repeatForever(autoreverses: true)
+                            : .default,
+                        value: pulse)
+                Circle()
+                    .strokeBorder(granted ? Color.green.opacity(0.4) : Color.orange.opacity(0.4), lineWidth: 1.5)
+                    .frame(width: 46, height: 46)
+                Image(systemName: granted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(granted ? .green : .orange)
+            }
+            .onAppear { pulse = granted }
+            .onChange(of: granted) { pulse = $0 }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(granted ? "Accessibility Granted" : "Accessibility Required")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(granted ? Color.primary : Color.orange)
+                Text(granted
+                     ? "Glide has the permissions it needs."
+                     : "Open System Settings to grant access.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            if !granted {
+                Button("Open Settings…") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// ─────────────────────────────────────────────
+// MARK: - Engine Status Card
+// ─────────────────────────────────────────────
+
+struct EngineStatusCard: View {
+    let phase: String
+    let fingerCount: Int
+    let reciprocalActive: Bool
+    @State private var phasePulse = false
+
+    var phaseColor: Color {
+        switch phase {
+        case "Idle":            return .gray
+        case "Candidate":       return .yellow
+        case "Locked (Swipe)":  return .green
+        case "Ignored":         return .red
+        case "Fired":           return .blue
+        case "App Switcher":    return .purple
+        default:                return .gray
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 20) {
+            // Phase indicator
+            VStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .fill(phaseColor.opacity(0.15))
+                        .frame(width: 36, height: 36)
+                        .scaleEffect(phasePulse && (phase == "Locked (Swipe)" || phase == "Fired") ? 1.2 : 1.0)
+                        .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: phasePulse)
+                    Circle()
+                        .fill(phaseColor)
+                        .frame(width: 10, height: 10)
+                }
+                Text(phase)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(phaseColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .frame(width: 70)
+            .onAppear { phasePulse = true }
+
+            Divider().frame(height: 40)
+
+            // Finger count
+            VStack(spacing: 4) {
+                Text("\(fingerCount)")
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .foregroundStyle(fingerCount >= 2 ? Color.primary : Color.secondary)
+                    .contentTransition(.numericText())
+                    .animation(.spring(response: 0.3), value: fingerCount)
+                Text("Fingers")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(width: 60)
+
+            Divider().frame(height: 40)
+
+            // Reciprocal badge
+            VStack(spacing: 4) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(reciprocalActive ? Color.green.opacity(0.15) : Color.secondary.opacity(0.08))
+                    Image(systemName: reciprocalActive ? "arrow.left.arrow.right.circle.fill" : "arrow.left.arrow.right.circle")
+                        .font(.system(size: 18))
+                        .foregroundStyle(reciprocalActive ? Color.green : Color.gray)
+                }
+                .frame(width: 36, height: 36)
+                Text("Reciprocal")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(width: 70)
+
+            Spacer()
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+// ─────────────────────────────────────────────
 // MARK: - General form
 // ─────────────────────────────────────────────
 
@@ -817,34 +1222,28 @@ struct GeneralFormView: View {
 
     var body: some View {
         Form {
-            Section("Accessibility") {
-                LabeledContent("Status") {
-                    if store.accessibilityGranted {
-                        Label("Granted", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    } else {
-                        HStack(spacing: 8) {
-                            Label("Not Granted", systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                            Button("Open Settings…") {
-                                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                                    NSWorkspace.shared.open(url)
-                                }
-                            }
-                            .buttonStyle(.link)
-                        }
-                    }
+            // ── Accessibility ──
+            Section {
+                AccessibilityStatusCard(granted: store.accessibilityGranted)
+            } header: {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.shield")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.orange)
+                    Text("Accessibility")
                 }
             }
 
+            // ── Startup ──
             Section("Startup") {
                 Toggle("Launch at Login", isOn: Binding(
                     get: { store.launchAtLoginEnabled },
                     set: { _ in store.toggleLaunchAtLogin() }
                 ))
-                .help("Automatically start GestureFlow when you log in.")
+                .help("Automatically start Glide when you log in.")
             }
 
+            // ── Window Targeting ──
             Section("Window Targeting") {
                 Picker("Strategy", selection: Binding(
                     get: { store.windowTargetingMode },
@@ -856,6 +1255,7 @@ struct GeneralFormView: View {
                 .pickerStyle(.radioGroup)
             }
 
+            // ── Feedback ──
             Section {
                 Toggle("Haptic Feedback", isOn: Binding(
                     get: { store.hapticFeedbackEnabled },
@@ -864,43 +1264,65 @@ struct GeneralFormView: View {
                     get: { store.debugLoggingEnabled },
                     set: { store.updateDebugLogging($0) }))
             } header: {
-                Text("Feedback & Debugging")
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.purple)
+                    Text("Feedback & Debugging")
+                }
             } footer: {
                 Text("Haptic feedback uses the Force Touch actuator for each gesture. Debug logging prints engine output to Console.app.")
             }
 
-            Section("Engine Status") {
-                LabeledContent("Session Phase") {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(phaseColor(store.enginePhase))
-                            .frame(width: 8, height: 8)
-                        Text(store.enginePhase)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                LabeledContent("Active Fingers") {
-                    Text("\(store.fingerCount)")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-                LabeledContent("Reciprocal Token") {
-                    Text(store.reciprocalActive ? "Active" : "—")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(store.reciprocalActive ? Color.green : Color.gray)
+            // ── Edge Margin ──
+            EdgeMarginSectionView(store: store)
+
+            // ── Engine Status ──
+            Section {
+                EngineStatusCard(
+                    phase: store.enginePhase,
+                    fingerCount: store.fingerCount,
+                    reciprocalActive: store.reciprocalActive)
+            } header: {
+                HStack(spacing: 6) {
+                    Image(systemName: "memorychip")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.green)
+                    Text("Engine Status")
                 }
             }
 
-            Section("Stats") {
-                LabeledContent("Total Rules", value: "\(store.rules.count)")
-                LabeledContent("Finger Sets", value: "\(store.diagnostics.configuredFingerCounts) of 4")
-                LabeledContent("App-Specific Rules", value: "\(store.diagnostics.appSpecificRules)")
-                if store.diagnostics.openAppRulesMissingTarget > 0 {
-                    LabeledContent("Missing App Target") {
-                        Text("\(store.diagnostics.openAppRulesMissingTarget)")
-                            .foregroundStyle(.orange)
+            // ── Stats ──
+            Section {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        statPill(
+                            label: "Rules",
+                            value: "\(store.rules.count)",
+                            color: .blue)
+                        statPill(
+                            label: "Finger Sets",
+                            value: "\(store.diagnostics.configuredFingerCounts)/4",
+                            color: .purple)
+                        statPill(
+                            label: "App Rules",
+                            value: "\(store.diagnostics.appSpecificRules)",
+                            color: .orange)
+                        if store.diagnostics.openAppRulesMissingTarget > 0 {
+                            statPill(
+                                label: "Missing Target",
+                                value: "\(store.diagnostics.openAppRulesMissingTarget)",
+                                color: .red)
+                        }
                     }
+                    .padding(.vertical, 6)
+                }
+            } header: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chart.bar.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.blue)
+                    Text("Stats")
                 }
             }
         }
@@ -908,15 +1330,26 @@ struct GeneralFormView: View {
         .navigationTitle("General")
     }
 
-    private func phaseColor(_ phase: String) -> Color {
-        switch phase {
-        case "Idle":              return .gray
-        case "Candidate":         return .yellow
-        case "Locked (Swipe)":    return .green
-        case "Ignored":           return .red
-        case "Fired":             return .blue
-        case "App Switcher":      return .purple
-        default:                  return .gray
+    @ViewBuilder
+    private func statPill(label: String, value: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
         }
+        .frame(minWidth: 64)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(color.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(color.opacity(0.18), lineWidth: 1)
+        )
     }
 }

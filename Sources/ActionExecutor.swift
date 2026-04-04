@@ -445,7 +445,7 @@ final class ActionExecutor {
         lastMinimizedWindows = minimizedNow
 
         // All windows are now minimized — activate Finder so no user app is frontmost.
-        // NSApp.deactivate() only affects GestureFlow itself; we need to explicitly
+        // NSApp.deactivate() only affects Glide itself; we need to explicitly
         // hand focus to Finder, which is macOS's "desktop / no app" state.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             if let finder = NSWorkspace.shared.runningApplications.first(where: {

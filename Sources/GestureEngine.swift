@@ -216,6 +216,10 @@ final class GestureEngine {
     private(set) var currentPhaseName: String = "Idle"
     private(set) var currentFingerCount: Int = 0
     private(set) var isReciprocalActive: Bool = false
+    /// Last known centroid position (0–1 normalised), updated on every MT frame.
+    /// Exposed so the trackpad margin preview can show a live dot.
+    private(set) var currentCentroidX: Float = 0.5
+    private(set) var currentCentroidY: Float = 0.5
 
     /// Callback invoked on main queue whenever the engine's observable state
     /// changes. Used by PreferencesStore to avoid 0.1s polling.
@@ -281,19 +285,19 @@ final class GestureEngine {
 
     /// Zero all global MT state so no stale values survive stop/start.
     private func resetAllGlobalState() {
-        gestureFlowActiveTouches = 0
-        gestureFlowClickFingerCount = 0
-        gestureFlowPeakFingerCount = 0
-        gestureFlowLastMTTimestamp = 0
-        gestureFlowLastDispatchedCount = 0
-        gestureFlowLastDispatchedCx = 0
-        gestureFlowLastDispatchedCy = 0
+        glideActiveTouches = 0
+        glideClickFingerCount = 0
+        glidePeakFingerCount = 0
+        glideLastMTTimestamp = 0
+        glideLastDispatchedCount = 0
+        glideLastDispatchedCx = 0
+        glideLastDispatchedCy = 0
     }
 
     // MARK: - Multitouch
 
     private func startMultitouch() {
-        MultitouchBridge.shared.start(callback: gestureFlowMTCallback)
+        MultitouchBridge.shared.start(callback: glideMTCallback)
     }
 
     /// Periodically checks that the MT callback is still firing.
@@ -302,10 +306,10 @@ final class GestureEngine {
     private func startMTWatchdog() {
         mtWatchdogTimer?.invalidate()
         // Seed the timestamp so we don't false-trigger immediately on start
-        gestureFlowLastMTTimestamp = ProcessInfo.processInfo.systemUptime
+        glideLastMTTimestamp = ProcessInfo.processInfo.systemUptime
         let timer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { [weak self] _ in
             guard let self, self.isRunning else { return }
-            let lastMT = gestureFlowLastMTTimestamp
+            let lastMT = glideLastMTTimestamp
             let now = ProcessInfo.processInfo.systemUptime
             // If no MT callback has fired in 8 seconds, the device is dead.
             // (During normal usage, MT fires at ~60 Hz whenever fingers touch.)
@@ -313,7 +317,7 @@ final class GestureEngine {
             // touching the trackpad — the check only matters after wake.
             guard lastMT > 0, now - lastMT > 8.0 else { return }
             // Verify the user actually touched the trackpad recently by checking
-            // if there are active touches right now. If gestureFlowActiveTouches > 0
+            // if there are active touches right now. If glideActiveTouches > 0
             // but no callback arrived, the bridge is definitely stale.
             // However, after sleep MT usually goes silent completely (activeTouches = 0
             // and no callbacks), so we also restart if we detect a system wake
@@ -321,7 +325,7 @@ final class GestureEngine {
             AppLogger.debug("[Engine] MT watchdog: no callback for \(now - lastMT)s — restarting MT bridge")
             MultitouchBridge.shared.stop()
             self.startMultitouch()
-            gestureFlowLastMTTimestamp = now
+            glideLastMTTimestamp = now
         }
         timer.tolerance = 1.0   // Allow macOS to coalesce ±1s for battery savings
         mtWatchdogTimer = timer
@@ -355,13 +359,13 @@ final class GestureEngine {
                     return nil
                 }
                 if type == .leftMouseDown {
-                    let n = gestureFlowActiveTouches
+                    let n = glideActiveTouches
                     if n >= 3 {
-                        gestureFlowClickFingerCount = n
+                        glideClickFingerCount = n
                     }
                     return Unmanaged.passUnretained(cgEvent)
                 }
-                if gestureFlowActiveTouches >= 3 { return nil }
+                if glideActiveTouches >= 3 { return nil }
                 return Unmanaged.passUnretained(cgEvent)
             },
             userInfo: nil)
@@ -464,9 +468,9 @@ final class GestureEngine {
                     return nil
                 }
                 // Read finger count from all available sources
-                let tapCount  = gestureFlowClickFingerCount
-                let peakCount = gestureFlowPeakFingerCount
-                let liveCount = gestureFlowActiveTouches
+                let tapCount  = glideClickFingerCount
+                let peakCount = glidePeakFingerCount
+                let liveCount = glideActiveTouches
                 let n = max(tapCount, peakCount, liveCount)
                 if n >= 3 {
                     // Dispatch click processing to main queue
@@ -519,7 +523,7 @@ final class GestureEngine {
             guard let self else { return }
             // Don't clear if our own action caused the app switch
             guard !self.suppressContextClear else { return }
-            // Don't clear if GestureFlow itself activated
+            // Don't clear if Glide itself activated
             guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
             // If we have a reciprocal token and the new frontmost app differs
@@ -535,16 +539,16 @@ final class GestureEngine {
 
     /// Called from the NSEvent global monitor (backup path).
     private func handleLeftClickFromMonitor() {
-        let tapCount  = Int(gestureFlowClickFingerCount)
-        let peakCount = Int(gestureFlowPeakFingerCount)
-        let liveCount = Int(gestureFlowActiveTouches)
+        let tapCount  = Int(glideClickFingerCount)
+        let peakCount = Int(glidePeakFingerCount)
+        let liveCount = Int(glideActiveTouches)
         let n = max(tapCount, peakCount, liveCount)
 
         if n >= 3 {
             processClick(fingerCount: n)
         } else {
             // Normal 1-finger click: clear reciprocal state
-            gestureFlowClickFingerCount = 0
+            glideClickFingerCount = 0
             clearReciprocalToken()
         }
     }
@@ -554,12 +558,25 @@ final class GestureEngine {
     func processClick(fingerCount n: Int) {
         if case .switchingApps = phase { return }
 
+        // ── Edge margin guard ──
+        if tuning.edgeMarginEnabled {
+            let m = tuning.edgeMargin
+            let inEdge = currentCentroidX < m.left
+                      || currentCentroidX > (1.0 - m.right)
+                      || currentCentroidY < m.bottom
+                      || currentCentroidY > (1.0 - m.top)
+            if inEdge {
+                AppLogger.debug("[Engine] Click ignored — inside edge margin")
+                return
+            }
+        }
+
         // Dedup: if this click was already processed within 100ms, skip.
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastClickProcessedTime > 0.1 else { return }
         lastClickProcessedTime = now
 
-        gestureFlowClickFingerCount = 0
+        glideClickFingerCount = 0
 
         guard let rule = bestRule(fingers: n, direction: .click) else {
             return
@@ -581,7 +598,7 @@ final class GestureEngine {
     }
 
     private func handleExternalInteraction() {
-        guard gestureFlowActiveTouches < 2 else { return }
+        guard glideActiveTouches < 2 else { return }
         if case .fired = phase { return }
         if case .switchingApps = phase { return }
         clearReciprocalToken()
@@ -590,7 +607,7 @@ final class GestureEngine {
     // MARK: - Touch update (phase-driven dispatcher)
 
     func onTouches(_ frame: TouchFrameData) {
-        // Note: gestureFlowActiveTouches is updated on the MT thread now
+        // Note: glideActiveTouches is updated on the MT thread now
         // (before dispatch to main) so the CGEvent tap can see it immediately.
         setSuppressionActive(frame.count >= 3)
 
@@ -599,14 +616,18 @@ final class GestureEngine {
 
         // ── Fingers lifted: reset session ──
         if n < 2 {
-            gestureFlowClickFingerCount = 0
+            glideClickFingerCount = 0
             finishIfNeeded()
             updateObservableState()
             return
         }
 
+        // Update centroid for UI live preview
+        currentCentroidX = frame.cx
+        currentCentroidY = frame.cy
+
         // ── Click-in-progress guard ──
-        if gestureFlowClickFingerCount >= 3 {
+        if glideClickFingerCount >= 3 {
             return
         }
 
@@ -619,6 +640,17 @@ final class GestureEngine {
         // ──────────────────────────────────────────────
         case .idle:
             guard hasAnySwipeRule(fingers: n) else { return }
+            // ── Edge margin guard ──
+            // Ignore gestures that begin inside the configured dead zones near
+            // the trackpad bezel. cx/cy are normalised (0.0–1.0); cy=0 is bottom.
+            if tuning.edgeMarginEnabled {
+                let m = tuning.edgeMargin
+                let inEdge = frame.cx < m.left
+                          || frame.cx > (1.0 - m.right)
+                          || frame.cy < m.bottom
+                          || frame.cy > (1.0 - m.top)
+                if inEdge { return }  // stay idle — don't start a candidate
+            }
             sessionGeneration &+= 1
             let data = CandidateData(
                 startX: frame.cx, startY: frame.cy,
@@ -1242,21 +1274,21 @@ final class GestureEngine {
 
 /// Written by the MT callback (MT thread) and the CGEvent tap callback (HID thread).
 /// Read by the engine on main. Effectively atomic for Int32 on arm64/x86_64.
-var gestureFlowActiveTouches: Int32 = 0
+var glideActiveTouches: Int32 = 0
 
 /// Set synchronously in the CGEvent tap callback the moment a leftMouseDown
 /// fires with 3+ fingers. Consumed on main in handleLeftClick().
-var gestureFlowClickFingerCount: Int32 = 0
+var glideClickFingerCount: Int32 = 0
 
 /// Peak finger count from the MT callback. Set when count >= 3,
 /// reset to 0 after a 300ms delay. This survives the timing race where
 /// the MT "fingers lifted" callback is dispatched to main before the
 /// NSEvent leftMouseDown monitor fires.
-var gestureFlowPeakFingerCount: Int32 = 0
+var glidePeakFingerCount: Int32 = 0
 
 /// Last time the MT callback fired (ProcessInfo.systemUptime).
 /// Used by the engine's watchdog to detect stale MT devices.
-var gestureFlowLastMTTimestamp: TimeInterval = 0
+var glideLastMTTimestamp: TimeInterval = 0
 
 /// Work item for resetting the peak finger count after a delay.
 private var peakResetWorkItem: DispatchWorkItem?
@@ -1265,31 +1297,71 @@ private var peakResetWorkItem: DispatchWorkItem?
 /// meaningful movement, we skip the main-queue dispatch to avoid ~60
 /// unnecessary wake-ups/sec. For count >= 3, every frame is dispatched
 /// because the engine's state machine needs continuous evidence.
-private var gestureFlowLastDispatchedCount: Int32 = 0
-private var gestureFlowLastDispatchedCx: Float = 0
-private var gestureFlowLastDispatchedCy: Float = 0
+private var glideLastDispatchedCount: Int32 = 0
+private var glideLastDispatchedCx: Float = 0
+private var glideLastDispatchedCy: Float = 0
+
+/// True if the current multitouch sequence has touched the margin at any point.
+/// Blocks all gestures until all fingers are lifted.
+var glideLifecycleBlocked: Bool = false
 
 /// The MT callback. Computes per-frame evidence (centroid, spread, coherence)
 /// and dispatches to the engine on main via TouchFrameData.
-let gestureFlowMTCallback: MTContactCallback = { _, data, count, _, _ in
+let glideMTCallback: MTContactCallback = { _, data, count, _, _ in
     // Record that the MT callback is alive (for the watchdog)
-    gestureFlowLastMTTimestamp = ProcessInfo.processInfo.systemUptime
+    glideLastMTTimestamp = ProcessInfo.processInfo.systemUptime
 
-    guard let data, count > 0 else {
-        if gestureFlowActiveTouches > 0 {
+    var validTouches: [MTTouch] = []
+    if let data, count > 0 {
+        let n = Int(count)
+        let rawTouches = data.assumingMemoryBound(to: MTTouch.self)
+        let tuning = Settings.shared.tuning
+        
+        var anyInMargin = false
+        if tuning.edgeMarginEnabled {
+            let m = tuning.edgeMargin
+            for i in 0..<n {
+                let t = rawTouches[i]
+                let x = t.normalizedPosition.x
+                let y = t.normalizedPosition.y
+                if x < m.left || x > (1.0 - m.right) || y < m.bottom || y > (1.0 - m.top) {
+                    anyInMargin = true
+                    break
+                }
+            }
+        }
+        
+        if anyInMargin {
+            glideLifecycleBlocked = true
+        }
+        
+        if !glideLifecycleBlocked {
+            for i in 0..<n {
+                validTouches.append(rawTouches[i])
+            }
+        }
+    } else {
+        // All fingers lifted, reset the lifecycle block
+        glideLifecycleBlocked = false
+    }
+
+    let validCount = Int32(validTouches.count)
+
+    guard validCount > 0 else {
+        if glideActiveTouches > 0 {
             // Update finger count immediately on MT thread so CGEvent tap sees it
-            gestureFlowActiveTouches = 0
-            gestureFlowLastDispatchedCount = 0
-            gestureFlowLastDispatchedCx = 0
-            gestureFlowLastDispatchedCy = 0
+            glideActiveTouches = 0
+            glideLastDispatchedCount = 0
+            glideLastDispatchedCx = 0
+            glideLastDispatchedCy = 0
             DispatchQueue.main.async {
-                gestureFlowClickFingerCount = 0
+                glideClickFingerCount = 0
                 // Schedule peak count reset after a short delay.
                 // This keeps the peak count alive long enough for
                 // handleLeftClick to read it even if the finger-lift
                 // callback dispatches to main before the click handler.
                 peakResetWorkItem?.cancel()
-                let work = DispatchWorkItem { gestureFlowPeakFingerCount = 0 }
+                let work = DispatchWorkItem { glidePeakFingerCount = 0 }
                 peakResetWorkItem = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
 
@@ -1301,17 +1373,16 @@ let gestureFlowMTCallback: MTContactCallback = { _, data, count, _, _ in
         return 0
     }
 
-    let n = Int(count)
-    let touches = data.assumingMemoryBound(to: MTTouch.self)
+    let n = Int(validCount)
 
     // Update finger count immediately on MT thread (before dispatch to main)
     // so the CGEvent tap callback can see current count right away.
     // Int32 stores are effectively atomic on arm64/x86_64.
-    gestureFlowActiveTouches = count
+    glideActiveTouches = validCount
 
     // Track peak finger count for click detection
-    if count >= 3 {
-        gestureFlowPeakFingerCount = count
+    if validCount >= 3 {
+        glidePeakFingerCount = validCount
         // Cancel any pending reset
         DispatchQueue.main.async { peakResetWorkItem?.cancel() }
     }
@@ -1319,8 +1390,8 @@ let gestureFlowMTCallback: MTContactCallback = { _, data, count, _, _ in
     // ── Compute centroid ──
     var sumX: Float = 0, sumY: Float = 0
     for i in 0..<n {
-        sumX += touches[i].normalizedPosition.x
-        sumY += touches[i].normalizedPosition.y
+        sumX += validTouches[i].normalizedPosition.x
+        sumY += validTouches[i].normalizedPosition.y
     }
     let cx = sumX / Float(n)
     let cy = sumY / Float(n)
@@ -1330,25 +1401,25 @@ let gestureFlowMTCallback: MTContactCallback = { _, data, count, _, _ in
     // Skip the main-queue dispatch when nothing meaningful changed.
     // For count >= 3, always dispatch — the engine needs every frame for
     // candidate evidence, swipe tracking, and app-switcher.
-    if count < 3 {
-        let countChanged = count != gestureFlowLastDispatchedCount
-        let centroidMoved = abs(cx - gestureFlowLastDispatchedCx) > 0.001
-                         || abs(cy - gestureFlowLastDispatchedCy) > 0.001
+    if validCount < 3 {
+        let countChanged = validCount != glideLastDispatchedCount
+        let centroidMoved = abs(cx - glideLastDispatchedCx) > 0.001
+                         || abs(cy - glideLastDispatchedCy) > 0.001
         if !countChanged && !centroidMoved {
             return 0
         }
     }
-    gestureFlowLastDispatchedCount = count
-    gestureFlowLastDispatchedCx = cx
-    gestureFlowLastDispatchedCy = cy
+    glideLastDispatchedCount = validCount
+    glideLastDispatchedCx = cx
+    glideLastDispatchedCy = cy
 
     // ── Compute spread (average finger-to-centroid distance) ──
     var spread: Float = 0
     if n >= 3 {
         var spreadSum: Float = 0
         for i in 0..<n {
-            let dx = touches[i].normalizedPosition.x - cx
-            let dy = touches[i].normalizedPosition.y - cy
+            let dx = validTouches[i].normalizedPosition.x - cx
+            let dy = validTouches[i].normalizedPosition.y - cy
             spreadSum += (dx * dx + dy * dy).squareRoot()
         }
         spread = spreadSum / Float(n)
@@ -1364,8 +1435,8 @@ let gestureFlowMTCallback: MTContactCallback = { _, data, count, _, _ in
         var avgDirY: Float = 0
         var movingFingers: Int = 0
         for i in 0..<n {
-            let vx = touches[i].velocity.x
-            let vy = touches[i].velocity.y
+            let vx = validTouches[i].velocity.x
+            let vy = validTouches[i].velocity.y
             let mag = (vx * vx + vy * vy).squareRoot()
             if mag > 0.01 {  // only count fingers that are actually moving
                 avgDirX += vx / mag
@@ -1381,7 +1452,7 @@ let gestureFlowMTCallback: MTContactCallback = { _, data, count, _, _ in
         // else: no fingers moving yet → default coherence 1.0 (don't veto idle fingers)
     }
 
-    let frameData = TouchFrameData(count: count, cx: cx, cy: cy,
+    let frameData = TouchFrameData(count: validCount, cx: cx, cy: cy,
                                    spread: spread, coherence: coherence)
 
     DispatchQueue.main.async {

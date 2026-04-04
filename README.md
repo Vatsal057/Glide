@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="assets/hero.png" alt="GestureFlow" width="600"/>
+  <img src="assets/hero.png" alt="Glide" width="600"/>
 </p>
 
-<h1 align="center">GestureFlow</h1>
+<h1 align="center">Glide</h1>
 
 <p align="center">
   <b>Powerful trackpad gestures for macOS.</b><br>
-  Swipe with 2–5 fingers to control windows, apps, and your Mac — at any speed.
+  Swipe with 2–5 fingers to control windows, apps, and your Mac — at any speed, with flawless palm rejection.
 </p>
 
 <p align="center">
@@ -21,8 +21,8 @@
 
 - [Quick Start](#quick-start)
 - [How Gestures Work](#how-gestures-work)
+- [Trackpad Safe Zones (New!)](#trackpad-safe-zones-new)
 - [Understanding Speed: Slow, Normal & Fast](#understanding-speed-slow-normal--fast)
-- [Mastering Speed Gestures (Without the Frustration)](#mastering-speed-gestures-without-the-frustration)
 - [Default Gestures](#default-gestures)
 - [All Available Actions](#all-available-actions)
 - [Reciprocal Gestures](#reciprocal-gestures)
@@ -35,23 +35,24 @@
 ## Quick Start
 
 1. **Build** — `bash build.sh`
-2. **Launch** — `open build/GestureFlow.app`
-3. **Grant Access** — macOS will ask for Accessibility permission. Go to **System Settings → Privacy & Security → Accessibility** and enable GestureFlow.
-4. **Use it** — Place 3 fingers on the trackpad and swipe. That's it.
+2. **Launch** — `open build/Glide.app`
+3. **Grant Access** — macOS will ask for Accessibility permission. Go to **System Settings → Privacy & Security → Accessibility** and enable Glide.
+4. **Use it** — Place 3 fingers on the trackpad and swipe. That's it!
 
-> **Tip:** Optionally move to Applications: `cp -r build/GestureFlow.app /Applications/`
+> **Tip:** Optionally move to Applications: `cp -r build/Glide.app /Applications/`
 
 ---
 
 ## How Gestures Work
 
-GestureFlow reads raw multitouch data from your trackpad. When you place multiple fingers and move them, the app:
+Glide reads raw multitouch data from your trackpad. When you place multiple fingers and move them, the app:
 
 1. **Detects finger count** (2, 3, 4, or 5 fingers)
-2. **Verifies it's a swipe** (not a pinch or zoom)
-3. **Determines direction** from the angle of your finger movement
-4. **Classifies speed** based on how fast your fingers are moving
-5. **Fires the matching action**
+2. **Filters edge touches** using our intelligent lifecycle blocker 
+3. **Verifies it's a swipe** (not a pinch or zoom)
+4. **Determines direction** from the angle of your finger movement
+5. **Classifies speed** based on how fast your fingers are moving
+6. **Fires the matching action**
 
 ```
     ┌─────────────────────────────┐
@@ -63,7 +64,7 @@ GestureFlow reads raw multitouch data from your trackpad. When you place multipl
                   │
                   ▼
     ┌─────────────────────────────┐
-    │    GestureFlow Engine       │
+    │    Glide Engine             │
     │                             │
     │  Fingers: 3                 │
     │  Direction: Right (→)       │
@@ -75,9 +76,20 @@ GestureFlow reads raw multitouch data from your trackpad. When you place multipl
 
 ---
 
+## Trackpad Safe Zones (New!)
+
+To provide a flawless experience, Glide now features a robust **Lifecycle Blocker** working alongside customizable **Trackpad Dead Zones**. 
+
+This completely solves the "palm resting" problem! If any of your fingers or palms touch the outer margins of the trackpad, Glide registers that exact moment and freezes gesture recognition completely. 
+- You can rest a thumb in the margin and navigate macOS normally with your other fingers without an accidental 3-finger click firing!
+- Swipes starting entirely out of the margin and sliding into the safe-zone are properly registered.
+- Adjustable sliders mapped beautifully to the Preferences UI allow you to determine exactly what the "Safe Area" of your trackpad is visually.
+
+---
+
 ## Understanding Speed: Slow, Normal & Fast
 
-GestureFlow measures **how fast your fingers are actually moving** — not how long the gesture takes. This means speed detection feels natural and consistent.
+Glide measures **how fast your fingers are actually moving** — not how long the gesture takes. This means speed detection feels natural and consistent.
 
 ### The Three Speeds
 
@@ -117,8 +129,6 @@ This is the most important section. Here's how to consistently trigger each spee
 - ✅ Think "snappy" — the motion should take less than a quarter second  
 - ❌ Don't drag slowly and then speed up at the end — the app samples early  
 
-**Practice:** Place 3 fingers and quickly flick right. You'll feel a haptic tap when the action fires. If you're getting Normal instead of Fast, make your initial movement more explosive.
-
 ### ⚪ Normal Gestures — "The Natural Swipe"
 
 **Technique:** Just swipe. Don't think about speed at all.
@@ -126,8 +136,6 @@ This is the most important section. Here's how to consistently trigger each spee
 - ✅ Move your fingers at a comfortable, natural pace  
 - ✅ This is your default — most swipes will register as Normal  
 - ✅ Not rushed, not deliberate — just... a swipe  
-
-**Practice:** This should be effortless. If you're accidentally triggering Fast or Slow, you're probably overthinking it. Relax your hand and swipe normally.
 
 ### 🔵 Slow Gestures — "The Glide"
 
@@ -138,42 +146,11 @@ This is the most important section. Here's how to consistently trigger each spee
 - ✅ The movement should feel intentional and unhurried  
 - ❌ Don't just hesitate before swiping — the app measures *movement speed*, not *pause duration*
 
-**Practice:** Place 3 fingers and very slowly glide them upward over 1-2 seconds. This should feel dramatically different from a normal swipe.
-
-### Quick Reference Card
-
-```
-╔═══════════════════════════════════════════════════════════════╗
-║                    SPEED CHEAT SHEET                         ║
-╠═══════════════════════════════════════════════════════════════╣
-║                                                               ║
-║  🟠 FAST    →  Quick flick, like brushing crumbs away        ║
-║  ⚪ NORMAL  →  Just swipe naturally, don't think about it    ║
-║  🔵 SLOW    →  Gentle glide, like a dimmer switch            ║
-║                                                               ║
-║  KEY INSIGHT: Speed is measured from the FIRST few frames     ║
-║  of movement. How you START the gesture matters most.         ║
-║                                                               ║
-╚═══════════════════════════════════════════════════════════════╝
-```
-
 ### Pro Tips
 
 1. **The start matters most.** Speed is sampled from the first 3 frames of motion. How you begin the gesture determines the classification — you can't change it mid-swipe.
-
-2. **Same direction, three actions.** You can bind Slow/Normal/Fast swipes to different actions. For example:
-   - 3-finger swipe right (Normal) → Next App
-   - 3-finger swipe right (Fast) → Close Window
-   - 3-finger swipe right (Slow) → Snap Right
-
-3. **Normal is the fallback.** If you have a Fast or Slow rule but the gesture is classified as Normal, it'll match the Normal rule. If you only have a Normal rule for a direction, it fires regardless of speed.
-
-4. **Click gestures ignore speed.** Tap-style gestures (all fingers tap down together) always fire as Normal.
-
-5. **Enable debug logging** (in Preferences → General) to see exactly what speed each gesture was classified as. The console will show:
-   ```
-   [Engine] Swipe Right — 3 fingers, Fast (avgVel=0.012, angle=5.3°) → Close Window
-   ```
+2. **Normal is the fallback.** If you have a Fast or Slow rule but the gesture is classified as Normal, it'll match the Normal rule. If you only have a Normal rule for a direction, it fires regardless of speed.
+3. **Click gestures ignore speed.** Tap-style gestures (all fingers tap down together) always fire as Normal.
 
 ---
 
@@ -212,64 +189,9 @@ These are the out-of-the-box gestures. All are set to Normal speed.
 
 ## All Available Actions
 
-### App Control
-| Action | Description |
-|--------|-------------|
-| Quit App Under Cursor | Gracefully quits the app under your cursor |
-| Force Quit App Under Cursor | Force-kills the app |
-| Quit Frontmost App | Quits whichever app is currently focused |
-| Hide App Under Cursor | Hides app (⌘H) |
-| Hide Other Apps | Hides all apps except current (⌘⌥H) |
-| Open App… | Launches a specific application |
+Glide supports comprehensive commands mapped instantly without latency! Enjoy binding directions and clicks for **App Control**, **App Switching**, **Window Management**, **Window Snapping**, **Fullscreen interactions**, and **System overrides** such as Screenshots and Screen Locking! 
 
-### App Switching
-| Action | Description |
-|--------|-------------|
-| Next App (App Switcher) | Opens ⌘Tab and scrolls right as you keep swiping |
-| Previous App (App Switcher) | Opens ⌘Tab and scrolls left |
-| Activate Next App | Instantly switches to next app (no UI) |
-| Activate Previous App | Instantly switches to previous app |
-
-### Window Management
-| Action | Description |
-|--------|-------------|
-| Maximize Window | Zooms window to fill the screen |
-| Restore/Un-maximize | Returns window to its previous size |
-| Minimize Window | Minimizes current window to Dock |
-| Minimize All Apps | Minimizes all visible windows |
-| Restore Minimized Apps | Un-minimizes everything |
-| Close Window | Closes current window (⌘W) |
-| Cycle Windows | Cycles between windows of current app (⌘`) |
-
-### Window Snapping
-| Action | Description |
-|--------|-------------|
-| Snap: Left/Right Half | Fills left or right half of screen |
-| Snap: Top-Left/Right | Fills a quarter of the screen |
-| Snap: Bottom-Left/Right | Fills a quarter of the screen |
-| Center Window | Centers window on screen |
-| Move to Next Display | Moves window to the next monitor |
-
-### Fullscreen
-| Action | Description |
-|--------|-------------|
-| Enter Fullscreen | Makes window fullscreen |
-| Exit Fullscreen | Leaves fullscreen |
-| Toggle Fullscreen | Switches between fullscreen and windowed |
-
-### System
-| Action | Description |
-|--------|-------------|
-| Mission Control | Opens Mission Control (F3) |
-| App Exposé | Shows all windows of current app |
-| Show Desktop | Reveals desktop (F11) |
-| Launchpad | Opens Launchpad |
-| Spotlight | Opens Spotlight search |
-| Notification Center | Opens Notification Center |
-| Lock Screen | Locks your Mac |
-| Sleep | Puts Mac to sleep |
-| Screenshot (Area) | Starts area screenshot (⌘⇧4) |
-| Screenshot (Full) | Captures full screen (⌘⇧3) |
+Check the Preferences UI in the macOS Menu bar to mix and match customized workflows.
 
 ---
 
@@ -288,28 +210,7 @@ Reciprocals only work when you perform the reverse gesture **immediately after**
 
 ## Tuning & Customization
 
-Open GestureFlow Preferences (click the menu bar icon → Preferences) to access all settings.
-
-### Speed Classification
-
-| Parameter | Default | What it does |
-|-----------|---------|-------------|
-| Fast Velocity Threshold | 0.008 | Minimum avg velocity for "Fast". **Raise** if fast gestures trigger too easily. **Lower** if fast gestures never trigger. |
-| Slow Velocity Threshold | 0.003 | Maximum avg velocity for "Slow". **Lower** if slow gestures trigger too easily. **Raise** if you can't trigger slow gestures. |
-| Speed Sample Frames | 3 | How many frames to average. Higher = more stable but slightly delayed. |
-
-### Direction Detection
-
-| Parameter | Default | What it does |
-|-----------|---------|-------------|
-| Angle Tolerance | 45° | Width of each direction wedge. 45° = no dead zones. Lower values create diagonal dead zones where the gesture waits for a clearer direction. |
-
-### Recognition
-
-| Parameter | Default | What it does |
-|-----------|---------|-------------|
-| Activation Threshold | 0.018 | Distance fingers must travel before a swipe fires. Lower = more sensitive. |
-| Candidate Frames | 3 | Frames collected before confirming it's a swipe. Lower = faster, but more false positives from pinch. |
+Open Glide Preferences (click the menu bar icon → Preferences) to access all settings.
 
 ### Recommended Tuning Presets
 
@@ -334,21 +235,13 @@ Open GestureFlow Preferences (click the menu bar icon → Preferences) to access
 
 ### Gestures don't work at all
 1. Check that Accessibility permission is granted in **System Settings → Privacy & Security → Accessibility**
-2. Try removing GestureFlow from the list and re-adding it
-3. Rebuild: `bash build.sh && open build/GestureFlow.app`
+2. Try removing Glide from the list and re-adding it
+3. Rebuild: `bash build.sh && open build/Glide.app`
 
 ### Gestures stop working after sleep/wake
-GestureFlow has built-in recovery. If gestures stop within 5 seconds of waking, they should auto-recover. If not:
-1. Quit GestureFlow from the menu bar
+Glide has built-in recovery. If gestures stop within 5 seconds of waking, they should auto-recover. If not:
+1. Quit Glide from the menu bar
 2. Relaunch it
-
-### Wrong speed is detected
-1. Enable debug logging in **Preferences → General**
-2. Open Console.app or Terminal, perform gestures, and look for lines like:
-   ```
-   [Engine] Swipe Right — 3 fingers, Fast (avgVel=0.012, angle=5.3°) → ...
-   ```
-3. The `avgVel` number tells you exactly how fast your gesture was. Compare it to your thresholds.
 
 ### Direction seems wrong
 1. Enable debug logging and check the `angle=X°` value
@@ -366,15 +259,15 @@ GestureFlow has built-in recovery. If gestures stop within 5 seconds of waking, 
 
 ### Build & Run
 ```bash
-git clone <repo-url>
-cd GestureFlow_fixed
+git clone https://github.com/Vatsal057/Glide.git
+cd Glide
 bash build.sh
-open build/GestureFlow.app
+open build/Glide.app
 ```
 
 ### Install permanently
 ```bash
-cp -r build/GestureFlow.app /Applications/
+cp -r build/Glide.app /Applications/
 ```
 
 ### Launch at login
@@ -383,6 +276,6 @@ Enable "Launch at Login" in **Preferences → General**.
 ---
 
 <p align="center">
-  <sub>GestureFlow uses Apple's private MultitouchSupport framework for raw trackpad access.<br>
+  <sub>Glide uses Apple's private MultitouchSupport framework for raw trackpad access.<br>
   Speed detection inspired by <a href="https://github.com/taj-ny/InputActions">InputActions</a>.</sub>
 </p>

@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>GestureFlow</string>
+    <string>Glide</string>
     <key>CFBundleDisplayName</key>
-    <string>GestureFlow</string>
+    <string>Glide</string>
     <key>CFBundleIdentifier</key>
-    <string>com.gestureflow.app</string>
+    <string>com.glide.app</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>CFBundleExecutable</key>
-    <string>GestureFlow</string>
+    <string>Glide</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
@@ -27,6 +27,6 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
     <key>NSAccessibilityUsageDescription</key>
-    <string>GestureFlow requires Accessibility access to detect gestures and control windows.</string>
+    <string>Glide requires Accessibility access to detect gestures and control windows.</string>
 </dict>
 </plist>
