@@ -225,9 +225,7 @@ final class GestureEngine {
     /// changes. Used by PreferencesStore to avoid 0.1s polling.
     var onStateChange: (() -> Void)?
 
-    /// Temporarily suppress reciprocal clearing when our own action causes an app switch.
-    private var suppressContextClear = false
-
+    // (suppressContextClear was removed to prevent time-based reciprocal expiration)
     // MARK: - Tuning shorthand
 
     private var tuning: GestureTuning { Settings.shared.tuning }
@@ -516,25 +514,8 @@ final class GestureEngine {
     }
 
     private func installWorkspaceObservers() {
-        let wnc = NSWorkspace.shared.notificationCenter
-        // Clear reciprocal token when user manually switches apps
-        let obs = wnc.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
-                                  object: nil, queue: .main) { [weak self] n in
-            guard let self else { return }
-            // Don't clear if our own action caused the app switch
-            guard !self.suppressContextClear else { return }
-            // Don't clear if Glide itself activated
-            guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                  app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
-            // If we have a reciprocal token and the new frontmost app differs
-            // from the context app, the user switched away manually.
-            if let token = self.reciprocalToken,
-               token.contextApp != app.bundleIdentifier {
-                self.clearReciprocalToken()
-                AppLogger.debug("[Engine] Reciprocal cleared — app context changed")
-            }
-        }
-        workspaceObservers.append(obs)
+        // App-switch token clearing has been intentionally removed to prevent time-based expiration
+        // of reciprocal gestures like Mission Control.
     }
 
     /// Called from the NSEvent global monitor (backup path).
@@ -1159,10 +1140,6 @@ final class GestureEngine {
     private func executeSwipeRule(_ rule: GestureRule, fingers: Int, direction: GestureDirection) {
         Haptic.forAction(rule.action)
 
-        // Suppress workspace observer clearing while the action's side effects settle.
-        // Actions like minimizeAllApps activate Finder 0.15s later, which would
-        // otherwise clear the reciprocal token before the user can use it.
-        suppressContextClear = true
         ActionExecutor.shared.execute(rule.action, appPath: rule.appPath)
 
         // Store reciprocal token only if the rule has reciprocal enabled
@@ -1173,11 +1150,6 @@ final class GestureEngine {
             clearReciprocalToken()
         }
         updateObservableState()
-
-        // Re-enable workspace observer after side effects settle
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.suppressContextClear = false
-        }
     }
 
     /// Try to consume the reciprocal token. Returns true if consumed.
