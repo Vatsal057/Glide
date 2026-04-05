@@ -297,12 +297,12 @@ final class Settings {
             if let data   = UserDefaults.standard.data(forKey: kRules),
                let decoded = try? JSONDecoder().decode([GestureRule].self, from: data) {
                 let migrated = canonicalizeRules(migrateRulesIfNeeded(decoded))
+                _rules = migrated        // cache BEFORE persistRules to prevent re-entrancy
                 persistRules(migrated)
-                _rules = migrated
                 return migrated
             }
             let defaults = canonicalizeRules(Self.defaultRules)
-            _rules = defaults
+            _rules = defaults            // cache BEFORE persistRules
             persistRules(defaults)
             return defaults
         }
@@ -319,6 +319,17 @@ final class Settings {
         _windowTargetingMode = nil
         _debugLogging = nil
         _hapticFeedback = nil
+    }
+
+    /// Wipes all persisted UserDefaults keys so YAML can become
+    /// the single source of truth on the next write.
+    func clearUserDefaults() {
+        UserDefaults.standard.removeObject(forKey: kRules)
+        UserDefaults.standard.removeObject(forKey: kRulesVersion)
+        UserDefaults.standard.removeObject(forKey: kTuning)
+        UserDefaults.standard.removeObject(forKey: kWindowTargetingMode)
+        UserDefaults.standard.removeObject(forKey: kDebugLogging)
+        UserDefaults.standard.removeObject(forKey: kHapticFeedback)
     }
 
     var tuning: GestureTuning {
@@ -344,6 +355,7 @@ final class Settings {
             if let data = try? JSONEncoder().encode(normalized) {
                 UserDefaults.standard.set(data, forKey: kTuning)
             }
+            GlideConfigStore.shared.save()
         }
     }
 
@@ -366,6 +378,7 @@ final class Settings {
         set {
             _windowTargetingMode = newValue
             UserDefaults.standard.set(newValue.rawValue, forKey: kWindowTargetingMode)
+            GlideConfigStore.shared.save()
         }
     }
 
@@ -383,6 +396,7 @@ final class Settings {
         set {
             _debugLogging = newValue
             UserDefaults.standard.set(newValue, forKey: kDebugLogging)
+            GlideConfigStore.shared.save()
         }
     }
 
@@ -400,6 +414,7 @@ final class Settings {
         set {
             _hapticFeedback = newValue
             UserDefaults.standard.set(newValue, forKey: kHapticFeedback)
+            GlideConfigStore.shared.save()
         }
     }
 
@@ -463,6 +478,7 @@ final class Settings {
             UserDefaults.standard.set(data, forKey: kRules)
         }
         UserDefaults.standard.set(currentRulesVersion, forKey: kRulesVersion)
+        GlideConfigStore.shared.save()
     }
 
     private func normalizedTuning(_ tuning: GestureTuning) -> GestureTuning {

@@ -24,7 +24,6 @@ The system gives you four fixed gestures you can't change. Third-party apps eith
 
 **Glide fixes this.** It's a free, open-source macOS utility that reads raw trackpad input and maps every combination of finger count, direction, and *speed* to whatever action you want — snapping windows, switching apps, locking your screen, taking screenshots, or anything else macOS can do. It lives in your menu bar, uses no CPU when idle, and gets out of your way.
 
-One `bash build.sh` and it's running. No Xcode. No package manager. No account required.
 
 ---
 

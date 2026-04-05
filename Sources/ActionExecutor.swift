@@ -301,7 +301,17 @@ final class ActionExecutor {
         }
     }
 
-    private func isWindowMaximized(_ window: AXUIElement) -> Bool {
+    func isFrontmostWindowFullscreen() -> Bool {
+        guard let w = focusedWindow() else { return false }
+        return axBool(w, attribute: "AXFullScreen" as CFString) ?? false
+    }
+
+    func isFrontmostWindowMaximized() -> Bool {
+        guard let w = focusedWindow() else { return false }
+        return isWindowMaximized(w)
+    }
+
+    internal func isWindowMaximized(_ window: AXUIElement) -> Bool {
         guard let frame = axFrame(window),
               let screen = screen(for: window) else { return false }
 

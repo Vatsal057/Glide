@@ -10,6 +10,14 @@ import ServiceManagement
 @MainActor
 final class PreferencesStore: ObservableObject {
 
+    // ── Config I/O feedback ──
+    enum ConfigAlert: Equatable {
+        case exportSuccess(String)   // path
+        case importSuccess
+        case error(String)
+    }
+    @Published var configAlert: ConfigAlert? = nil
+
     struct RuleDiagnostics {
         var configuredFingerCounts: Int = 0
         var appSpecificRules: Int = 0
@@ -126,6 +134,39 @@ final class PreferencesStore: ObservableObject {
         let appDelegate = NSApp.delegate as? AppDelegate
         appDelegate?.setLaunchAtLogin(!launchAtLoginEnabled)
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+    }
+
+    // ── YAML Config Export — copies live file to user-chosen location ──
+    func exportConfig() {
+        let panel = NSSavePanel()
+        panel.title                    = "Export Glide Config"
+        panel.nameFieldLabel           = "Save As:"
+        panel.nameFieldStringValue     = "glide_config.yaml"
+        panel.allowedContentTypes      = [.yaml]
+        panel.canCreateDirectories     = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if GlideConfigStore.shared.exportTo(url) {
+            configAlert = .exportSuccess(url.lastPathComponent)
+        } else {
+            configAlert = .error("Export failed — check file permissions.")
+        }
+    }
+
+    // ── YAML Config Import — loads file, applies, saves to live path ──
+    func importConfig() {
+        let panel = NSOpenPanel()
+        panel.title                   = "Import Glide Config"
+        panel.allowedContentTypes     = [.yaml]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories    = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if GlideConfigStore.shared.importFrom(url) {
+            Settings.shared.invalidateCache()
+            reload()
+            configAlert = .importSuccess
+        } else {
+            configAlert = .error("File is not a valid Glide config.")
+        }
     }
 
     func chooseApp(for ruleID: UUID) {
@@ -1267,6 +1308,9 @@ struct GeneralFormView: View {
                 Text("Haptic feedback uses the Force Touch actuator for each gesture. Debug logging prints engine output to Console.app.")
             }
 
+            // ── Configuration (Import / Export YAML) ──
+            ConfigurationSectionView(store: store)
+
             // ── Edge Margin ──
             EdgeMarginSectionView(store: store)
 
@@ -1344,5 +1388,135 @@ struct GeneralFormView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(color.opacity(0.18), lineWidth: 1)
         )
+    }
+}
+
+// ─────────────────────────────────────────────
+// MARK: - Configuration section (Import / Export YAML)
+// ─────────────────────────────────────────────
+
+struct ConfigurationSectionView: View {
+    @ObservedObject var store: PreferencesStore
+    @State private var bannerVisible = false
+    @State private var bannerTimer: Timer?
+
+    private var livePath: String { GlideConfigStore.shared.configPath }
+
+    var body: some View {
+        Section {
+            // ── Live file path row ──
+            LabeledContent("Live Config File") {
+                HStack(spacing: 8) {
+                    Text(livePath)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Button {
+                        NSWorkspace.shared.selectFile(
+                            livePath,
+                            inFileViewerRootedAtPath: (livePath as NSString).deletingLastPathComponent
+                        )
+                    } label: {
+                        Image(systemName: "folder")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Reveal in Finder")
+                }
+            }
+
+            // ── Action buttons ──
+            HStack(spacing: 12) {
+                Button {
+                    store.exportConfig()
+                    showBanner()
+                } label: {
+                    Label("Export Copy…", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.bordered)
+                .help("Copy the live config.yaml to a custom location for backup or sharing")
+
+                Button {
+                    store.importConfig()
+                    showBanner()
+                } label: {
+                    Label("Import Config…", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.bordered)
+                .help("Restore gestures, tuning, and preferences from a .yaml file")
+
+                Spacer()
+            }
+            .padding(.vertical, 2)
+
+            // ── Inline feedback banner ──
+            if bannerVisible, let alert = store.configAlert {
+                HStack(spacing: 10) {
+                    Image(systemName: alertIcon(alert))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(alertColor(alert))
+                    Text(alertMessage(alert))
+                        .font(.system(size: 12))
+                        .foregroundStyle(alertColor(alert))
+                    Spacer()
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(alertColor(alert).opacity(0.10))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(alertColor(alert).opacity(0.25), lineWidth: 1)
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        } header: {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.badge.gearshape")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.indigo)
+                Text("Configuration")
+            }
+        } footer: {
+            Text("config.yaml is saved automatically to Application Support whenever you change any setting. Use \"Export Copy…\" to back it up, or \"Import Config…\" to restore after a reinstall.")
+        }
+        .onChange(of: store.configAlert) { _ in showBanner() }
+    }
+
+    private func showBanner() {
+        guard store.configAlert != nil else { return }
+        withAnimation(.easeOut(duration: 0.22)) { bannerVisible = true }
+        bannerTimer?.invalidate()
+        bannerTimer = Timer.scheduledTimer(withTimeInterval: 3.5, repeats: false) { _ in
+            DispatchQueue.main.async {
+                withAnimation(.easeIn(duration: 0.22)) { bannerVisible = false }
+            }
+        }
+    }
+
+    private func alertIcon(_ a: PreferencesStore.ConfigAlert) -> String {
+        switch a {
+        case .exportSuccess: return "checkmark.circle.fill"
+        case .importSuccess: return "checkmark.circle.fill"
+        case .error:         return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private func alertColor(_ a: PreferencesStore.ConfigAlert) -> Color {
+        switch a {
+        case .exportSuccess, .importSuccess: return .green
+        case .error:                         return .red
+        }
+    }
+
+    private func alertMessage(_ a: PreferencesStore.ConfigAlert) -> String {
+        switch a {
+        case .exportSuccess(let name): return "Config exported to \"\(name)\"."
+        case .importSuccess:           return "Config imported — gestures and settings updated."
+        case .error(let msg):          return msg
+        }
     }
 }

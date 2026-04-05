@@ -10,7 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: State
     private var statusItem: NSStatusItem!
     private var enabled = true
-    private let engine  = GestureEngine.shared
+    private lazy var engine = GestureEngine.shared
 
     // MARK: Launch at Login
 
@@ -36,6 +36,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Launch
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.debug("[Glide] Launching")
+
+        // Restore settings from the live config.yaml in Application Support
+        // (no-op if the file doesn't exist yet — defaults are used instead)
+        GlideConfigStore.shared.load()
+
         setupStatusBar()
         checkPermissions()
 

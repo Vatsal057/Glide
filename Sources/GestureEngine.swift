@@ -1082,9 +1082,28 @@ final class GestureEngine {
     private func bestRule(fingers: Int, direction: GestureDirection, speed: GestureSpeed = .normal) -> GestureRule? {
         let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let all = Settings.shared.rules.filter { $0.fingers == fingers && $0.direction == direction }
+
+        // ── Smart State Filtering ──
+        // Special filters based on window state (NOT_FULLSCREEN, MAXIMIZED, etc.)
+        let stateRules = all.filter { r in
+            guard let filter = r.appFilter else { return false }
+            switch filter.uppercased() {
+            case "FULLSCREEN":      return ActionExecutor.shared.isFrontmostWindowFullscreen()
+            case "NOT_FULLSCREEN":  return !ActionExecutor.shared.isFrontmostWindowFullscreen()
+            case "MAXIMIZED":       return ActionExecutor.shared.isFrontmostWindowMaximized()
+            case "NOT_MAXIMIZED":   return !ActionExecutor.shared.isFrontmostWindowMaximized()
+            default: return false
+            }
+        }
+        if let match = bestRuleMatch(in: stateRules, speed: speed) { return match }
+
+        // ── Standard Bundle ID Filtering ──
         let specific = all.filter { $0.appFilter != nil && $0.appFilter == bid }
-        let generic  = all.filter { $0.appFilter == nil }
-        return bestRuleMatch(in: specific, speed: speed) ?? bestRuleMatch(in: generic, speed: speed)
+        if let match = bestRuleMatch(in: specific, speed: speed) { return match }
+
+        // ── Generic (Global) Rules ──
+        let generic = all.filter { $0.appFilter == nil }
+        return bestRuleMatch(in: generic, speed: speed)
     }
 
     private func hasAnySwipeRule(fingers: Int) -> Bool {
