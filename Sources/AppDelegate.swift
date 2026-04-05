@@ -59,50 +59,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         engine.stop()
     }
 
-    // MARK: Permissions
-
     private func checkPermissions() {
-        let trusted = AXIsProcessTrustedWithOptions(
-            [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        )
-        if trusted {
-            AppLogger.debug("[Glide] Accessibility granted — starting engine")
-            engine.start()
-        } else {
-            print("[Glide] Accessibility not granted — polling")
-            showPermissionsAlert()
-            pollForAccessibility()
-        }
-    }
-
-    private func showPermissionsAlert() {
-        let a = NSAlert()
-        a.messageText     = "Accessibility Permission Required"
-        a.informativeText = """
-        Glide needs Accessibility access to detect trackpad gestures and control windows.
-
-        1. macOS has opened System Settings → Privacy & Security → Accessibility.
-        2. Find "Glide" in the list and toggle it ON.
-        3. The app will start automatically once permission is granted.
-        """
-        a.addButton(withTitle: "Open System Settings")
-        a.addButton(withTitle: "Later")
-        if a.runModal() == .alertFirstButtonReturn,
-           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    private func pollForAccessibility() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            if AXIsProcessTrusted() {
-                AppLogger.debug("[Glide] Accessibility granted — starting engine")
-                self?.engine.start()
-                self?.refreshIcon()
-            } else {
-                self?.pollForAccessibility()
-            }
-        }
+        // Trigger system-level accessibility prompt if not already granted.
+        AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+        engine.start()
     }
 
     // MARK: Wake / Terminate observers
@@ -233,9 +193,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         • Slow / Normal / Fast speeds can map to different actions
 
         You can add, remove, or customise all gestures in Preferences.
-
-        Required permissions:
-        • Accessibility — to control windows and simulate keys
         """
         a.addButton(withTitle: "Got it")
         a.runModal()

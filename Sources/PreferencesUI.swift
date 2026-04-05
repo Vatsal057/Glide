@@ -31,7 +31,6 @@ final class PreferencesStore: ObservableObject {
     @Published private(set) var windowTargetingMode: WindowTargetingMode = .focusedThenCursor
     @Published private(set) var hapticFeedbackEnabled = true
     @Published private(set) var debugLoggingEnabled = false
-    @Published private(set) var accessibilityGranted = false
     @Published private(set) var diagnostics = RuleDiagnostics()
     @Published private(set) var launchAtLoginEnabled = false
 
@@ -52,7 +51,6 @@ final class PreferencesStore: ObservableObject {
         windowTargetingMode = s.windowTargetingMode
         hapticFeedbackEnabled = s.hapticFeedbackEnabled
         debugLoggingEnabled = s.debugLoggingEnabled
-        accessibilityGranted = AXIsProcessTrusted()
         diagnostics = buildDiagnostics(for: rules)
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
     }
@@ -338,9 +336,6 @@ struct PreferencesRootView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Glide")
                             .font(.system(size: 12, weight: .semibold))
-                        Text(store.accessibilityGranted ? "Active" : "Needs Permission")
-                            .font(.system(size: 11))
-                            .foregroundStyle(store.accessibilityGranted ? Color.secondary : Color.orange)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -1104,64 +1099,7 @@ struct EdgeMarginSectionView: View {
     }
 }
 
-// ─────────────────────────────────────────────
-// MARK: - Accessibility Card
-// ─────────────────────────────────────────────
 
-struct AccessibilityStatusCard: View {
-    let granted: Bool
-    @State private var pulse = false
-
-    var body: some View {
-        HStack(spacing: 16) {
-            // Animated ring indicator
-            ZStack {
-                Circle()
-                    .fill(granted ? Color.green.opacity(0.12) : Color.orange.opacity(0.12))
-                    .frame(width: 46, height: 46)
-                    .scaleEffect(pulse ? 1.15 : 1.0)
-                    .animation(
-                        granted
-                            ? .easeInOut(duration: 1.8).repeatForever(autoreverses: true)
-                            : .default,
-                        value: pulse)
-                Circle()
-                    .strokeBorder(granted ? Color.green.opacity(0.4) : Color.orange.opacity(0.4), lineWidth: 1.5)
-                    .frame(width: 46, height: 46)
-                Image(systemName: granted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(granted ? .green : .orange)
-            }
-            .onAppear { pulse = granted }
-            .onChange(of: granted) { pulse = $0 }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(granted ? "Accessibility Granted" : "Accessibility Required")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(granted ? Color.primary : Color.orange)
-                Text(granted
-                     ? "Glide has the permissions it needs."
-                     : "Open System Settings to grant access.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            if !granted {
-                Button("Open Settings…") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.orange)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
 
 // ─────────────────────────────────────────────
 // MARK: - Engine Status Card
@@ -1256,18 +1194,6 @@ struct GeneralFormView: View {
 
     var body: some View {
         Form {
-            // ── Accessibility ──
-            Section {
-                AccessibilityStatusCard(granted: store.accessibilityGranted)
-            } header: {
-                HStack(spacing: 6) {
-                    Image(systemName: "lock.shield")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.orange)
-                    Text("Accessibility")
-                }
-            }
-
             // ── Startup ──
             Section("Startup") {
                 Toggle("Launch at Login", isOn: Binding(
