@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger workflow on tags starting with 'v' (e.g., v1.0.0)
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Enable Execution for Build Script
+        run: chmod +x build.sh
+        
+      - name: Build Glide App
+        run: ./build.sh
+        
+      - name: Compress App Bundle
+        run: |
+          cd build
+          # -y preserves symlinks which are vital for macOS app bundles
+          zip -yr Glide.app.zip Glide.app
+          
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/Glide.app.zip
+          name: Glide ${{ github.ref_name }}
+          generate_release_notes: true
