@@ -1,20 +1,10 @@
-<p align="center">
-  <img src="assets/hero.png" alt="Glide" width="620"/>
-</p>
+![Glide](assets/hero.png)
 
-<br>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/macOS-13%2B-007AFF?style=flat-square&logo=apple&logoColor=white"/>
-  &nbsp;
-  <img src="https://img.shields.io/badge/Swift-6.3-F05138?style=flat-square&logo=swift&logoColor=white"/>
-  &nbsp;
-  <img src="https://img.shields.io/badge/arch-Universal%20Binary-34C759?style=flat-square"/>
-  &nbsp;
-  <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square"/>
-</p>
-
-<br>
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-007AFF?style=flat-square&logo=apple&logoColor=white)](https://github.com/Vatsal057/Glide/releases/latest)
+[![Swift 6.3](https://img.shields.io/badge/Swift-6.3-F05138?style=flat-square&logo=swift&logoColor=white)](https://swift.org)
+[![arch: Universal Binary](https://img.shields.io/badge/arch-Universal%20Binary-34C759?style=flat-square)](https://github.com/Vatsal057/Glide/releases/latest)
+[![Release](https://img.shields.io/github/v/release/Vatsal057/Glide?style=flat-square&label=release&color=0A84FF)](https://github.com/Vatsal057/Glide/releases/latest)
+[![license: MIT](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
 
 ---
 
@@ -24,10 +14,21 @@ The system gives you four fixed gestures you can't change. Third-party apps eith
 
 **Glide fixes this.** It's a free, open-source macOS utility that reads raw trackpad input and maps every combination of finger count, direction, and *speed* to whatever action you want — snapping windows, switching apps, locking your screen, taking screenshots, or anything else macOS can do. It lives in your menu bar, uses no CPU when idle, and gets out of your way.
 
-
 ---
 
-<br>
+## Download
+
+**[⬇ Download Glide v1.0.0](https://github.com/Vatsal057/Glide/releases/latest)** — Universal Binary (Apple Silicon + Intel)
+
+1. Download `Glide.app.zip` from the release page and unzip it.
+2. Move `Glide.app` to `/Applications/`.
+3. Launch it and grant the Accessibility permission when macOS asks.
+
+That's it. Your trackpad is already smarter.
+
+> **Or build from source** — see [Getting Started](#getting-started) below.
+
+---
 
 ## Getting Started
 
@@ -38,7 +39,7 @@ bash build.sh
 open build/Glide.app
 ```
 
-Grant the Accessibility permission when macOS asks (Glide needs it to move windows and simulate keys), and you're done. Your trackpad is already smarter.
+Grant the Accessibility permission when macOS asks (Glide needs it to move windows and simulate keys), and you're done.
 
 **Want it in `/Applications` and at login?**
 
@@ -51,6 +52,7 @@ Then open **Preferences → General** and flip on **Launch at Login**. That's th
 ---
 
 <br>
+
 
 ## What Glide Can Do
 
