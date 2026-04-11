@@ -230,7 +230,7 @@ final class PreferencesStore: ObservableObject {
     }
 
     private func nextAvailableRule() -> GestureRule? {
-        for fingers in 2...5 {
+        for fingers in 3...5 {
             for direction in GestureDirection.allCases {
                 let speeds: [GestureSpeed] = direction == .click ? [.normal] : GestureSpeed.allCases
                 for speed in speeds {
@@ -476,7 +476,6 @@ struct GestureListView: View {
 
     private func fingerIcon(_ n: Int) -> String {
         switch n {
-        case 2:  return "hand.point.up.braille"
         case 3:  return "hand.raised"
         case 4:  return "hand.raised.fingers.spread"
         case 5:  return "hand.wave"
@@ -548,7 +547,6 @@ struct RuleRowView: View {
 
 private func badgeColor(_ fingers: Int) -> Color {
     switch fingers {
-    case 2:  return .blue
     case 3:  return .purple
     case 4:  return .orange
     default: return .pink
@@ -577,7 +575,7 @@ struct RuleDetailView: View {
         Form {
             Section("Gesture") {
                 Picker("Fingers", selection: $rule.fingers) {
-                    ForEach(2...5, id: \.self) { n in Text("\(n) Fingers").tag(n) }
+                    ForEach(3...5, id: \.self) { n in Text("\(n) Fingers").tag(n) }
                 }
                 Picker("Direction", selection: $rule.direction) {
                     ForEach(GestureDirection.allCases, id: \.self) { d in

@@ -566,7 +566,7 @@ final class GestureEngine {
     }
 
     private func handleExternalInteraction() {
-        guard glideActiveTouches < 2 else { return }
+        guard glideActiveTouches < 3 else { return }
         if case .fired = phase { return }
         if case .switchingApps = phase { return }
         clearReciprocalToken()
@@ -583,7 +583,7 @@ final class GestureEngine {
         currentFingerCount = n
 
         // ── Fingers lifted: reset session ──
-        if n < 2 {
+        if n < 3 {
             glideClickFingerCount = 0
             finishIfNeeded()
             updateObservableState()
@@ -1366,15 +1366,11 @@ let glideMTCallback: MTContactCallback = { _, data, count, _, _ in
     let cy = sumY / Float(n)
 
     // ── Frame deduplication for low-finger counts ──
-    // For count < 3, the engine does minimal work (early returns or no-ops).
-    // Skip the main-queue dispatch when nothing meaningful changed.
-    // For count >= 3, always dispatch — the engine needs every frame for
-    // candidate evidence, swipe tracking, and app-switcher.
+    // For count < 3, the engine ONLY cares about transitions (finger down / up).
+    // Dispatching centroid movement for 1 or 2 fingers floods the main thread and causes severe drag/scroll lag.
+    // For count >= 3, we track movement because 3+ finger gestures and swipes need live coordinates.
     if validCount < 3 {
-        let countChanged = validCount != glideLastDispatchedCount
-        let centroidMoved = abs(cx - glideLastDispatchedCx) > 0.001
-                         || abs(cy - glideLastDispatchedCy) > 0.001
-        if !countChanged && !centroidMoved {
+        if validCount == glideLastDispatchedCount {
             return 0
         }
     }

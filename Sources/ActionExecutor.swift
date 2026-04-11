@@ -436,27 +436,52 @@ final class ActionExecutor {
         }
     }
 
+    /// The app that was frontmost before minimize-all, so restore can re-focus it.
+    private var frontmostBeforeMinimize: NSRunningApplication?
+
     private func minimizeAllApps() {
         let myPID = ProcessInfo.processInfo.processIdentifier
+
+        // Remember which app was active so restore can bring it back
+        frontmostBeforeMinimize = NSWorkspace.shared.frontmostApplication
+
         let apps = NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular && $0.processIdentifier != myPID
         }
 
-        var minimizedNow: [AXUIElement] = []
+        // Collect all candidate windows first, then minimize.
+        // We minimize the frontmost app's windows LAST so the visual
+        // "cascade away" animation looks natural (back-to-front order).
+        let frontPID = frontmostBeforeMinimize?.processIdentifier ?? 0
+        var backWindows:  [AXUIElement] = []
+        var frontWindows: [AXUIElement] = []
+
         for app in apps {
+            let isFront = app.processIdentifier == frontPID
             for window in windows(for: app.processIdentifier) {
+                // Skip already-minimized windows
                 guard axBool(window, attribute: kAXMinimizedAttribute as CFString) == false else { continue }
-                if setAXBool(window, attribute: kAXMinimizedAttribute as CFString, value: true) {
-                    minimizedNow.append(window)
+                // Skip windows with no reasonable size (e.g. hidden helper windows)
+                if let frame = axFrame(window), frame.width < 1 || frame.height < 1 { continue }
+                if isFront {
+                    frontWindows.append(window)
+                } else {
+                    backWindows.append(window)
                 }
+            }
+        }
+
+        // Minimize back windows first, then front windows
+        var minimizedNow: [AXUIElement] = []
+        for window in backWindows + frontWindows {
+            if setAXBool(window, attribute: kAXMinimizedAttribute as CFString, value: true) {
+                minimizedNow.append(window)
             }
         }
 
         lastMinimizedWindows = minimizedNow
 
-        // All windows are now minimized — activate Finder so no user app is frontmost.
-        // NSApp.deactivate() only affects Glide itself; we need to explicitly
-        // hand focus to Finder, which is macOS's "desktop / no app" state.
+        // Activate Finder so the desktop is shown cleanly
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             if let finder = NSWorkspace.shared.runningApplications.first(where: {
                 $0.bundleIdentifier == "com.apple.finder"
@@ -469,10 +494,29 @@ final class ActionExecutor {
     private func restoreMinimizedApps() {
         pruneStaleMinimizedWindows()
         guard !lastMinimizedWindows.isEmpty else { return }
-        for window in lastMinimizedWindows {
-            _ = setAXBool(window, attribute: kAXMinimizedAttribute as CFString, value: false)
+
+        // Restore in reverse order (last minimized = frontmost app's windows first)
+        // and stagger slightly so WindowServer isn't overwhelmed
+        let windowsToRestore = lastMinimizedWindows.reversed()
+        let savedFrontApp = frontmostBeforeMinimize
+
+        for (index, window) in windowsToRestore.enumerated() {
+            let delay = Double(index) * 0.03  // 30ms stagger per window
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                _ = self.setAXBool(window, attribute: kAXMinimizedAttribute as CFString, value: false)
+            }
         }
+
+        // Re-focus the app that was active before minimize-all
+        let totalDelay = Double(lastMinimizedWindows.count) * 0.03 + 0.1
+        DispatchQueue.main.asyncAfter(deadline: .now() + totalDelay) {
+            if let app = savedFrontApp, !app.isTerminated {
+                app.activate(options: .activateIgnoringOtherApps)
+            }
+        }
+
         lastMinimizedWindows.removeAll()
+        frontmostBeforeMinimize = nil
     }
 
     private func maximize(windowAtCursor: Bool) {
