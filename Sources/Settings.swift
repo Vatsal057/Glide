@@ -34,21 +34,16 @@ enum WindowTargetingMode: String, Codable, CaseIterable {
 }
 
 enum GestureAction: String, Codable, CaseIterable {
-    // App lifecycle
     case quitApp          = "Quit App Under Cursor"
     case forceQuitApp     = "Force Quit App Under Cursor"
     case quitFrontmost    = "Quit Frontmost App"
     case hideApp          = "Hide App Under Cursor"
     case hideOthers       = "Hide Other Apps"
     case openApp          = "Open App…"
-
-    // App switching
     case appSwitcherNext  = "Next App (App Switcher)"
     case appSwitcherPrev  = "Previous App (App Switcher)"
     case switchAppNext    = "Activate Next App"
     case switchAppPrev    = "Activate Previous App"
-
-    // Window state
     case minimizeWindow   = "Minimize Window"
     case minimizeAllApps  = "Minimize All Apps"
     case restoreMinimizedApps = "Restore Minimized Apps"
@@ -59,8 +54,6 @@ enum GestureAction: String, Codable, CaseIterable {
     case exitFullscreen   = "Exit Fullscreen"
     case toggleFullscreen = "Toggle Fullscreen"
     case cycleWindows     = "Cycle Windows (⌘`)"
-
-    // Window snapping
     case snapLeft         = "Snap: Left Half"
     case snapRight        = "Snap: Right Half"
     case snapTopLeft      = "Snap: Top-Left"
@@ -69,8 +62,6 @@ enum GestureAction: String, Codable, CaseIterable {
     case snapBottomRight  = "Snap: Bottom-Right"
     case centerWindow     = "Center Window"
     case moveNextDisplay  = "Move to Next Display"
-
-    // macOS system
     case missionControl   = "Mission Control"
     case appExpose        = "App Exposé"
     case showDesktop      = "Show Desktop"
@@ -81,22 +72,16 @@ enum GestureAction: String, Codable, CaseIterable {
     case sleep            = "Sleep"
     case screenshotArea   = "Screenshot (Area)"
     case screenshotFull   = "Screenshot (Full)"
-
-    // Meta
     case doNothing        = "Do Nothing"
 
-    /// Returns the natural inverse action, or nil if this action is not reversible.
     var inverseAction: GestureAction? {
         switch self {
-        // Toggle-style: same action reverses itself
         case .missionControl:    return .missionControl
         case .appExpose:         return .appExpose
         case .showDesktop:       return .showDesktop
         case .launchpad:         return .launchpad
         case .toggleFullscreen:  return .toggleFullscreen
         case .notifCenter:       return .notifCenter
-
-        // State pairs
         case .enterFullscreen:       return .exitFullscreen
         case .exitFullscreen:        return .enterFullscreen
         case .maximizeWindow:        return .restoreWindow
@@ -104,33 +89,16 @@ enum GestureAction: String, Codable, CaseIterable {
         case .minimizeWindow:        return .restoreWindow
         case .minimizeAllApps:       return .restoreMinimizedApps
         case .restoreMinimizedApps:  return .minimizeAllApps
-
-        // Snap → restore
-        case .snapLeft:          return .restoreWindow
-        case .snapRight:         return .restoreWindow
-        case .snapTopLeft:       return .restoreWindow
-        case .snapTopRight:      return .restoreWindow
-        case .snapBottomLeft:    return .restoreWindow
-        case .snapBottomRight:   return .restoreWindow
-        case .centerWindow:      return .restoreWindow
-
-        // App switching
+        case .snapLeft, .snapRight,
+             .snapTopLeft, .snapTopRight,
+             .snapBottomLeft, .snapBottomRight,
+             .centerWindow:      return .restoreWindow
         case .switchAppNext:     return .switchAppPrev
         case .switchAppPrev:     return .switchAppNext
-
-        // Destructive / one-shot — no inverse
-        case .quitApp, .forceQuitApp, .quitFrontmost,
-             .closeWindow, .hideApp, .hideOthers,
-             .openApp, .cycleWindows, .moveNextDisplay,
-             .spotlight, .lockScreen, .sleep,
-             .screenshotArea, .screenshotFull,
-             .appSwitcherNext, .appSwitcherPrev,
-             .doNothing:
-            return nil
+        default:                 return nil
         }
     }
 
-    /// Whether this action has a natural inverse and supports reciprocal gestures.
     var supportsReciprocal: Bool { inverseAction != nil }
 }
 
@@ -144,42 +112,40 @@ struct GestureRule: Codable, Identifiable, Equatable {
     var direction: GestureDirection = .click
     var speed:     GestureSpeed     = .normal
     var action:    GestureAction    = .doNothing
-    var appPath:   String?          // for openApp
-    var appFilter: String?          // bundle-ID; nil = any app
-    var reciprocalEnabled: Bool     = true  // allow reverse gesture to undo this action
+    var appPath:   String?
+    var appFilter: String?
+    var reciprocalEnabled: Bool     = true
 
     init(fingers: Int, direction: GestureDirection, speed: GestureSpeed = .normal,
          action: GestureAction, appPath: String? = nil, appFilter: String? = nil,
          reciprocalEnabled: Bool = true) {
-        self.fingers   = fingers
-        self.direction = direction
-        self.speed     = speed
-        self.action    = action
-        self.appPath   = appPath
-        self.appFilter = appFilter
+        self.fingers           = fingers
+        self.direction         = direction
+        self.speed             = speed
+        self.action            = action
+        self.appPath           = appPath
+        self.appFilter         = appFilter
         self.reciprocalEnabled = reciprocalEnabled
     }
 
-    // Make Codable robust against future enum cases
+    // Robust decoding — tolerates unknown future enum cases
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id        = (try? c.decodeIfPresent(UUID.self,             forKey: .id))   ?? UUID()
-        fingers   = (try? c.decode(Int.self,                       forKey: .fingers)) ?? 3
-        direction = (try? c.decode(GestureDirection.self,          forKey: .direction)) ?? .click
-        speed     = (try? c.decodeIfPresent(GestureSpeed.self,     forKey: .speed)) ?? .normal
-        action    = (try? c.decode(GestureAction.self,             forKey: .action)) ?? .doNothing
-        appPath   = try? c.decodeIfPresent(String.self,            forKey: .appPath)
-        appFilter = try? c.decodeIfPresent(String.self,            forKey: .appFilter)
-        reciprocalEnabled = (try? c.decodeIfPresent(Bool.self,     forKey: .reciprocalEnabled)) ?? true
+        id        = (try? c.decodeIfPresent(UUID.self,          forKey: .id))        ?? UUID()
+        fingers   = (try? c.decode(Int.self,                    forKey: .fingers))   ?? 3
+        direction = (try? c.decode(GestureDirection.self,       forKey: .direction)) ?? .click
+        speed     = (try? c.decodeIfPresent(GestureSpeed.self,  forKey: .speed))     ?? .normal
+        action    = (try? c.decode(GestureAction.self,          forKey: .action))    ?? .doNothing
+        appPath   = try? c.decodeIfPresent(String.self,         forKey: .appPath)
+        appFilter = try? c.decodeIfPresent(String.self,         forKey: .appFilter)
+        reciprocalEnabled = (try? c.decodeIfPresent(Bool.self,  forKey: .reciprocalEnabled)) ?? true
     }
 }
 
 // ─────────────────────────────────────────────
-// MARK: - EdgeMargin
+// MARK: - EdgeMargin / GestureTuning
 // ─────────────────────────────────────────────
 
-/// Per-side dead zones expressed as fractions of the normalised trackpad space (0.0–1.0).
-/// Gestures whose starting centroid falls within these margins are silently ignored.
 struct EdgeMargin: Codable, Equatable {
     var left:   Float = 0.05
     var right:  Float = 0.05
@@ -190,315 +156,152 @@ struct EdgeMargin: Codable, Equatable {
 }
 
 struct GestureTuning: Codable, Equatable {
-    /// How far (normalised coords) a finger must travel before a swipe locks in.
-    var initialThreshold: Float = 0.018
-
-    /// How far the centroid must move per app-switcher step.
-    var appSwitcherStepThreshold: Float = 0.003
-
-    /// Minimum time between app-switcher steps.
-    var appSwitcherDebounce: TimeInterval = 0.10
-
-    /// Average centroid delta/frame above which a gesture is classified as "Fast".
-    /// Higher = harder to trigger fast gestures. InputActions uses ~20 px/event for swipes;
-    /// our normalised coords are ~0.0–1.0, so 0.008 is a sensible default.
-    var fastVelocityThreshold: Float = 0.008
-
-    /// Average centroid delta/frame below which a gesture is classified as "Slow".
-    /// Lower = only very deliberate crawling gestures register as slow.
-    var slowVelocityThreshold: Float = 0.003
-
-    /// Number of frames to average when computing gesture velocity.
-    /// Matches InputActions' `inputEventsToSample` (default 3).
-    var speedSampleCount: Int = 3
-
-    // ── Pinch veto / candidate phase ──
-
-    /// Number of frames to collect before locking a session as swipe.
-    /// Minimum enforced: 3 (to let gestures reveal themselves).
-    var candidateFrames: Int = 3
-
-    /// Cumulative spread change across all candidate frames above which the session is vetoed.
-    var pinchSpreadThreshold: Float = 0.015
-
-    /// Per-frame spread delta above which the session is vetoed immediately.
-    var pinchFrameSpreadThreshold: Float = 0.008
-
-    /// Minimum directional coherence (0–1) to accept as swipe. Lower = more lenient.
-    var swipeCoherenceThreshold: Float = 0.30
-
-    /// Angle tolerance in degrees for each cardinal direction (InputActions: DEFAULT_SWIPE_ANGLE_TOLERANGE = 20).
-    /// Each cardinal direction spans ±angleTolerance from its axis.
-    /// 45° = full quadrants (no dead zones); lower = narrower wedges with diagonal dead zones.
-    var swipeAngleTolerance: Float = 45
-
-    // ── Edge margin (dead zone near trackpad bezel) ──
-    var edgeMarginEnabled: Bool = true
-    var edgeMargin: EdgeMargin = EdgeMargin()
+    var initialThreshold:           Float        = 0.018
+    var appSwitcherStepThreshold:   Float        = 0.003
+    var appSwitcherDebounce:        TimeInterval = 0.10
+    var fastVelocityThreshold:      Float        = 0.008
+    var slowVelocityThreshold:      Float        = 0.003
+    var speedSampleCount:           Int          = 3
+    var candidateFrames:            Int          = 3
+    var pinchSpreadThreshold:       Float        = 0.015
+    var pinchFrameSpreadThreshold:  Float        = 0.008
+    var swipeCoherenceThreshold:    Float        = 0.30
+    var swipeAngleTolerance:        Float        = 45
+    var edgeMarginEnabled:          Bool         = true
+    var edgeMargin:                 EdgeMargin   = EdgeMargin()
 
     init() {}
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        initialThreshold         = try c.decodeIfPresent(Float.self,         forKey: .initialThreshold)         ?? 0.018
-        appSwitcherStepThreshold = try c.decodeIfPresent(Float.self,         forKey: .appSwitcherStepThreshold) ?? 0.003
-        appSwitcherDebounce      = try c.decodeIfPresent(TimeInterval.self,  forKey: .appSwitcherDebounce)      ?? 0.10
-        // Velocity-based speed params (replacing legacy time-based ones)
-        fastVelocityThreshold    = try c.decodeIfPresent(Float.self,         forKey: .fastVelocityThreshold)    ?? 0.008
-        slowVelocityThreshold    = try c.decodeIfPresent(Float.self,         forKey: .slowVelocityThreshold)    ?? 0.003
-        speedSampleCount         = try c.decodeIfPresent(Int.self,           forKey: .speedSampleCount)         ?? 3
-        candidateFrames          = try c.decodeIfPresent(Int.self,           forKey: .candidateFrames)          ?? 3
-        pinchSpreadThreshold     = try c.decodeIfPresent(Float.self,         forKey: .pinchSpreadThreshold)     ?? 0.015
+        initialThreshold          = try c.decodeIfPresent(Float.self,        forKey: .initialThreshold)          ?? 0.018
+        appSwitcherStepThreshold  = try c.decodeIfPresent(Float.self,        forKey: .appSwitcherStepThreshold)  ?? 0.003
+        appSwitcherDebounce       = try c.decodeIfPresent(TimeInterval.self, forKey: .appSwitcherDebounce)       ?? 0.10
+        fastVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .fastVelocityThreshold)     ?? 0.008
+        slowVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .slowVelocityThreshold)     ?? 0.003
+        speedSampleCount          = try c.decodeIfPresent(Int.self,          forKey: .speedSampleCount)          ?? 3
+        candidateFrames           = try c.decodeIfPresent(Int.self,          forKey: .candidateFrames)           ?? 3
+        pinchSpreadThreshold      = try c.decodeIfPresent(Float.self,        forKey: .pinchSpreadThreshold)      ?? 0.015
         pinchFrameSpreadThreshold = try c.decodeIfPresent(Float.self,        forKey: .pinchFrameSpreadThreshold) ?? 0.008
-        swipeCoherenceThreshold  = try c.decodeIfPresent(Float.self,         forKey: .swipeCoherenceThreshold)  ?? 0.3
-        swipeAngleTolerance      = try c.decodeIfPresent(Float.self,         forKey: .swipeAngleTolerance)      ?? 45
-        edgeMarginEnabled        = try c.decodeIfPresent(Bool.self,          forKey: .edgeMarginEnabled)        ?? true
-        edgeMargin               = try c.decodeIfPresent(EdgeMargin.self,    forKey: .edgeMargin)               ?? EdgeMargin()
+        swipeCoherenceThreshold   = try c.decodeIfPresent(Float.self,        forKey: .swipeCoherenceThreshold)   ?? 0.30
+        swipeAngleTolerance       = try c.decodeIfPresent(Float.self,        forKey: .swipeAngleTolerance)       ?? 45
+        edgeMarginEnabled         = try c.decodeIfPresent(Bool.self,         forKey: .edgeMarginEnabled)         ?? true
+        edgeMargin                = try c.decodeIfPresent(EdgeMargin.self,   forKey: .edgeMargin)                ?? EdgeMargin()
     }
 }
 
 // ─────────────────────────────────────────────
 // MARK: - Settings
 // ─────────────────────────────────────────────
+//
+// Pure in-memory store. All persistence is handled by GlideConfigStore (YAML).
+// Public setters trigger an immediate YAML save. Use apply(_:) during config
+// load to batch-set all values without triggering per-field saves.
 
 final class Settings {
     static let shared = Settings()
-    private init() {}
 
-    private struct RuleIdentity: Hashable {
-        let fingers: Int
-        let direction: GestureDirection
-        let speed: GestureSpeed
-        let appFilter: String?
+    private init() {
+        _rules = Self.canonicalizeRules(Self.defaultRules)
     }
 
-    private let kRules = "gestureRulesV3"
-    private let kRulesVersion = "gestureRulesSchemaVersion"
-    private let kTuning = "gestureTuningV2"
-    private let kWindowTargetingMode = "windowTargetingModeV1"
-    private let kDebugLogging = "debugLoggingV1"
-    private let kHapticFeedback = "hapticFeedbackV1"
-    // Legacy keys — for one-time migration only
-    private let kLegacyTuning = "gestureTuningV1"
-    private let kLegacyInitialThreshold = "adv_swipeThreshold"
-    private let kLegacyAppSwitcherStepThreshold = "adv_stepThreshold"
-    private let currentRulesVersion = 6
+    // MARK: Backing stores
 
-    // Simple in-memory cache
-    private var _rules: [GestureRule]?
-    private var _tuning: GestureTuning?
-    private var _windowTargetingMode: WindowTargetingMode?
-    private var _debugLogging: Bool?
-    private var _hapticFeedback: Bool?
+    private var _rules:           [GestureRule]
+    private var _tuning:          GestureTuning       = GestureTuning()
+    private var _windowTargeting: WindowTargetingMode = .focusedThenCursor
+    private var _hapticFeedback:  Bool                = true
+    private var _debugLogging:    Bool                = false
+    private var _launchAtLogin:   Bool                = false
+
+    // MARK: Public interface
 
     var rules: [GestureRule] {
-        get {
-            if let cached = _rules { return cached }
-            if let data   = UserDefaults.standard.data(forKey: kRules),
-               let decoded = try? JSONDecoder().decode([GestureRule].self, from: data) {
-                let migrated = canonicalizeRules(migrateRulesIfNeeded(decoded))
-                _rules = migrated        // cache BEFORE persistRules to prevent re-entrancy
-                persistRules(migrated)
-                return migrated
-            }
-            let defaults = canonicalizeRules(Self.defaultRules)
-            _rules = defaults            // cache BEFORE persistRules
-            persistRules(defaults)
-            return defaults
-        }
-        set {
-            let normalized = canonicalizeRules(newValue)
-            _rules = normalized
-            persistRules(normalized)
-        }
-    }
-
-    func invalidateCache() {
-        _rules = nil
-        _tuning = nil
-        _windowTargetingMode = nil
-        _debugLogging = nil
-        _hapticFeedback = nil
-    }
-
-    /// Wipes all persisted UserDefaults keys so YAML can become
-    /// the single source of truth on the next write.
-    func clearUserDefaults() {
-        UserDefaults.standard.removeObject(forKey: kRules)
-        UserDefaults.standard.removeObject(forKey: kRulesVersion)
-        UserDefaults.standard.removeObject(forKey: kTuning)
-        UserDefaults.standard.removeObject(forKey: kWindowTargetingMode)
-        UserDefaults.standard.removeObject(forKey: kDebugLogging)
-        UserDefaults.standard.removeObject(forKey: kHapticFeedback)
+        get { _rules }
+        set { _rules = Self.canonicalizeRules(newValue); GlideConfigStore.shared.save() }
     }
 
     var tuning: GestureTuning {
-        get {
-            if let cached = _tuning { return cached }
-            if let data = UserDefaults.standard.data(forKey: kTuning),
-               let decoded = try? JSONDecoder().decode(GestureTuning.self, from: data) {
-                _tuning = decoded
-                return decoded
-            }
-            // Try migrating from legacy V1 tuning (velocity-based) — just use fresh defaults
-            // since velocity values don't translate meaningfully to time values.
-            let defaults = migratedLegacyTuning() ?? GestureTuning()
-            _tuning = defaults
-            if let data = try? JSONEncoder().encode(defaults) {
-                UserDefaults.standard.set(data, forKey: kTuning)
-            }
-            return defaults
-        }
-        set {
-            let normalized = normalizedTuning(newValue)
-            _tuning = normalized
-            if let data = try? JSONEncoder().encode(normalized) {
-                UserDefaults.standard.set(data, forKey: kTuning)
-            }
-            GlideConfigStore.shared.save()
-        }
-    }
-
-    func resetTuning() {
-        tuning = GestureTuning()
+        get { _tuning }
+        set { _tuning = Self.normalizedTuning(newValue); GlideConfigStore.shared.save() }
     }
 
     var windowTargetingMode: WindowTargetingMode {
-        get {
-            if let cached = _windowTargetingMode { return cached }
-            if let raw = UserDefaults.standard.string(forKey: kWindowTargetingMode),
-               let decoded = WindowTargetingMode(rawValue: raw) {
-                _windowTargetingMode = decoded
-                return decoded
-            }
-            let value: WindowTargetingMode = .focusedThenCursor
-            _windowTargetingMode = value
-            return value
-        }
-        set {
-            _windowTargetingMode = newValue
-            UserDefaults.standard.set(newValue.rawValue, forKey: kWindowTargetingMode)
-            GlideConfigStore.shared.save()
-        }
-    }
-
-    var debugLoggingEnabled: Bool {
-        get {
-            if let cached = _debugLogging { return cached }
-            if UserDefaults.standard.object(forKey: kDebugLogging) != nil {
-                let value = UserDefaults.standard.bool(forKey: kDebugLogging)
-                _debugLogging = value
-                return value
-            }
-            _debugLogging = false
-            return false
-        }
-        set {
-            _debugLogging = newValue
-            UserDefaults.standard.set(newValue, forKey: kDebugLogging)
-            GlideConfigStore.shared.save()
-        }
+        get { _windowTargeting }
+        set { _windowTargeting = newValue; GlideConfigStore.shared.save() }
     }
 
     var hapticFeedbackEnabled: Bool {
-        get {
-            if let cached = _hapticFeedback { return cached }
-            if UserDefaults.standard.object(forKey: kHapticFeedback) != nil {
-                let value = UserDefaults.standard.bool(forKey: kHapticFeedback)
-                _hapticFeedback = value
-                return value
-            }
-            _hapticFeedback = true   // on by default
-            return true
-        }
-        set {
-            _hapticFeedback = newValue
-            UserDefaults.standard.set(newValue, forKey: kHapticFeedback)
-            GlideConfigStore.shared.save()
-        }
+        get { _hapticFeedback }
+        set { _hapticFeedback = newValue; GlideConfigStore.shared.save() }
     }
 
-    private func migrateRulesIfNeeded(_ rules: [GestureRule]) -> [GestureRule] {
-        let storedVersion = UserDefaults.standard.integer(forKey: kRulesVersion)
-        guard storedVersion < currentRulesVersion else {
-            return rules.map(normalizedRule)
-        }
-
-        let migrated = rules.map { rule in
-            var rule = normalizedRule(rule)
-
-            if rule.fingers == 3, rule.direction == .swipeDown, rule.action == .minimizeWindow {
-                rule.action = .minimizeAllApps
-            }
-
-            if rule.fingers == 5, rule.direction == .swipeUp, rule.action == .toggleFullscreen {
-                rule.action = .enterFullscreen
-            }
-
-            if rule.fingers == 5, rule.direction == .swipeDown, rule.action == .showDesktop {
-                rule.action = .exitFullscreen
-            }
-
-            return rule
-        }
-        return migrated
+    var debugLoggingEnabled: Bool {
+        get { _debugLogging }
+        set { _debugLogging = newValue; GlideConfigStore.shared.save() }
     }
 
-    private func normalizedRule(_ rule: GestureRule) -> GestureRule {
-        var normalized = rule
-        normalized.fingers = min(max(normalized.fingers, 2), 5)
-        normalized.speed = normalized.speed == .any ? .normal : normalized.speed
-        if normalized.direction == .click {
-            normalized.speed = .normal
-        }
-        return normalized
+    var launchAtLoginEnabled: Bool {
+        get { _launchAtLogin }
+        set { _launchAtLogin = newValue; GlideConfigStore.shared.save() }
     }
 
-    private func canonicalizeRules(_ rules: [GestureRule]) -> [GestureRule] {
+    func resetTuning() { tuning = GestureTuning() }
+
+    // MARK: Batch load — bypasses per-field saves (called by GlideConfigStore.load)
+
+    func apply(_ config: GlideConfig) {
+        _rules           = Self.canonicalizeRules(config.toRules())
+        _tuning          = Self.normalizedTuning(config.toTuning())
+        _windowTargeting = WindowTargetingMode(rawValue: config.preferences.windowTargeting) ?? .focusedThenCursor
+        _hapticFeedback  = config.preferences.hapticFeedback
+        _debugLogging    = config.preferences.debugLogging
+        _launchAtLogin   = config.preferences.launchAtLogin
+    }
+
+    // MARK: Rule deduplication
+
+    private struct RuleIdentity: Hashable {
+        let fingers: Int; let direction: GestureDirection
+        let speed: GestureSpeed; let appFilter: String?
+    }
+
+    private static func canonicalizeRules(_ rules: [GestureRule]) -> [GestureRule] {
         var seen: Set<RuleIdentity> = []
-        var dedupedReversed: [GestureRule] = []
-
+        var result: [GestureRule] = []
         for rule in rules.reversed() {
-            let normalized = normalizedRule(rule)
-            let identity = RuleIdentity(
-                fingers: normalized.fingers,
-                direction: normalized.direction,
-                speed: normalized.speed,
-                appFilter: normalized.appFilter
-            )
-            guard seen.insert(identity).inserted else { continue }
-            dedupedReversed.append(normalized)
+            let r = normalizedRule(rule)
+            let id = RuleIdentity(fingers: r.fingers, direction: r.direction,
+                                  speed: r.speed, appFilter: r.appFilter)
+            if seen.insert(id).inserted { result.append(r) }
         }
-
-        return dedupedReversed.reversed()
+        return result.reversed()
     }
 
-    private func persistRules(_ rules: [GestureRule]) {
-        if let data = try? JSONEncoder().encode(rules) {
-            UserDefaults.standard.set(data, forKey: kRules)
-        }
-        UserDefaults.standard.set(currentRulesVersion, forKey: kRulesVersion)
-        GlideConfigStore.shared.save()
+    private static func normalizedRule(_ rule: GestureRule) -> GestureRule {
+        var r = rule
+        r.fingers = min(max(r.fingers, 2), 5)
+        r.speed   = (r.speed == .any || r.direction == .click) ? .normal : r.speed
+        return r
     }
 
-    private func normalizedTuning(_ tuning: GestureTuning) -> GestureTuning {
-        var n = tuning
-        n.initialThreshold = max(0.005, n.initialThreshold)
+    // Single authoritative tuning normalizer — also called by PreferencesStore
+    static func normalizedTuning(_ t: GestureTuning) -> GestureTuning {
+        var n = t
+        n.initialThreshold         = max(0.005, n.initialThreshold)
         n.appSwitcherStepThreshold = max(0.001, n.appSwitcherStepThreshold)
-        n.appSwitcherDebounce = max(0.0, n.appSwitcherDebounce)
-        // Enforce non-overlapping bands: slowVelocityThreshold < fastVelocityThreshold
-        n.slowVelocityThreshold = max(0.001, min(n.slowVelocityThreshold, 0.020))
-        n.fastVelocityThreshold = max(n.slowVelocityThreshold + 0.001, max(0.003, min(n.fastVelocityThreshold, 0.030)))
-        n.speedSampleCount = max(2, min(n.speedSampleCount, 8))
-        // Pinch veto
-        n.candidateFrames = max(1, min(n.candidateFrames, 8))
-        n.pinchSpreadThreshold = max(0.002, n.pinchSpreadThreshold)
+        n.appSwitcherDebounce      = max(0.0,   n.appSwitcherDebounce)
+        n.slowVelocityThreshold    = max(0.001, min(n.slowVelocityThreshold, 0.020))
+        n.fastVelocityThreshold    = max(n.slowVelocityThreshold + 0.001,
+                                         max(0.003, min(n.fastVelocityThreshold, 0.030)))
+        n.speedSampleCount         = max(2, min(n.speedSampleCount, 8))
+        n.candidateFrames          = max(1, min(n.candidateFrames, 8))
+        n.pinchSpreadThreshold     = max(0.002, n.pinchSpreadThreshold)
         n.pinchFrameSpreadThreshold = max(0.001, n.pinchFrameSpreadThreshold)
-        n.swipeCoherenceThreshold = max(0.0, min(n.swipeCoherenceThreshold, 0.95))
-        // Direction detection
-        n.swipeAngleTolerance = max(20, min(n.swipeAngleTolerance, 45))
-        // Edge margin clamping
-        let clamp = { (v: Float) in max(EdgeMargin.range.lowerBound, min(v, EdgeMargin.range.upperBound)) }
+        n.swipeCoherenceThreshold  = max(0.0, min(n.swipeCoherenceThreshold, 0.95))
+        n.swipeAngleTolerance      = max(20, min(n.swipeAngleTolerance, 45))
+        let clamp = { (v: Float) in max(EdgeMargin.range.lowerBound,
+                                        min(v, EdgeMargin.range.upperBound)) }
         n.edgeMargin.left   = clamp(n.edgeMargin.left)
         n.edgeMargin.right  = clamp(n.edgeMargin.right)
         n.edgeMargin.top    = clamp(n.edgeMargin.top)
@@ -506,32 +309,9 @@ final class Settings {
         return n
     }
 
-    /// Migrate from legacy V1 tuning. Since old params were velocity-based and new
-    /// params are time-based, we only migrate the threshold values that didn't change
-    /// semantically. Speed params get fresh defaults.
-    private func migratedLegacyTuning() -> GestureTuning? {
-        let defaults = UserDefaults.standard
-        // Check for any legacy key
-        guard defaults.object(forKey: kLegacyTuning) != nil
-            || defaults.object(forKey: kLegacyInitialThreshold) != nil
-            || defaults.object(forKey: kLegacyAppSwitcherStepThreshold) != nil else {
-            return nil
-        }
+    // MARK: Defaults
 
-        var tuning = GestureTuning()
-
-        if defaults.object(forKey: kLegacyInitialThreshold) != nil {
-            tuning.initialThreshold = defaults.float(forKey: kLegacyInitialThreshold)
-        }
-        if defaults.object(forKey: kLegacyAppSwitcherStepThreshold) != nil {
-            tuning.appSwitcherStepThreshold = defaults.float(forKey: kLegacyAppSwitcherStepThreshold)
-        }
-        // Speed params: use fresh defaults (velocity → time doesn't map meaningfully)
-
-        return normalizedTuning(tuning)
-    }
-
-    static var defaultRules: [GestureRule] = [
+    static let defaultRules: [GestureRule] = [
         GestureRule(fingers: 3, direction: .click,      action: .quitApp),
         GestureRule(fingers: 3, direction: .swipeRight, action: .appSwitcherNext),
         GestureRule(fingers: 3, direction: .swipeLeft,  action: .appSwitcherPrev),
@@ -546,6 +326,10 @@ final class Settings {
         GestureRule(fingers: 5, direction: .click,      action: .lockScreen),
     ]
 }
+
+// ─────────────────────────────────────────────
+// MARK: - AppLogger
+// ─────────────────────────────────────────────
 
 enum AppLogger {
     static func debug(_ message: @autoclosure () -> String) {
