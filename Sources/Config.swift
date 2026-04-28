@@ -8,27 +8,13 @@ import Foundation
 /// Mirrors the config.yaml schema:
 ///
 ///   touchpad:
-///     speed:
-///       swipe_threshold: 0.018
-///     preferences:
-///       window_targeting: "Focused Window First"
-///       haptic_feedback:  true
-///       debug_logging:    false
-///     tuning:
-///       ...
+///     speed: { swipe_threshold, fast_velocity_threshold, ... }
+///     preferences: { window_targeting, haptic_feedback, ... }
+///     tuning: { ... }
 ///     gestures:
-///       - type: swipe
-///         direction: up
-///         fingers: 3
-///         speed: normal
-///         action: "Mission Control"
-///         app_filter: null
-///         app_path: null
-///         reciprocal: true
+///       - { type, direction, fingers, speed, action, app_filter, app_path, reciprocal }
 ///
 struct GlideConfig {
-
-    // ── Nested models ──
 
     struct Speed {
         var swipeThreshold: Float = 0.018
@@ -41,6 +27,7 @@ struct GlideConfig {
         var windowTargeting: String = "Focused Window First"
         var hapticFeedback: Bool = true
         var debugLogging: Bool = false
+        var launchAtLogin: Bool = false
     }
 
     struct Tuning {
@@ -64,8 +51,8 @@ struct GlideConfig {
         var fingers: Int
         var speed: String?          // "slow" | "normal" | "fast" — nil for click
         var action: String
-        var appFilter: String?      // bundle ID or null
-        var appPath: String?        // for openApp action
+        var appFilter: String?
+        var appPath: String?
         var reciprocal: Bool
     }
 
@@ -76,15 +63,143 @@ struct GlideConfig {
 }
 
 // ─────────────────────────────────────────────
+// MARK: - GlideConfig ↔ Settings bridge
+// ─────────────────────────────────────────────
+
+extension GlideConfig {
+
+    // ── Build a GlideConfig from current in-memory Settings ──
+
+    static func fromSettings() -> GlideConfig {
+        let s = Settings.shared
+        let t = s.tuning
+        var cfg = GlideConfig()
+
+        cfg.speed.swipeThreshold         = t.initialThreshold
+        cfg.speed.fastVelocityThreshold  = t.fastVelocityThreshold
+        cfg.speed.slowVelocityThreshold  = t.slowVelocityThreshold
+        cfg.speed.speedSampleCount       = t.speedSampleCount
+
+        cfg.preferences.windowTargeting  = s.windowTargetingMode.rawValue
+        cfg.preferences.hapticFeedback   = s.hapticFeedbackEnabled
+        cfg.preferences.debugLogging     = s.debugLoggingEnabled
+        cfg.preferences.launchAtLogin    = s.launchAtLoginEnabled
+
+        cfg.tuning.appSwitcherStepThreshold  = t.appSwitcherStepThreshold
+        cfg.tuning.appSwitcherDebounce       = t.appSwitcherDebounce
+        cfg.tuning.candidateFrames           = t.candidateFrames
+        cfg.tuning.pinchSpreadThreshold      = t.pinchSpreadThreshold
+        cfg.tuning.pinchFrameSpreadThreshold = t.pinchFrameSpreadThreshold
+        cfg.tuning.swipeCoherenceThreshold   = t.swipeCoherenceThreshold
+        cfg.tuning.swipeAngleTolerance       = t.swipeAngleTolerance
+        cfg.tuning.edgeMarginEnabled         = t.edgeMarginEnabled
+        cfg.tuning.edgeMarginLeft            = t.edgeMargin.left
+        cfg.tuning.edgeMarginRight           = t.edgeMargin.right
+        cfg.tuning.edgeMarginTop             = t.edgeMargin.top
+        cfg.tuning.edgeMarginBottom          = t.edgeMargin.bottom
+
+        cfg.gestures = s.rules.map { rule in
+            let isClick = rule.direction == .click
+            return GlideConfig.Gesture(
+                type:       isClick ? "click" : "swipe",
+                direction:  isClick ? nil     : yamlDirection(rule.direction),
+                fingers:    rule.fingers,
+                speed:      isClick ? nil     : rule.speed.rawValue.lowercased(),
+                action:     rule.action.rawValue,
+                appFilter:  rule.appFilter,
+                appPath:    rule.appPath,
+                reciprocal: rule.reciprocalEnabled
+            )
+        }
+        return cfg
+    }
+
+    // ── Convert to Settings-domain types (used by Settings.apply(_:)) ──
+
+    func toTuning() -> GestureTuning {
+        var t = GestureTuning()
+        t.initialThreshold          = speed.swipeThreshold
+        t.fastVelocityThreshold     = speed.fastVelocityThreshold
+        t.slowVelocityThreshold     = speed.slowVelocityThreshold
+        t.speedSampleCount          = speed.speedSampleCount
+        t.appSwitcherStepThreshold  = tuning.appSwitcherStepThreshold
+        t.appSwitcherDebounce       = tuning.appSwitcherDebounce
+        t.candidateFrames           = tuning.candidateFrames
+        t.pinchSpreadThreshold      = tuning.pinchSpreadThreshold
+        t.pinchFrameSpreadThreshold = tuning.pinchFrameSpreadThreshold
+        t.swipeCoherenceThreshold   = tuning.swipeCoherenceThreshold
+        t.swipeAngleTolerance       = tuning.swipeAngleTolerance
+        t.edgeMarginEnabled         = tuning.edgeMarginEnabled
+        t.edgeMargin.left           = tuning.edgeMarginLeft
+        t.edgeMargin.right          = tuning.edgeMarginRight
+        t.edgeMargin.top            = tuning.edgeMarginTop
+        t.edgeMargin.bottom         = tuning.edgeMarginBottom
+        return t
+    }
+
+    func toRules() -> [GestureRule] {
+        gestures.compactMap { g in
+            guard !g.action.isEmpty, let action = GestureAction(rawValue: g.action) else { return nil }
+
+            let direction: GestureDirection
+            if g.type == "click" {
+                direction = .click
+            } else {
+                guard let d = swiftDirection(g.direction) else { return nil }
+                direction = d
+            }
+
+            let speed: GestureSpeed = {
+                switch g.speed?.lowercased() {
+                case "slow": return .slow
+                case "fast": return .fast
+                default:     return .normal
+                }
+            }()
+
+            return GestureRule(
+                fingers:           g.fingers,
+                direction:         direction,
+                speed:             speed,
+                action:            action,
+                appPath:           g.appPath,
+                appFilter:         g.appFilter,
+                reciprocalEnabled: g.reciprocal
+            )
+        }
+    }
+
+    // ── Direction helpers ──
+
+    private static func yamlDirection(_ d: GestureDirection) -> String {
+        switch d {
+        case .swipeLeft:  return "left"
+        case .swipeRight: return "right"
+        case .swipeUp:    return "up"
+        case .swipeDown:  return "down"
+        case .click:      return "none"
+        }
+    }
+
+    private func swiftDirection(_ s: String?) -> GestureDirection? {
+        switch s?.lowercased() {
+        case "left":  return .swipeLeft
+        case "right": return .swipeRight
+        case "up":    return .swipeUp
+        case "down":  return .swipeDown
+        default:      return nil
+        }
+    }
+}
+
+// ─────────────────────────────────────────────
 // MARK: - YAML Serializer
 // ─────────────────────────────────────────────
 
 enum GlideConfigSerializer {
 
     static func serialize(_ config: GlideConfig) -> String {
-        var lines: [String] = []
-
-        lines += [
+        var lines: [String] = [
             "# Glide Configuration",
             "# Generated by Glide — import via Preferences › General › Import Config",
             "#",
@@ -102,6 +217,7 @@ enum GlideConfigSerializer {
             "    window_targeting: \"\(config.preferences.windowTargeting)\"",
             "    haptic_feedback: \(config.preferences.hapticFeedback ? "true" : "false")",
             "    debug_logging: \(config.preferences.debugLogging ? "true" : "false")",
+            "    launch_at_login: \(config.preferences.launchAtLogin ? "true" : "false")",
             "",
             "  # ── Tuning ─────────────────────────────────────────",
             "  tuning:",
@@ -119,21 +235,18 @@ enum GlideConfigSerializer {
             "      right: \(fmt(config.tuning.edgeMarginRight))",
             "      top: \(fmt(config.tuning.edgeMarginTop))",
             "      bottom: \(fmt(config.tuning.edgeMarginBottom))",
+            "",
+            "  # ── Gestures ────────────────────────────────────────",
+            "  gestures:",
         ]
 
-        lines += ["", "  # ── Gestures ────────────────────────────────────────", "  gestures:"]
-
-        // Group by finger count for readability
         let grouped = Dictionary(grouping: config.gestures) { $0.fingers }
-        let sortedFingers = grouped.keys.sorted()
-
-        for fingers in sortedFingers {
-            let fingerLabel = "\(fingers)-Finger Gestures"
+        for fingers in grouped.keys.sorted() {
             let bar = String(repeating: "#", count: 49)
             lines += [
                 "",
                 "    \(bar)",
-                "    # 🔹 \(fingerLabel.uppercased())",
+                "    # 🔹 \("\(fingers)-FINGER GESTURES")",
                 "    \(bar)",
             ]
             for g in grouped[fingers]! {
@@ -144,41 +257,22 @@ enum GlideConfigSerializer {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    // ── Per-gesture block ──
-
     private static func serializeGesture(_ g: GlideConfig.Gesture) -> [String] {
         var lines: [String] = [""]
-
-        // Comment header
         let comment = "\(g.fingers)-finger \(g.type)\(g.direction.map { " \($0)" } ?? "")\(g.speed.map { " (\($0))" } ?? "") → \(g.action)"
         lines.append("    # \(comment)")
-
         lines.append("    - type: \(g.type)")
-
-        if let d = g.direction {
-            lines.append("      direction: \(d)")
-        }
-
+        if let d = g.direction { lines.append("      direction: \(d)") }
         lines.append("      fingers: \(g.fingers)")
-
-        if let s = g.speed {
-            lines.append("      speed: \(s)")
-        }
-
+        if let s = g.speed { lines.append("      speed: \(s)") }
         lines.append("      action: \"\(escape(g.action))\"")
-
-        // Optional fields — emit even when null for visibility
         lines.append("      app_filter: \(g.appFilter.map { "\"\($0)\"" } ?? "null")")
-
         if g.type == "swipe" || g.appPath != nil {
             lines.append("      app_path: \(g.appPath.map { "\"\(escape($0))\"" } ?? "null")")
             lines.append("      reciprocal: \(g.reciprocal ? "true" : "false")")
         }
-
         return lines
     }
-
-    // ── Helpers ──
 
     private static func fmt(_ v: Float) -> String { String(format: "%.3f", v) }
 
@@ -194,8 +288,6 @@ enum GlideConfigSerializer {
 
 enum GlideConfigParser {
 
-    // ── Public entry ──
-
     static func parse(yaml: String) -> GlideConfig? {
         let lines = yaml.components(separatedBy: "\n")
         var cfg = GlideConfig()
@@ -205,43 +297,28 @@ enum GlideConfigParser {
 
         while i < lines.count {
             let (indent, key, _) = tokenize(lines[i])
-
-            // Stop if we leave the touchpad block
             if indent == 0 && key != nil && key != "touchpad" { break }
-
             switch key {
-            case "speed":
-                i += 1
-                parseSpeed(lines, from: &i, into: &cfg.speed)
-            case "preferences":
-                i += 1
-                parsePreferences(lines, from: &i, into: &cfg.preferences)
-            case "tuning":
-                i += 1
-                parseTuning(lines, from: &i, into: &cfg.tuning)
-            case "gestures":
-                i += 1
-                parseGestures(lines, from: &i, into: &cfg.gestures)
-                return cfg   // gestures is last — done
-            default:
-                i += 1
+            case "speed":       i += 1; parseSpeed(lines, from: &i, into: &cfg.speed)
+            case "preferences": i += 1; parsePreferences(lines, from: &i, into: &cfg.preferences)
+            case "tuning":      i += 1; parseTuning(lines, from: &i, into: &cfg.tuning)
+            case "gestures":    i += 1; parseGestures(lines, from: &i, into: &cfg.gestures); return cfg
+            default:            i += 1
             }
         }
         return cfg
     }
 
-    // ── Section parsers ──
-
     private static func parseSpeed(_ lines: [String], from i: inout Int, into speed: inout GlideConfig.Speed) {
-        let baseIndent = indentOf(lines, at: i)
+        let base = indentOf(lines, at: i)
         while i < lines.count {
             let (ind, key, val) = tokenize(lines[i])
-            if ind < baseIndent { return }
+            if ind < base { return }
             switch key {
-            case "swipe_threshold":               speed.swipeThreshold               = floatVal(val) ?? speed.swipeThreshold
-            case "fast_velocity_threshold":       speed.fastVelocityThreshold       = floatVal(val) ?? speed.fastVelocityThreshold
-            case "slow_velocity_threshold":       speed.slowVelocityThreshold       = floatVal(val) ?? speed.slowVelocityThreshold
-            case "speed_sample_count":            speed.speedSampleCount            = intVal(val)   ?? speed.speedSampleCount
+            case "swipe_threshold":          speed.swipeThreshold         = floatVal(val) ?? speed.swipeThreshold
+            case "fast_velocity_threshold":  speed.fastVelocityThreshold  = floatVal(val) ?? speed.fastVelocityThreshold
+            case "slow_velocity_threshold":  speed.slowVelocityThreshold  = floatVal(val) ?? speed.slowVelocityThreshold
+            case "speed_sample_count":       speed.speedSampleCount       = intVal(val)   ?? speed.speedSampleCount
             default: break
             }
             i += 1
@@ -249,14 +326,15 @@ enum GlideConfigParser {
     }
 
     private static func parsePreferences(_ lines: [String], from i: inout Int, into prefs: inout GlideConfig.Preferences) {
-        let baseIndent = indentOf(lines, at: i)
+        let base = indentOf(lines, at: i)
         while i < lines.count {
             let (ind, key, val) = tokenize(lines[i])
-            if ind < baseIndent { return }
+            if ind < base { return }
             switch key {
             case "window_targeting": prefs.windowTargeting = stringVal(val) ?? prefs.windowTargeting
             case "haptic_feedback":  prefs.hapticFeedback  = boolVal(val)   ?? prefs.hapticFeedback
             case "debug_logging":    prefs.debugLogging    = boolVal(val)   ?? prefs.debugLogging
+            case "launch_at_login":  prefs.launchAtLogin   = boolVal(val)   ?? prefs.launchAtLogin
             default: break
             }
             i += 1
@@ -264,22 +342,22 @@ enum GlideConfigParser {
     }
 
     private static func parseTuning(_ lines: [String], from i: inout Int, into tuning: inout GlideConfig.Tuning) {
-        let baseIndent = indentOf(lines, at: i)
+        let base = indentOf(lines, at: i)
         while i < lines.count {
             let (ind, key, val) = tokenize(lines[i])
-            if ind < baseIndent { return }
+            if ind < base { return }
             switch key {
-            case "app_switcher_step_threshold":   tuning.appSwitcherStepThreshold   = floatVal(val)  ?? tuning.appSwitcherStepThreshold
-            case "app_switcher_debounce":         tuning.appSwitcherDebounce        = doubleVal(val) ?? tuning.appSwitcherDebounce
-            case "candidate_frames":              tuning.candidateFrames            = intVal(val)    ?? tuning.candidateFrames
-            case "pinch_spread_threshold":        tuning.pinchSpreadThreshold       = floatVal(val)  ?? tuning.pinchSpreadThreshold
-            case "pinch_frame_spread_threshold":  tuning.pinchFrameSpreadThreshold  = floatVal(val)  ?? tuning.pinchFrameSpreadThreshold
-            case "swipe_coherence_threshold":     tuning.swipeCoherenceThreshold    = floatVal(val)  ?? tuning.swipeCoherenceThreshold
-            case "swipe_angle_tolerance":         tuning.swipeAngleTolerance        = floatVal(val)  ?? tuning.swipeAngleTolerance
+            case "app_switcher_step_threshold":  tuning.appSwitcherStepThreshold  = floatVal(val)  ?? tuning.appSwitcherStepThreshold
+            case "app_switcher_debounce":        tuning.appSwitcherDebounce       = doubleVal(val) ?? tuning.appSwitcherDebounce
+            case "candidate_frames":             tuning.candidateFrames           = intVal(val)    ?? tuning.candidateFrames
+            case "pinch_spread_threshold":       tuning.pinchSpreadThreshold      = floatVal(val)  ?? tuning.pinchSpreadThreshold
+            case "pinch_frame_spread_threshold": tuning.pinchFrameSpreadThreshold = floatVal(val)  ?? tuning.pinchFrameSpreadThreshold
+            case "swipe_coherence_threshold":    tuning.swipeCoherenceThreshold   = floatVal(val)  ?? tuning.swipeCoherenceThreshold
+            case "swipe_angle_tolerance":        tuning.swipeAngleTolerance       = floatVal(val)  ?? tuning.swipeAngleTolerance
             case "edge_margin":
                 i += 1
                 parseEdgeMargin(lines, from: &i, into: &tuning)
-                continue   // edge_margin subparser already advanced i
+                continue
             default: break
             }
             i += 1
@@ -287,10 +365,10 @@ enum GlideConfigParser {
     }
 
     private static func parseEdgeMargin(_ lines: [String], from i: inout Int, into tuning: inout GlideConfig.Tuning) {
-        let baseIndent = indentOf(lines, at: i)
+        let base = indentOf(lines, at: i)
         while i < lines.count {
             let (ind, key, val) = tokenize(lines[i])
-            if ind < baseIndent { return }
+            if ind < base { return }
             switch key {
             case "enabled": tuning.edgeMarginEnabled = boolVal(val)  ?? tuning.edgeMarginEnabled
             case "left":    tuning.edgeMarginLeft    = floatVal(val) ?? tuning.edgeMarginLeft
@@ -304,21 +382,15 @@ enum GlideConfigParser {
     }
 
     private static func parseGestures(_ lines: [String], from i: inout Int, into gestures: inout [GlideConfig.Gesture]) {
-        let baseIndent = indentOf(lines, at: i)
+        let base = indentOf(lines, at: i)
         while i < lines.count {
             let line = lines[i]
             let (ind, key, _) = tokenize(line)
-
-            // Stop if we've left the gestures block
-            if ind < baseIndent && !line.trimmingCharacters(in: .whitespaces).hasPrefix("-") && key != nil { return }
-
-            // New gesture entry
+            if ind < base && !line.trimmingCharacters(in: .whitespaces).hasPrefix("-") && key != nil { return }
             if line.trimmingCharacters(in: .whitespaces).hasPrefix("-") {
                 let g = parseGestureBlock(lines, from: &i)
-                if !g.type.isEmpty && !g.action.isEmpty {
-                    gestures.append(g)
-                }
-                continue   // parseGestureBlock already advanced i
+                if !g.type.isEmpty && !g.action.isEmpty { gestures.append(g) }
+                continue
             }
             i += 1
         }
@@ -327,37 +399,30 @@ enum GlideConfigParser {
     private static func parseGestureBlock(_ lines: [String], from i: inout Int) -> GlideConfig.Gesture {
         var g = GlideConfig.Gesture(type: "", direction: nil, fingers: 3,
                                     speed: nil, action: "", appFilter: nil, appPath: nil, reciprocal: true)
-
-        // Parse the leading "- type: ..." line
-        let firstLine = lines[i].trimmingCharacters(in: .whitespaces).dropFirst() // strip "- "
+        let firstLine = lines[i].trimmingCharacters(in: .whitespaces).dropFirst()
         if let colon = firstLine.firstIndex(of: ":") {
-            let k = String(firstLine[firstLine.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
+            let k = String(firstLine[..<colon]).trimmingCharacters(in: .whitespaces)
             let v = String(firstLine[firstLine.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
             if k == "type" { g.type = v }
         }
-        let blockIndent = leadingSpaces(lines[i])   // indent of "    - type: ..."
+        let blockIndent = leadingSpaces(lines[i])
         i += 1
-
-        // Parse subsequent indented keys belonging to this block
         while i < lines.count {
             let line = lines[i]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
-
             let ind = leadingSpaces(line)
-            // A new "- " at same or lesser indent means a new gesture; stop
             if trimmed.hasPrefix("-") && ind <= blockIndent { return g }
             if ind <= blockIndent { return g }
-
             let (_, key, val) = tokenize(line)
             switch key {
-            case "type":       g.type      =  val ?? g.type
-            case "direction":  g.direction =  val
-            case "fingers":    g.fingers   =  intVal(val) ?? g.fingers
-            case "speed":      g.speed     =  val
-            case "action":     g.action    =  mapActionSynonym(stringVal(val) ?? g.action)
-            case "app_filter": g.appFilter =  nullableStringVal(val)
-            case "app_path":   g.appPath   =  nullableStringVal(val)
+            case "type":       g.type      = val ?? g.type
+            case "direction":  g.direction = val
+            case "fingers":    g.fingers   = intVal(val) ?? g.fingers
+            case "speed":      g.speed     = val
+            case "action":     g.action    = mapActionSynonym(stringVal(val) ?? g.action)
+            case "app_filter": g.appFilter = nullableStringVal(val)
+            case "app_path":   g.appPath   = nullableStringVal(val)
             case "reciprocal": g.reciprocal = boolVal(val) ?? g.reciprocal
             default: break
             }
@@ -368,29 +433,19 @@ enum GlideConfigParser {
 
     // ── Low-level tokenizer ──
 
-    /// Returns (indent, key, value) for a YAML key:value line.
-    /// Comments and blank lines return (0, nil, nil).
     private static func tokenize(_ raw: String) -> (Int, String?, String?) {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return (0, nil, nil) }
         let indent = leadingSpaces(raw)
         guard let colon = trimmed.firstIndex(of: ":") else { return (indent, nil, nil) }
-        let key = String(trimmed[trimmed.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
+        let key  = String(trimmed[..<colon]).trimmingCharacters(in: .whitespaces)
         let rest = String(trimmed[trimmed.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
-        let val: String? = rest.isEmpty ? nil : rest
-        return (indent, key, val)
+        return (indent, key, rest.isEmpty ? nil : rest)
     }
 
-    private static func leadingSpaces(_ s: String) -> Int {
-        s.prefix(while: { $0 == " " }).count
-    }
+    private static func leadingSpaces(_ s: String) -> Int { s.prefix(while: { $0 == " " }).count }
+    private static func indentOf(_ lines: [String], at i: Int) -> Int { i < lines.count ? leadingSpaces(lines[i]) : 0 }
 
-    private static func indentOf(_ lines: [String], at i: Int) -> Int {
-        guard i < lines.count else { return 0 }
-        return leadingSpaces(lines[i])
-    }
-
-    /// Advance `i` until a line whose stripped content starts with `key:`.
     @discardableResult
     private static func scanToKey(_ key: String, in lines: [String], from i: inout Int) -> Bool {
         while i < lines.count {
@@ -403,18 +458,10 @@ enum GlideConfigParser {
 
     // ── Value converters ──
 
-    private static func floatVal(_ s: String?) -> Float? {
-        guard let s else { return nil }
-        return Float(s)
-    }
-    private static func doubleVal(_ s: String?) -> Double? {
-        guard let s else { return nil }
-        return Double(s)
-    }
-    private static func intVal(_ s: String?) -> Int? {
-        guard let s else { return nil }
-        return Int(s)
-    }
+    private static func floatVal(_ s: String?) -> Float?    { s.flatMap { Float($0) } }
+    private static func doubleVal(_ s: String?) -> Double?  { s.flatMap { Double($0) } }
+    private static func intVal(_ s: String?) -> Int?        { s.flatMap { Int($0) } }
+
     private static func boolVal(_ s: String?) -> Bool? {
         switch s?.lowercased() {
         case "true", "yes", "1": return true
@@ -422,261 +469,97 @@ enum GlideConfigParser {
         default: return nil
         }
     }
+
     private static func stringVal(_ s: String?) -> String? {
         guard let s else { return nil }
-        // Strip surrounding quotes
-        if (s.hasPrefix("\"") && s.hasSuffix("\"")) ||
-           (s.hasPrefix("'")  && s.hasSuffix("'")) {
+        if (s.hasPrefix("\"") && s.hasSuffix("\"")) || (s.hasPrefix("'") && s.hasSuffix("'")) {
             return String(s.dropFirst().dropLast())
         }
         return s
-    }
-    private static func mapActionSynonym(_ s: String) -> String {
-        switch s.lowercased() {
-        case "launch app":            return "Open App…"
-        case "open spotlight":        return "Spotlight"
-        case "screenshot selection": return "Screenshot (Area)"
-        case "take screenshot":       return "Screenshot (Full)"
-        default: return s
-        }
     }
 
     private static func nullableStringVal(_ s: String?) -> String? {
         guard let s, s.lowercased() != "null", s != "~" else { return nil }
         return stringVal(s)
     }
-}
 
-// ─────────────────────────────────────────────
-// MARK: - GlideConfig ↔ Settings bridge
-// ─────────────────────────────────────────────
-
-extension GlideConfig {
-
-    // ── Build a GlideConfig from current Settings ──
-
-    static func fromSettings() -> GlideConfig {
-        let s = Settings.shared
-        let t = s.tuning
-        var cfg = GlideConfig()
-
-        cfg.speed.swipeThreshold          = t.initialThreshold
-        cfg.speed.fastVelocityThreshold   = t.fastVelocityThreshold
-        cfg.speed.slowVelocityThreshold   = t.slowVelocityThreshold
-        cfg.speed.speedSampleCount        = t.speedSampleCount
-
-        cfg.preferences.windowTargeting   = s.windowTargetingMode.rawValue
-        cfg.preferences.hapticFeedback    = s.hapticFeedbackEnabled
-        cfg.preferences.debugLogging      = s.debugLoggingEnabled
-
-        cfg.tuning.appSwitcherStepThreshold   = t.appSwitcherStepThreshold
-        cfg.tuning.appSwitcherDebounce        = t.appSwitcherDebounce
-        cfg.tuning.candidateFrames            = t.candidateFrames
-        cfg.tuning.pinchSpreadThreshold       = t.pinchSpreadThreshold
-        cfg.tuning.pinchFrameSpreadThreshold  = t.pinchFrameSpreadThreshold
-        cfg.tuning.swipeCoherenceThreshold    = t.swipeCoherenceThreshold
-        cfg.tuning.swipeAngleTolerance        = t.swipeAngleTolerance
-        cfg.tuning.edgeMarginEnabled          = t.edgeMarginEnabled
-        cfg.tuning.edgeMarginLeft             = t.edgeMargin.left
-        cfg.tuning.edgeMarginRight            = t.edgeMargin.right
-        cfg.tuning.edgeMarginTop              = t.edgeMargin.top
-        cfg.tuning.edgeMarginBottom           = t.edgeMargin.bottom
-
-        cfg.gestures = s.rules.map { rule in
-            let isClick = rule.direction == .click
-            return GlideConfig.Gesture(
-                type:       isClick ? "click" : "swipe",
-                direction:  isClick ? nil     : yamlDirection(rule.direction),
-                fingers:    rule.fingers,
-                speed:      isClick ? nil     : rule.speed.rawValue.lowercased(),
-                action:     rule.action.rawValue,
-                appFilter:  rule.appFilter,
-                appPath:    rule.appPath,
-                reciprocal: rule.reciprocalEnabled
-            )
-        }
-
-        return cfg
-    }
-
-    // ── Apply a parsed GlideConfig back into Settings ──
-
-    func applyToSettings() {
-        let s = Settings.shared
-
-        // ── YAML is the single source of truth ──
-        // Clear any stale UserDefaults written by a previous in-app UI session,
-        // so the values we're about to write from YAML are not shadowed.
-        s.clearUserDefaults()
-        s.invalidateCache()
-
-        // Tuning
-        s.tuning = {
-            var t = GestureTuning()
-            t.initialThreshold           = speed.swipeThreshold
-            t.fastVelocityThreshold      = speed.fastVelocityThreshold
-            t.slowVelocityThreshold      = speed.slowVelocityThreshold
-            t.speedSampleCount           = speed.speedSampleCount
-            t.appSwitcherStepThreshold   = tuning.appSwitcherStepThreshold
-            t.appSwitcherDebounce        = tuning.appSwitcherDebounce
-            t.candidateFrames            = tuning.candidateFrames
-            t.pinchSpreadThreshold       = tuning.pinchSpreadThreshold
-            t.pinchFrameSpreadThreshold  = tuning.pinchFrameSpreadThreshold
-            t.swipeCoherenceThreshold    = tuning.swipeCoherenceThreshold
-            t.swipeAngleTolerance        = tuning.swipeAngleTolerance
-            t.edgeMarginEnabled          = tuning.edgeMarginEnabled
-            t.edgeMargin.left            = tuning.edgeMarginLeft
-            t.edgeMargin.right           = tuning.edgeMarginRight
-            t.edgeMargin.top             = tuning.edgeMarginTop
-            t.edgeMargin.bottom          = tuning.edgeMarginBottom
-            return t
-        }()
-
-        // Preferences
-        if let mode = WindowTargetingMode(rawValue: preferences.windowTargeting) {
-            s.windowTargetingMode = mode
-        }
-        s.hapticFeedbackEnabled = preferences.hapticFeedback
-        s.debugLoggingEnabled   = preferences.debugLogging
-
-        // Gesture rules
-        let rules: [GestureRule] = gestures.compactMap { g in
-            guard !g.action.isEmpty,
-                  let action = GestureAction(rawValue: g.action)
-            else { return nil }
-
-            let direction: GestureDirection
-            if g.type == "click" {
-                direction = .click
-            } else {
-                direction = GlideConfig.swiftDirection(g.direction) ?? .swipeUp
-            }
-
-            let speed: GestureSpeed = {
-                switch g.speed?.lowercased() {
-                case "slow":   return .slow
-                case "fast":   return .fast
-                default:       return .normal
-                }
-            }()
-
-            return GestureRule(
-                fingers:           g.fingers,
-                direction:         direction,
-                speed:             speed,
-                action:            action,
-                appPath:           g.appPath,
-                appFilter:         g.appFilter,
-                reciprocalEnabled: g.reciprocal
-            )
-        }
-        s.rules = rules
-    }
-
-    // ── Direction helpers ──
-
-    private static func yamlDirection(_ d: GestureDirection) -> String {
-        switch d {
-        case .swipeLeft:  return "left"
-        case .swipeRight: return "right"
-        case .swipeUp:    return "up"
-        case .swipeDown:  return "down"
-        case .click:      return "none"
-        }
-    }
-
-    private static func swiftDirection(_ s: String?) -> GestureDirection? {
-        switch s?.lowercased() {
-        case "left":  return .swipeLeft
-        case "right": return .swipeRight
-        case "up":    return .swipeUp
-        case "down":  return .swipeDown
-        default:      return nil
+    private static func mapActionSynonym(_ s: String) -> String {
+        switch s.lowercased() {
+        case "launch app":           return "Open App…"
+        case "open spotlight":       return "Spotlight"
+        case "screenshot selection": return "Screenshot (Area)"
+        case "take screenshot":      return "Screenshot (Full)"
+        default: return s
         }
     }
 }
 
 // ─────────────────────────────────────────────
-// MARK: - GlideConfigStore (auto-sync singleton)
+// MARK: - GlideConfigStore
 // ─────────────────────────────────────────────
-
-/// Manages the live config file at:
-///   ~/Library/Application Support/Glide/config.yaml
-///
-/// Call `save()` after any settings change.
-/// Call `load()` on app launch to restore settings from disk.
-///
+//
+// Manages the live config file at:
+//   ~/Library/Application Support/Glide/config.yaml
+//
+// • save()  — serializes current Settings to disk
+// • load()  — reads file and applies it to Settings via Settings.apply(_:)
+//
 final class GlideConfigStore {
     static let shared = GlideConfigStore()
     private init() {}
 
-    // Re-entrancy guard: save() is called from Settings setters which may themselves
-    // be triggered during serialization. This flag prevents infinite recursion.
-    private var isSaving = false
+    // MARK: Path
 
-    // ── Fixed storage path ──
-
-    /// ~/Library/Application Support/Glide/config.yaml
     var configURL: URL {
-        let appSupport = FileManager.default
+        let dir = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first!
-        let dir = appSupport.appendingPathComponent("Glide", isDirectory: true)
+            .appendingPathComponent("Glide", isDirectory: true)
         return dir.appendingPathComponent("config.yaml")
     }
 
-    /// Human-readable path for display in Preferences.
     var configPath: String { configURL.path }
 
-    // ── Save ──
+    // MARK: Save
 
-    /// Serializes the current Settings to config.yaml. Call this after any write.
     @discardableResult
     func save() -> Bool {
-        guard !isSaving else { return true }   // prevent re-entrancy
-        isSaving = true
-        defer { isSaving = false }
         let url = configURL
         do {
-            let dir = url.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
             let yaml = GlideConfigSerializer.serialize(GlideConfig.fromSettings())
             try yaml.write(to: url, atomically: true, encoding: .utf8)
-            AppLogger.debug("[Config] Saved config to \(url.path)")
+            AppLogger.debug("[Config] Saved → \(url.lastPathComponent)")
             return true
         } catch {
-            print("[Config] Failed to save config: \(error.localizedDescription)")
+            print("[Config] Save failed: \(error.localizedDescription)")
             return false
         }
     }
 
-    // ── Load ──
+    // MARK: Load
 
-    /// Loads config.yaml and applies it to Settings. Returns true if file existed and parsed.
     @discardableResult
     func load() -> Bool {
-        let url = configURL
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            AppLogger.debug("[Config] No config file found at \(url.path) — using defaults")
+        guard FileManager.default.fileExists(atPath: configURL.path) else {
+            AppLogger.debug("[Config] No config file — using defaults")
             return false
         }
-        guard let raw = try? String(contentsOf: url, encoding: .utf8),
+        guard let raw = try? String(contentsOf: configURL, encoding: .utf8),
               let cfg = GlideConfigParser.parse(yaml: raw) else {
-            print("[Config] Failed to parse config at \(url.path)")
+            print("[Config] Failed to parse config")
             return false
         }
-        cfg.applyToSettings()
-        Settings.shared.invalidateCache()   // flush in-memory cache so engine reads fresh values
-        AppLogger.debug("[Config] Loaded config from \(url.path)")
+        Settings.shared.apply(cfg)
+        AppLogger.debug("[Config] Loaded from \(configURL.lastPathComponent)")
         return true
     }
 
-    // ── Export to custom location ──
+    // MARK: Export / Import
 
-    /// Copies the live config file to any user-chosen URL.
     @discardableResult
     func exportTo(_ destination: URL) -> Bool {
-        // Ensure the live file is up to date first
         guard save() else { return false }
         do {
             if FileManager.default.fileExists(atPath: destination.path) {
@@ -690,18 +573,12 @@ final class GlideConfigStore {
         }
     }
 
-    // ── Import from custom location ──
-
-    /// Parses a user-chosen file, applies it, then saves to the live path.
     @discardableResult
     func importFrom(_ source: URL) -> Bool {
         guard let raw = try? String(contentsOf: source, encoding: .utf8),
-              let cfg = GlideConfigParser.parse(yaml: raw) else {
-            return false
-        }
-        cfg.applyToSettings()
-        Settings.shared.invalidateCache()
-        save()   // persist the imported data to the live path too
+              let cfg = GlideConfigParser.parse(yaml: raw) else { return false }
+        Settings.shared.apply(cfg)
+        save()
         return true
     }
 }
