@@ -9,33 +9,25 @@ import IOKit.pwr_mgt
 
 final class ActionExecutor {
 
-    private struct WindowKey: Hashable {
-        let pid: pid_t
-        let identity: Int
-    }
-
     static let shared = ActionExecutor()
     private init() {}
+
     private lazy var keyEventSource = CGEventSource(stateID: .hidSystemState)
 
-    // Saved frames for maximize/restore
-    private var savedFrames: [WindowKey: CGRect] = [:]
-    var hasRestorableMinimizedApps: Bool {
-        pruneStaleMinimizedWindows()
-        return !lastMinimizedWindows.isEmpty
+    // MARK: - Maximize / Restore frame memory
+
+    private struct WindowKey: Hashable {
+        let pid: pid_t; let identity: Int
     }
 
-    private var lastMinimizedWindows: [AXUIElement] = []
+    private var savedFrames: [WindowKey: CGRect] = [:]
 
-    /// Removes savedFrames entries for PIDs that are no longer in the running app list.
-    /// Called lazily from maximize() rather than on a timer to avoid background overhead.
-    /// Only runs when savedFrames exceeds 20 entries (typical sessions accumulate far fewer).
+    /// Prunes savedFrames entries for PIDs that are no longer running.
+    /// Only runs when the dict exceeds 20 entries to avoid background overhead.
     private func pruneOrphanedFrames() {
         guard savedFrames.count > 20 else { return }
-        let runningPIDs = Set(
-            NSWorkspace.shared.runningApplications.map { $0.processIdentifier }
-        )
-        savedFrames = savedFrames.filter { runningPIDs.contains($0.key.pid) }
+        let running = Set(NSWorkspace.shared.runningApplications.map { $0.processIdentifier })
+        savedFrames = savedFrames.filter { running.contains($0.key.pid) }
     }
 
     func pruneSavedFrame(for pid: pid_t) {
@@ -43,61 +35,49 @@ final class ActionExecutor {
         pruneStaleMinimizedWindows(for: pid)
     }
 
-    // MARK: Dispatch
+    // MARK: - Minimize / Restore state
+
+    var hasRestorableMinimizedApps: Bool {
+        pruneStaleMinimizedWindows()
+        return !lastMinimizedWindows.isEmpty
+    }
+
+    private var lastMinimizedWindows: [AXUIElement] = []
+    private var frontmostBeforeMinimize: NSRunningApplication?
+
+    // MARK: - Action dispatch
 
     func execute(_ action: GestureAction, appPath: String? = nil) {
-        AppLogger.debug("[Action] Executing: \(action.rawValue)")
+        AppLogger.debug("[Action] \(action.rawValue)")
         switch action {
 
-        // ── App lifecycle ──────────────────────────────────────────────────
-        case .quitApp:
-            quitAppAtCursor(NSEvent.mouseLocation)
-        case .forceQuitApp:
-            forceQuitAtCursor()
-        case .quitFrontmost:
-            NSWorkspace.shared.frontmostApplication?.terminate()
-        case .hideApp:
-            hideAppAtCursor()
-        case .hideOthers:
-            hideAppAtCursor(othersOnly: true)
-        case .openApp:
-            if let path = appPath { openApp(path: path) }
+        // App lifecycle
+        case .quitApp:           quitAppAtCursor(NSEvent.mouseLocation)
+        case .forceQuitApp:      forceQuitAtCursor()
+        case .quitFrontmost:     NSWorkspace.shared.frontmostApplication?.terminate()
+        case .hideApp:           hideAppAtCursor()
+        case .hideOthers:        hideAppAtCursor(othersOnly: true)
+        case .openApp:           if let path = appPath { openApp(path: path) }
 
-        // ── App switching ──────────────────────────────────────────────────
-        // These are handled directly in GestureEngine for continuous scrolling.
-        // But if mapped as a one-shot, fire once.
-        case .appSwitcherNext:
-            sendKey(0x30, .maskCommand)    // Cmd+Tab
-        case .appSwitcherPrev:
-            sendKey(0x30, [.maskCommand, .maskShift])
-        case .switchAppNext:
-            activateAdjacentApp(forward: true)
-        case .switchAppPrev:
-            activateAdjacentApp(forward: false)
+        // App switching
+        case .appSwitcherNext:   sendKey(0x30, .maskCommand)
+        case .appSwitcherPrev:   sendKey(0x30, [.maskCommand, .maskShift])
+        case .switchAppNext:     activateAdjacentApp(forward: true)
+        case .switchAppPrev:     activateAdjacentApp(forward: false)
 
-        // ── Window state ──────────────────────────────────────────────────
-        case .minimizeWindow:
-            minimizeFocused()
-        case .minimizeAllApps:
-            minimizeAllApps()
-        case .restoreMinimizedApps:
-            restoreMinimizedApps()
-        case .maximizeWindow:
-            maximize(windowAtCursor: true)
-        case .restoreWindow:
-            restore(windowAtCursor: true)
-        case .closeWindow:
-            closeWindow()
-        case .enterFullscreen:
-            setFullscreen(true)
-        case .exitFullscreen:
-            setFullscreen(false)
-        case .toggleFullscreen:
-            setFullscreen(nil)
-        case .cycleWindows:
-            sendKey(0x32, .maskCommand)    // Cmd+`
+        // Window state
+        case .minimizeWindow:        minimizeFocused()
+        case .minimizeAllApps:       minimizeAllApps()
+        case .restoreMinimizedApps:  restoreMinimizedApps()
+        case .maximizeWindow:        maximize()
+        case .restoreWindow:         restore()
+        case .closeWindow:           closeWindow()
+        case .enterFullscreen:       setFullscreen(true)
+        case .exitFullscreen:        setFullscreen(false)
+        case .toggleFullscreen:      setFullscreen(nil)
+        case .cycleWindows:          sendKey(0x32, .maskCommand)
 
-        // ── Window snapping ───────────────────────────────────────────────
+        // Window snapping
         case .snapLeft:         snap(CGRect(x: 0,   y: 0,   width: 0.5, height: 1))
         case .snapRight:        snap(CGRect(x: 0.5, y: 0,   width: 0.5, height: 1))
         case .snapTopLeft:      snap(CGRect(x: 0,   y: 0.5, width: 0.5, height: 0.5))
@@ -107,59 +87,41 @@ final class ActionExecutor {
         case .centerWindow:     centerWindow()
         case .moveNextDisplay:  moveToNextDisplay()
 
-        // ── System ────────────────────────────────────────────────────────
-        case .missionControl:
-            performMissionControl()
-        case .appExpose:
-            sendKey(125, .maskControl)
-        case .showDesktop:
-            sendKey(103, [])   // F11
-        case .launchpad:
-            sendKey(131, [])
-        case .spotlight:
-            sendKey(0x31, .maskCommand)    // Cmd+Space
+        // System
+        case .missionControl:   performMissionControl()
+        case .appExpose:        sendKey(125, .maskControl)
+        case .showDesktop:      sendKey(103, [])
+        case .launchpad:        sendKey(131, [])
+        case .spotlight:        sendKey(0x31, .maskCommand)
         case .notifCenter:
             DistributedNotificationCenter.default().postNotificationName(
                 NSNotification.Name("com.apple.notificationcenterui.dockControllerActivated"),
                 object: nil, deliverImmediately: true)
-        case .lockScreen:
-            lockScreen()
-        case .sleep:
-            sleepSystem()
-        case .screenshotArea:
-            sendKey(0x15, [.maskCommand, .maskShift])   // Cmd+Shift+4
-        case .screenshotFull:
-            sendKey(0x14, [.maskCommand, .maskShift])   // Cmd+Shift+3
+        case .lockScreen:       lockScreen()
+        case .sleep:            sleepSystem()
+        case .screenshotArea:   sendKey(0x15, [.maskCommand, .maskShift])
+        case .screenshotFull:   sendKey(0x14, [.maskCommand, .maskShift])
 
-        case .doNothing:
-            break
+        case .doNothing: break
         }
     }
 
     private func performMissionControl() {
-        guard let src = eventSource() else { return }
-        let f3: CGKeyCode = 160 // Mission Control hardware key
+        guard let src = keyEventSource ?? CGEventSource(stateID: .hidSystemState) else { return }
+        let f3: CGKeyCode = 160
         CGEvent(keyboardEventSource: src, virtualKey: f3, keyDown: true)?.post(tap: .cghidEventTap)
         CGEvent(keyboardEventSource: src, virtualKey: f3, keyDown: false)?.post(tap: .cghidEventTap)
     }
 
-    private func eventSource() -> CGEventSource? {
-        keyEventSource ?? CGEventSource(stateID: .hidSystemState)
-    }
-
-    // MARK: - App Under Cursor
+    // MARK: - App under cursor
 
     func quitAppAtCursor(_ location: NSPoint) {
-        guard let pid = pidAtLocation(location) else {
-            AppLogger.debug("[Action] quitApp — no window at cursor"); return
-        }
-        AppLogger.debug("[Action] Quitting PID \(pid)")
+        guard let pid = pidAtLocation(location) else { return }
         NSRunningApplication(processIdentifier: pid)?.terminate()
     }
 
     private func forceQuitAtCursor() {
         guard let pid = pidAtLocation(NSEvent.mouseLocation) else { return }
-        AppLogger.debug("[Action] Force-quitting PID \(pid)")
         NSRunningApplication(processIdentifier: pid)?.forceTerminate()
         activateAnotherApp(excluding: pid)
     }
@@ -167,7 +129,6 @@ final class ActionExecutor {
     private func hideAppAtCursor(othersOnly: Bool = false) {
         guard let pid = pidAtLocation(NSEvent.mouseLocation) else { return }
         if othersOnly {
-            // Activate target, then Cmd+Opt+H
             NSRunningApplication(processIdentifier: pid)?.activate(options: .activateIgnoringOtherApps)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 self.sendKey(0x04, [.maskCommand, .maskAlternate])
@@ -180,8 +141,9 @@ final class ActionExecutor {
     private func activateAnotherApp(excluding pid: pid_t) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             NSWorkspace.shared.runningApplications
-                .first { $0.activationPolicy == .regular && $0.processIdentifier != pid
-                         && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }?
+                .first { $0.activationPolicy == .regular
+                      && $0.processIdentifier != pid
+                      && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }?
                 .activate(options: .activateIgnoringOtherApps)
         }
     }
@@ -191,27 +153,31 @@ final class ActionExecutor {
                                            configuration: .init()) { _, _ in }
     }
 
-    // MARK: - Window helpers
+    // MARK: - Window targeting
 
-    /// AX element for the window topmost at the given screen-coordinate (Cocoa origin).
+    private func targetWindow() -> AXUIElement? {
+        switch Settings.shared.windowTargetingMode {
+        case .focusedThenCursor: return focusedWindow() ?? windowAtCursor()
+        case .cursorThenFocused: return windowAtCursor() ?? focusedWindow()
+        }
+    }
+
     func windowAtCursor(_ location: NSPoint? = nil) -> AXUIElement? {
-        let mouse  = location ?? NSEvent.mouseLocation
-        let cgPt   = quartzPoint(from: mouse)
-        let myPID  = ProcessInfo.processInfo.processIdentifier
+        let cgPt  = quartzPoint(from: location ?? NSEvent.mouseLocation)
+        let myPID = ProcessInfo.processInfo.processIdentifier
 
         guard let list = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return nil }
 
         for win in list {
             guard let bounds = win[kCGWindowBounds as String] as? [String: CGFloat],
                   let pid    = win[kCGWindowOwnerPID as String] as? pid_t,
                   let layer  = win[kCGWindowLayer as String] as? Int,
                   pid != myPID, layer == 0 else { continue }
-
             let rect = CGRect(x: bounds["X"] ?? 0, y: bounds["Y"] ?? 0,
                               width: bounds["Width"] ?? 0, height: bounds["Height"] ?? 0)
             guard rect.contains(cgPt) else { continue }
-
             let appEl = AXUIElementCreateApplication(pid)
             var wRef: CFTypeRef?
             guard AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wRef) == .success,
@@ -225,12 +191,11 @@ final class ActionExecutor {
     }
 
     private func pidAtLocation(_ loc: NSPoint) -> pid_t? {
-        let cgPt = quartzPoint(from: loc)
+        let cgPt  = quartzPoint(from: loc)
         let myPID = ProcessInfo.processInfo.processIdentifier
-
         guard let list = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
-
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return nil }
         for win in list {
             guard let bounds = win[kCGWindowBounds as String] as? [String: CGFloat],
                   let pid    = win[kCGWindowOwnerPID as String] as? pid_t,
@@ -243,63 +208,15 @@ final class ActionExecutor {
         return nil
     }
 
-    private func axFrame(_ w: AXUIElement) -> CGRect? {
-        var pr: CFTypeRef?, sr: CFTypeRef?
-        AXUIElementCopyAttributeValue(w, kAXPositionAttribute as CFString, &pr)
-        AXUIElementCopyAttributeValue(w, kAXSizeAttribute     as CFString, &sr)
-        guard let pv = axValue(from: pr), let sv = axValue(from: sr) else { return nil }
-        var pos = CGPoint.zero, size = CGSize.zero
-        guard AXValueGetValue(pv, .cgPoint, &pos),
-              AXValueGetValue(sv, .cgSize,  &size) else { return nil }
-        return CGRect(origin: pos, size: size)
+    private func focusedWindow() -> AXUIElement? {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &ref) == .success else { return nil }
+        return axElement(from: ref)
     }
 
-    private func setFrame(_ w: AXUIElement, _ frame: CGRect) {
-        var pos  = frame.origin
-        var size = frame.size
-        if let pr = AXValueCreate(.cgPoint, &pos)  { AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, pr) }
-        if let sr = AXValueCreate(.cgSize,  &size) { AXUIElementSetAttributeValue(w, kAXSizeAttribute     as CFString, sr) }
-    }
-
-    private func windowKey(for window: AXUIElement) -> WindowKey {
-        var pid: pid_t = 0
-        AXUIElementGetPid(window, &pid)
-        return WindowKey(pid: pid, identity: Int(CFHash(window)))
-    }
-
-    private func globalScreenMaxY() -> CGFloat {
-        NSScreen.screens.map(\.frame.maxY).max() ?? NSScreen.main?.frame.maxY ?? 0
-    }
-
-    private func quartzPoint(from cocoaPoint: CGPoint) -> CGPoint {
-        CGPoint(x: cocoaPoint.x, y: globalScreenMaxY() - cocoaPoint.y)
-    }
-
-    private func cocoaFrame(fromAXFrame frame: CGRect) -> CGRect {
-        let mainH = globalScreenMaxY()
-        return CGRect(x: frame.minX, y: mainH - frame.maxY, width: frame.width, height: frame.height)
-    }
-
-    private func axFrame(fromVisibleFrame frame: CGRect) -> CGRect {
-        let mainH = globalScreenMaxY()
-        return CGRect(x: frame.minX, y: mainH - frame.maxY, width: frame.width, height: frame.height)
-    }
-
-    private func screen(for window: AXUIElement) -> NSScreen? {
-        guard let frame = axFrame(window) else { return NSScreen.main }
-        let cocoa = cocoaFrame(fromAXFrame: frame)
-        let center = CGPoint(x: cocoa.midX, y: cocoa.midY)
-        return NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? NSScreen.main
-    }
-
-    private func targetWindow() -> AXUIElement? {
-        switch Settings.shared.windowTargetingMode {
-        case .focusedThenCursor:
-            return focusedWindow() ?? windowAtCursor()
-        case .cursorThenFocused:
-            return windowAtCursor() ?? focusedWindow()
-        }
-    }
+    // MARK: - Window state queries
 
     func isFrontmostWindowFullscreen() -> Bool {
         guard let w = focusedWindow() else { return false }
@@ -312,89 +229,13 @@ final class ActionExecutor {
     }
 
     internal func isWindowMaximized(_ window: AXUIElement) -> Bool {
-        guard let frame = axFrame(window),
-              let screen = screen(for: window) else { return false }
-
-        let visible = axFrame(fromVisibleFrame: screen.visibleFrame)
+        guard let frame = axFrame(window), let screen = screen(for: window) else { return false }
+        let visible   = axFrame(fromVisibleFrame: screen.visibleFrame)
         let tolerance: CGFloat = 16
-
         return abs(frame.minX - visible.minX) <= tolerance
             && abs(frame.minY - visible.minY) <= tolerance
-            && abs(frame.width - visible.width) <= tolerance
+            && abs(frame.width  - visible.width)  <= tolerance
             && abs(frame.height - visible.height) <= tolerance
-    }
-
-    private func defaultRestoredFrame(for window: AXUIElement) -> CGRect? {
-        guard let screen = screen(for: window) else { return nil }
-        let visible = screen.visibleFrame
-        let width = visible.width * 0.7
-        let height = visible.height * 0.7
-        let x = visible.minX + (visible.width - width) / 2
-        let y = visible.minY + (visible.height - height) / 2
-        return axFrame(fromVisibleFrame: CGRect(x: x, y: y, width: width, height: height))
-    }
-
-    private func axBool(_ element: AXUIElement, attribute: CFString) -> Bool? {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute, &ref) == .success else { return nil }
-        return ref as? Bool
-    }
-
-    @discardableResult
-    private func setAXBool(_ element: AXUIElement, attribute: CFString, value: Bool) -> Bool {
-        AXUIElementSetAttributeValue(element, attribute, value as CFTypeRef) == .success
-    }
-
-    private func windows(for pid: pid_t) -> [AXUIElement] {
-        let app = AXUIElementCreateApplication(pid)
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) == .success,
-              let windows = ref as? [AXUIElement] else { return [] }
-        return windows
-    }
-
-    private func pid(for element: AXUIElement) -> pid_t? {
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(element, &pid) == .success else { return nil }
-        return pid
-    }
-
-    private func axValue(from ref: CFTypeRef?) -> AXValue? {
-        guard let ref, CFGetTypeID(ref) == AXValueGetTypeID() else { return nil }
-        return unsafeBitCast(ref, to: AXValue.self)
-    }
-
-    private func axElement(from ref: CFTypeRef?) -> AXUIElement? {
-        guard let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
-        return unsafeBitCast(ref, to: AXUIElement.self)
-    }
-
-    private func pruneStaleMinimizedWindows(for pid: pid_t? = nil) {
-        lastMinimizedWindows.removeAll { window in
-            if let pid, self.pid(for: window) == pid {
-                return true
-            }
-            return axBool(window, attribute: kAXMinimizedAttribute as CFString) != true
-        }
-    }
-
-    func isApplicationMinimized(_ app: NSRunningApplication) -> Bool {
-        for window in windows(for: app.processIdentifier) {
-            if axBool(window, attribute: kAXMinimizedAttribute as CFString) == true {
-                return true
-            }
-        }
-        return false
-    }
-
-    private func focusedWindow() -> AXUIElement? {
-        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
-        let app = AXUIElementCreateApplication(pid)
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &ref) == .success else {
-            return nil
-        }
-        return axElement(from: ref)
     }
 
     // MARK: - Window operations
@@ -412,8 +253,6 @@ final class ActionExecutor {
         }
     }
 
-    /// Activates the next visible (non-minimized) regular app, excluding the given app.
-    /// If no such app exists, deactivates everything.
     private func activateNextApp(excluding current: NSRunningApplication?) {
         let myPID = ProcessInfo.processInfo.processIdentifier
         let apps = NSWorkspace.shared.runningApplications.filter {
@@ -422,7 +261,6 @@ final class ActionExecutor {
             && $0.processIdentifier != (current?.processIdentifier ?? 0)
             && !$0.isHidden
         }
-        // Prefer apps that still have visible (non-minimized) windows
         let appWithVisible = apps.first { app in
             self.windows(for: app.processIdentifier).contains {
                 self.axBool($0, attribute: kAXMinimizedAttribute as CFString) == false
@@ -431,63 +269,43 @@ final class ActionExecutor {
         if let next = appWithVisible ?? apps.first {
             next.activate(options: .activateIgnoringOtherApps)
         } else {
-            // Nothing to activate — step back to Finder or deactivate
             NSApp.deactivate()
         }
     }
 
-    /// The app that was frontmost before minimize-all, so restore can re-focus it.
-    private var frontmostBeforeMinimize: NSRunningApplication?
-
     private func minimizeAllApps() {
         let myPID = ProcessInfo.processInfo.processIdentifier
-
-        // Remember which app was active so restore can bring it back
         frontmostBeforeMinimize = NSWorkspace.shared.frontmostApplication
-
-        let apps = NSWorkspace.shared.runningApplications.filter {
-            $0.activationPolicy == .regular && $0.processIdentifier != myPID
-        }
-
-        // Collect all candidate windows first, then minimize.
-        // We minimize the frontmost app's windows LAST so the visual
-        // "cascade away" animation looks natural (back-to-front order).
         let frontPID = frontmostBeforeMinimize?.processIdentifier ?? 0
+
         var backWindows:  [AXUIElement] = []
         var frontWindows: [AXUIElement] = []
 
-        for app in apps {
-            let isFront = app.processIdentifier == frontPID
-            for window in windows(for: app.processIdentifier) {
-                // Skip already-minimized windows
-                guard axBool(window, attribute: kAXMinimizedAttribute as CFString) == false else { continue }
-                // Skip windows with no reasonable size (e.g. hidden helper windows)
-                if let frame = axFrame(window), frame.width < 1 || frame.height < 1 { continue }
-                if isFront {
-                    frontWindows.append(window)
+        for app in NSWorkspace.shared.runningApplications
+            where app.activationPolicy == .regular && app.processIdentifier != myPID {
+            for w in windows(for: app.processIdentifier) {
+                guard axBool(w, attribute: kAXMinimizedAttribute as CFString) == false else { continue }
+                if let f = axFrame(w), f.width < 1 || f.height < 1 { continue }
+                if app.processIdentifier == frontPID {
+                    frontWindows.append(w)
                 } else {
-                    backWindows.append(window)
+                    backWindows.append(w)
                 }
             }
         }
 
-        // Minimize back windows first, then front windows
         var minimizedNow: [AXUIElement] = []
-        for window in backWindows + frontWindows {
-            if setAXBool(window, attribute: kAXMinimizedAttribute as CFString, value: true) {
-                minimizedNow.append(window)
+        for w in backWindows + frontWindows {
+            if setAXBool(w, attribute: kAXMinimizedAttribute as CFString, value: true) {
+                minimizedNow.append(w)
             }
         }
-
         lastMinimizedWindows = minimizedNow
 
-        // Activate Finder so the desktop is shown cleanly
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            if let finder = NSWorkspace.shared.runningApplications.first(where: {
-                $0.bundleIdentifier == "com.apple.finder"
-            }) {
-                finder.activate(options: .activateIgnoringOtherApps)
-            }
+            NSWorkspace.shared.runningApplications
+                .first { $0.bundleIdentifier == "com.apple.finder" }?
+                .activate(options: .activateIgnoringOtherApps)
         }
     }
 
@@ -495,22 +313,18 @@ final class ActionExecutor {
         pruneStaleMinimizedWindows()
         guard !lastMinimizedWindows.isEmpty else { return }
 
-        // Restore in reverse order (last minimized = frontmost app's windows first)
-        // and stagger slightly so WindowServer isn't overwhelmed
-        let windowsToRestore = lastMinimizedWindows.reversed()
-        let savedFrontApp = frontmostBeforeMinimize
+        let toRestore   = lastMinimizedWindows.reversed()
+        let savedFront  = frontmostBeforeMinimize
 
-        for (index, window) in windowsToRestore.enumerated() {
-            let delay = Double(index) * 0.03  // 30ms stagger per window
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                _ = self.setAXBool(window, attribute: kAXMinimizedAttribute as CFString, value: false)
+        for (idx, w) in toRestore.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(idx) * 0.03) {
+                _ = self.setAXBool(w, attribute: kAXMinimizedAttribute as CFString, value: false)
             }
         }
 
-        // Re-focus the app that was active before minimize-all
         let totalDelay = Double(lastMinimizedWindows.count) * 0.03 + 0.1
         DispatchQueue.main.asyncAfter(deadline: .now() + totalDelay) {
-            if let app = savedFrontApp, !app.isTerminated {
+            if let app = savedFront, !app.isTerminated {
                 app.activate(options: .activateIgnoringOtherApps)
             }
         }
@@ -519,38 +333,25 @@ final class ActionExecutor {
         frontmostBeforeMinimize = nil
     }
 
-    private func maximize(windowAtCursor: Bool) {
-        _ = windowAtCursor
-        let w = targetWindow()
-        guard let w else { return }
-
-        // FIX: Prune savedFrames entries for PIDs of apps that are no longer running.
-        // Previously this dictionary grew unboundedly because pruneSavedFrame(pid:) was
-        // only called when an app *terminated* — not when individual windows were closed.
+    private func maximize() {
+        guard let w = targetWindow() else { return }
         pruneOrphanedFrames()
-
         if axBool(w, attribute: kAXMinimizedAttribute as CFString) == true {
             _ = setAXBool(w, attribute: kAXMinimizedAttribute as CFString, value: false)
         }
-
         if !isWindowMaximized(w), let frame = axFrame(w) {
             savedFrames[windowKey(for: w)] = frame
         }
-
         guard let screen = screen(for: w) else { return }
         setFrame(w, axFrame(fromVisibleFrame: screen.visibleFrame))
     }
 
-    private func restore(windowAtCursor: Bool) {
-        _ = windowAtCursor
-        let w = targetWindow()
-        guard let w else { return }
-
+    private func restore() {
+        guard let w = targetWindow() else { return }
         if axBool(w, attribute: kAXMinimizedAttribute as CFString) == true {
             _ = setAXBool(w, attribute: kAXMinimizedAttribute as CFString, value: false)
             return
         }
-
         if isWindowMaximized(w) {
             let key = windowKey(for: w)
             if let saved = savedFrames.removeValue(forKey: key) {
@@ -577,10 +378,10 @@ final class ActionExecutor {
         if axBool(w, attribute: kAXMinimizedAttribute as CFString) == true {
             _ = setAXBool(w, attribute: kAXMinimizedAttribute as CFString, value: false)
         }
-        let isFullscreen = axBool(w, attribute: "AXFullScreen" as CFString) ?? false
-        let nextState = targetState ?? !isFullscreen
-        guard nextState != isFullscreen else { return }
-        _ = setAXBool(w, attribute: "AXFullScreen" as CFString, value: nextState)
+        let isFS = axBool(w, attribute: "AXFullScreen" as CFString) ?? false
+        let next = targetState ?? !isFS
+        guard next != isFS else { return }
+        _ = setAXBool(w, attribute: "AXFullScreen" as CFString, value: next)
     }
 
     // MARK: - Snapping
@@ -588,71 +389,65 @@ final class ActionExecutor {
     private func snap(_ fraction: CGRect) {
         guard let w = targetWindow() else { return }
         let mouse = NSEvent.mouseLocation
-        guard let screen = (NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main) else { return }
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else { return }
         let mainH = globalScreenMaxY()
         let vf    = screen.visibleFrame
-
         let x  = vf.minX + vf.width  * fraction.minX
         let y  = vf.minY + vf.height * fraction.minY
         let sw = vf.width  * fraction.width
         let sh = vf.height * fraction.height
-        let cgY = mainH - (y + sh)
-
-        setFrame(w, CGRect(x: x, y: cgY, width: sw, height: sh))
+        setFrame(w, CGRect(x: x, y: mainH - (y + sh), width: sw, height: sh))
     }
 
     private func centerWindow() {
-        guard let w = targetWindow() else { return }
-        guard let f = axFrame(w) else { return }
+        guard let w = targetWindow(), let f = axFrame(w) else { return }
         let mouse = NSEvent.mouseLocation
-        guard let screen = (NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main) else { return }
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else { return }
         let mainH = globalScreenMaxY()
         let vf    = screen.visibleFrame
         let cx    = vf.minX + (vf.width  - f.width)  / 2
         let cy    = vf.minY + (vf.height - f.height) / 2
-        let cgY   = mainH - cy - f.height
-        var pos   = CGPoint(x: cx, y: cgY)
-        if let pr = AXValueCreate(.cgPoint, &pos) { AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, pr) }
+        var pos   = CGPoint(x: cx, y: mainH - cy - f.height)
+        if let pr = AXValueCreate(.cgPoint, &pos) {
+            AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, pr)
+        }
     }
 
     private func moveToNextDisplay() {
-        guard let w = targetWindow() else { return }
-        let screens = NSScreen.screens
-        guard screens.count > 1, let f = axFrame(w) else { return }
-        let mainH = globalScreenMaxY()
-
-        // Determine which screen the window is on
-        let cocoaY  = mainH - f.minY - f.height
+        guard let w = targetWindow(), NSScreen.screens.count > 1, let f = axFrame(w) else { return }
+        let mainH     = globalScreenMaxY()
+        let cocoaY    = mainH - f.minY - f.height
         let winCentre = CGPoint(x: f.midX, y: cocoaY + f.height / 2)
+        let screens   = NSScreen.screens
         guard let curIdx = screens.firstIndex(where: { $0.frame.contains(winCentre) }) else { return }
-        let next = screens[(curIdx + 1) % screens.count]
         let cur  = screens[curIdx]
-
-        // Relative position on current screen → same position on next
+        let next = screens[(curIdx + 1) % screens.count]
         let relX = (f.minX - cur.frame.minX) / cur.frame.width
         let relY = (cocoaY - cur.frame.minY) / cur.frame.height
         let nx   = next.frame.minX + relX * next.frame.width
         let ny   = next.frame.minY + relY * next.frame.height
-        let cgY  = mainH - ny - f.height
-
-        var pos = CGPoint(x: nx, y: cgY)
-        if let pr = AXValueCreate(.cgPoint, &pos) { AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, pr) }
+        var pos  = CGPoint(x: nx, y: mainH - ny - f.height)
+        if let pr = AXValueCreate(.cgPoint, &pos) {
+            AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, pr)
+        }
     }
 
-    // MARK: - App switching (non-switcher)
+    // MARK: - App switching
 
     private func activateAdjacentApp(forward: Bool) {
         let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
         guard let cur = NSWorkspace.shared.frontmostApplication,
               let idx = apps.firstIndex(where: { $0.processIdentifier == cur.processIdentifier }) else { return }
-        let next = forward ? apps[(idx + 1) % apps.count] : apps[(idx + apps.count - 1) % apps.count]
+        let next = forward
+            ? apps[(idx + 1) % apps.count]
+            : apps[(idx + apps.count - 1) % apps.count]
         next.activate(options: .activateIgnoringOtherApps)
     }
 
-    // MARK: - System
+    // MARK: - System actions
 
     private func lockScreen() {
-        // Try private Login framework first
+        // Try private Login framework
         if let h = dlopen("/System/Library/PrivateFrameworks/Login.framework/Versions/Current/Login", RTLD_LAZY) {
             defer { dlclose(h) }
             if let sym = dlsym(h, "SACLockScreenImmediate") {
@@ -661,25 +456,133 @@ final class ActionExecutor {
                 return
             }
         }
-        // Fallback: Ctrl+Cmd+Q
-        sendKey(0x0C, [.maskCommand, .maskControl])
+        sendKey(0x0C, [.maskCommand, .maskControl])   // Ctrl+Cmd+Q fallback
     }
 
     private func sleepSystem() {
+        // FIX: IOPMFindPowerManagement returns a send right — must release with IOServiceClose.
         let port = IOPMFindPowerManagement(mach_port_t(0))
         guard port != 0 else { return }
         IOPMSleepSystem(port)
+        IOServiceClose(port)   // release the Mach send right to prevent port leak
+    }
+
+    // MARK: - AX helpers
+
+    private func axFrame(_ w: AXUIElement) -> CGRect? {
+        var pr: CFTypeRef?, sr: CFTypeRef?
+        AXUIElementCopyAttributeValue(w, kAXPositionAttribute as CFString, &pr)
+        AXUIElementCopyAttributeValue(w, kAXSizeAttribute     as CFString, &sr)
+        guard let pv = axValue(from: pr), let sv = axValue(from: sr) else { return nil }
+        var pos = CGPoint.zero, size = CGSize.zero
+        guard AXValueGetValue(pv, .cgPoint, &pos), AXValueGetValue(sv, .cgSize, &size) else { return nil }
+        return CGRect(origin: pos, size: size)
+    }
+
+    private func setFrame(_ w: AXUIElement, _ frame: CGRect) {
+        var pos  = frame.origin; var size = frame.size
+        if let pr = AXValueCreate(.cgPoint, &pos)  { AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, pr) }
+        if let sr = AXValueCreate(.cgSize,  &size) { AXUIElementSetAttributeValue(w, kAXSizeAttribute     as CFString, sr) }
+    }
+
+    private func axBool(_ e: AXUIElement, attribute: CFString) -> Bool? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(e, attribute, &ref) == .success else { return nil }
+        return ref as? Bool
+    }
+
+    @discardableResult
+    private func setAXBool(_ e: AXUIElement, attribute: CFString, value: Bool) -> Bool {
+        AXUIElementSetAttributeValue(e, attribute, value as CFTypeRef) == .success
+    }
+
+    private func axValue(from ref: CFTypeRef?) -> AXValue? {
+        guard let ref, CFGetTypeID(ref) == AXValueGetTypeID() else { return nil }
+        return unsafeBitCast(ref, to: AXValue.self)
+    }
+
+    private func axElement(from ref: CFTypeRef?) -> AXUIElement? {
+        guard let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+        return unsafeBitCast(ref, to: AXUIElement.self)
+    }
+
+    private func windowKey(for w: AXUIElement) -> WindowKey {
+        var pid: pid_t = 0
+        AXUIElementGetPid(w, &pid)
+        return WindowKey(pid: pid, identity: Int(CFHash(w)))
+    }
+
+    private func windows(for pid: pid_t) -> [AXUIElement] {
+        let app = AXUIElementCreateApplication(pid)
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) == .success,
+              let wins = ref as? [AXUIElement] else { return [] }
+        return wins
+    }
+
+    private func pid(for element: AXUIElement) -> pid_t? {
+        var p: pid_t = 0
+        guard AXUIElementGetPid(element, &p) == .success else { return nil }
+        return p
+    }
+
+    private func screen(for window: AXUIElement) -> NSScreen? {
+        guard let frame = axFrame(window) else { return NSScreen.main }
+        let cocoa  = cocoaFrame(fromAXFrame: frame)
+        let center = CGPoint(x: cocoa.midX, y: cocoa.midY)
+        return NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? NSScreen.main
+    }
+
+    private func defaultRestoredFrame(for window: AXUIElement) -> CGRect? {
+        guard let screen = screen(for: window) else { return nil }
+        let vf = screen.visibleFrame
+        let w  = vf.width * 0.7; let h = vf.height * 0.7
+        return axFrame(fromVisibleFrame: CGRect(
+            x: vf.minX + (vf.width - w) / 2,
+            y: vf.minY + (vf.height - h) / 2,
+            width: w, height: h))
+    }
+
+    private func pruneStaleMinimizedWindows(for pid: pid_t? = nil) {
+        lastMinimizedWindows.removeAll { w in
+            if let pid, self.pid(for: w) == pid { return true }
+            return axBool(w, attribute: kAXMinimizedAttribute as CFString) != true
+        }
+    }
+
+    func isApplicationMinimized(_ app: NSRunningApplication) -> Bool {
+        windows(for: app.processIdentifier).contains {
+            axBool($0, attribute: kAXMinimizedAttribute as CFString) == true
+        }
+    }
+
+    // MARK: - Coordinate conversion
+
+    private func globalScreenMaxY() -> CGFloat {
+        NSScreen.screens.map(\.frame.maxY).max() ?? NSScreen.main?.frame.maxY ?? 0
+    }
+
+    private func quartzPoint(from cocoaPoint: CGPoint) -> CGPoint {
+        CGPoint(x: cocoaPoint.x, y: globalScreenMaxY() - cocoaPoint.y)
+    }
+
+    private func cocoaFrame(fromAXFrame frame: CGRect) -> CGRect {
+        CGRect(x: frame.minX, y: globalScreenMaxY() - frame.maxY,
+               width: frame.width, height: frame.height)
+    }
+
+    private func axFrame(fromVisibleFrame frame: CGRect) -> CGRect {
+        CGRect(x: frame.minX, y: globalScreenMaxY() - frame.maxY,
+               width: frame.width, height: frame.height)
     }
 
     // MARK: - Key event helper
 
     private func sendKey(_ key: CGKeyCode, _ flags: CGEventFlags) {
-        guard let src = eventSource(),
+        guard let src = keyEventSource ?? CGEventSource(stateID: .hidSystemState),
               let kd = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: true),
               let ku = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: false) else { return }
-        kd.flags = flags
-        kd.post(tap: .cghidEventTap)
-        ku.flags = flags
-        ku.post(tap: .cghidEventTap)
+        kd.flags = flags; kd.post(tap: .cghidEventTap)
+        ku.flags = flags; ku.post(tap: .cghidEventTap)
     }
 }
