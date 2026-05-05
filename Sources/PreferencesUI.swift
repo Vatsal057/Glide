@@ -31,9 +31,9 @@ final class PreferencesStore: ObservableObject {
     @Published private(set) var windowTargetingMode: WindowTargetingMode = .focusedThenCursor
     @Published private(set) var hapticFeedbackEnabled = true
     @Published private(set) var debugLoggingEnabled = false
+    @Published private(set) var launchAtLoginEnabled = false
     @Published private(set) var accessibilityGranted = false
     @Published private(set) var diagnostics = RuleDiagnostics()
-    @Published private(set) var launchAtLoginEnabled = false
 
     // Engine state (push-based — no polling timer)
     @Published private(set) var enginePhase: String = "Idle"
@@ -52,9 +52,9 @@ final class PreferencesStore: ObservableObject {
         windowTargetingMode = s.windowTargetingMode
         hapticFeedbackEnabled = s.hapticFeedbackEnabled
         debugLoggingEnabled = s.debugLoggingEnabled
+        launchAtLoginEnabled = s.launchAtLoginEnabled
         accessibilityGranted = AXIsProcessTrusted()
         diagnostics = buildDiagnostics(for: rules)
-        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
     }
 
     /// Subscribe to engine state changes via push callback.
@@ -118,22 +118,36 @@ final class PreferencesStore: ObservableObject {
         Settings.shared.debugLoggingEnabled = v
     }
 
+    func updateLaunchAtLogin(_ v: Bool) {
+        launchAtLoginEnabled = v
+        Settings.shared.launchAtLoginEnabled = v
+        do {
+            if v {
+                if SMAppService.mainApp.status != .enabled {
+                    try SMAppService.mainApp.register()
+                }
+            } else {
+                if SMAppService.mainApp.status == .enabled {
+                    try SMAppService.mainApp.unregister()
+                }
+            }
+        } catch {
+            AppLogger.debug("[Config] SMAppService error: \(error.localizedDescription)")
+            launchAtLoginEnabled = (SMAppService.mainApp.status == .enabled)
+            Settings.shared.launchAtLoginEnabled = launchAtLoginEnabled
+        }
+    }
+
     func updateTuning(_ mutate: (inout GestureTuning) -> Void) {
         var copy = tuning
         mutate(&copy)
-        tuning = normalizedTuning(copy)
-        Settings.shared.tuning = tuning
+        Settings.shared.tuning = copy          // Settings.normalizedTuning runs here + saves
+        tuning = Settings.shared.tuning        // read back the clamped value
     }
 
     func resetTuning() {
-        tuning = GestureTuning()
         Settings.shared.resetTuning()
-    }
-
-    func toggleLaunchAtLogin() {
-        let appDelegate = NSApp.delegate as? AppDelegate
-        appDelegate?.setLaunchAtLogin(!launchAtLoginEnabled)
-        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+        tuning = Settings.shared.tuning
     }
 
     // ── YAML Config Export — copies live file to user-chosen location ──
@@ -161,7 +175,6 @@ final class PreferencesStore: ObservableObject {
         panel.canChooseDirectories    = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         if GlideConfigStore.shared.importFrom(url) {
-            Settings.shared.invalidateCache()
             reload()
             configAlert = .importSuccess
         } else {
@@ -223,9 +236,8 @@ final class PreferencesStore: ObservableObject {
     }
 
     private func persistRules() {
-        rules = rules.map(sanitizedRule)
-        Settings.shared.rules = rules
-        rules = Settings.shared.rules
+        Settings.shared.rules = rules.map(sanitizedRule)
+        rules = Settings.shared.rules       // read back after canonicalization
         diagnostics = buildDiagnostics(for: rules)
     }
 
@@ -251,27 +263,6 @@ final class PreferencesStore: ObservableObject {
         var copy = r
         if copy.direction == .click { copy.speed = .normal }
         return copy
-    }
-
-    private func normalizedTuning(_ t: GestureTuning) -> GestureTuning {
-        var n = t
-        n.initialThreshold = max(0.005, n.initialThreshold)
-        n.appSwitcherStepThreshold = max(0.001, n.appSwitcherStepThreshold)
-        n.appSwitcherDebounce = max(0.0, n.appSwitcherDebounce)
-        n.slowVelocityThreshold = max(0.001, min(n.slowVelocityThreshold, 0.020))
-        n.fastVelocityThreshold = max(n.slowVelocityThreshold + 0.001, max(0.003, min(n.fastVelocityThreshold, 0.030)))
-        n.speedSampleCount = max(2, min(n.speedSampleCount, 8))
-        n.candidateFrames = max(1, min(n.candidateFrames, 8))
-        n.pinchSpreadThreshold = max(0.002, n.pinchSpreadThreshold)
-        n.pinchFrameSpreadThreshold = max(0.001, n.pinchFrameSpreadThreshold)
-        n.swipeCoherenceThreshold = max(0.0, min(n.swipeCoherenceThreshold, 0.95))
-        n.swipeAngleTolerance = max(20, min(n.swipeAngleTolerance, 45))
-        let clamp = { (v: Float) in max(EdgeMargin.range.lowerBound, min(v, EdgeMargin.range.upperBound)) }
-        n.edgeMargin.left   = clamp(n.edgeMargin.left)
-        n.edgeMargin.right  = clamp(n.edgeMargin.right)
-        n.edgeMargin.top    = clamp(n.edgeMargin.top)
-        n.edgeMargin.bottom = clamp(n.edgeMargin.bottom)
-        return n
     }
 
     private func buildDiagnostics(for rules: [GestureRule]) -> RuleDiagnostics {
@@ -656,8 +647,8 @@ struct RuleDetailView: View {
         .formStyle(.grouped)
         .navigationTitle(rule.action.rawValue)
         .navigationSubtitle("\(rule.fingers) fingers · \(rule.direction.rawValue)")
-        .onChange(of: rule.direction) { _ in
-            if rule.direction == .click { rule.speed = .normal }
+        .onChange(of: rule.direction) { newDirection in
+            if newDirection == .click { rule.speed = .normal }
         }
     }
 }
@@ -1132,7 +1123,7 @@ struct AccessibilityStatusCard: View {
                     .foregroundStyle(granted ? .green : .orange)
             }
             .onAppear { pulse = granted }
-            .onChange(of: granted) { pulse = $0 }
+            .onChange(of: granted) { newValue in pulse = newValue }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(granted ? "Accessibility Granted" : "Accessibility Required")
@@ -1266,15 +1257,6 @@ struct GeneralFormView: View {
                 }
             }
 
-            // ── Startup ──
-            Section("Startup") {
-                Toggle("Launch at Login", isOn: Binding(
-                    get: { store.launchAtLoginEnabled },
-                    set: { _ in store.toggleLaunchAtLogin() }
-                ))
-                .help("Automatically start Glide when you log in.")
-            }
-
             // ── Window Targeting ──
             Section("Window Targeting") {
                 Picker("Strategy", selection: Binding(
@@ -1304,6 +1286,20 @@ struct GeneralFormView: View {
                 }
             } footer: {
                 Text("Haptic feedback uses the Force Touch actuator for each gesture. Debug logging prints engine output to Console.app.")
+            }
+
+            // ── Launch ──
+            Section {
+                Toggle("Launch at Login", isOn: Binding(
+                    get: { store.launchAtLoginEnabled },
+                    set: { store.updateLaunchAtLogin($0) }))
+            } header: {
+                HStack(spacing: 6) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.yellow)
+                    Text("Launch")
+                }
             }
 
             // ── Configuration (Import / Export YAML) ──
@@ -1429,7 +1425,6 @@ struct ConfigurationSectionView: View {
             HStack(spacing: 12) {
                 Button {
                     store.exportConfig()
-                    showBanner()
                 } label: {
                     Label("Export Copy…", systemImage: "square.and.arrow.up")
                 }
@@ -1438,7 +1433,6 @@ struct ConfigurationSectionView: View {
 
                 Button {
                     store.importConfig()
-                    showBanner()
                 } label: {
                     Label("Import Config…", systemImage: "square.and.arrow.down")
                 }
