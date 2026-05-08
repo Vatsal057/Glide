@@ -43,17 +43,7 @@ if [[ -f "$SCRIPT_DIR/assets/AppIcon.icns" ]]; then
 fi
 
 # ── Collect Swift sources ────────────────────
-SOURCES=(
-    "$SCRIPT_DIR/Sources/main.swift"
-    "$SCRIPT_DIR/Sources/MultitouchBridge.swift"
-    "$SCRIPT_DIR/Sources/Settings.swift"
-    "$SCRIPT_DIR/Sources/Config.swift"
-    "$SCRIPT_DIR/Sources/ActionExecutor.swift"
-    "$SCRIPT_DIR/Sources/GestureEngine.swift"
-    "$SCRIPT_DIR/Sources/PreferencesWindow.swift"
-    "$SCRIPT_DIR/Sources/PreferencesUI.swift"
-    "$SCRIPT_DIR/Sources/AppDelegate.swift"
-)
+SOURCES=("$SCRIPT_DIR/Sources"/*.swift)
 
 # Verify all sources exist
 for src in "${SOURCES[@]}"; do
