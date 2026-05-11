@@ -1,5 +1,6 @@
 import Cocoa
 import CoreGraphics
+import ApplicationServices
 
 // ─────────────────────────────────────────────
 // MARK: - Haptic engine
@@ -11,8 +12,7 @@ private enum Haptic {
         guard Settings.shared.hapticFeedbackEnabled else { return }
         let pattern: NSHapticFeedbackManager.FeedbackPattern
         switch action {
-        case .quitApp, .forceQuitApp, .quitFrontmost,
-             .closeWindow, .sleep, .lockScreen:
+        case .quitApp, .forceQuitApp, .quitFrontmost, .closeWindow, .sleep, .lockScreen, .openApp:
             pattern = .generic
         case .minimizeWindow, .minimizeAllApps, .restoreMinimizedApps,
              .maximizeWindow, .restoreWindow,
@@ -20,81 +20,47 @@ private enum Haptic {
              .snapLeft, .snapRight, .snapTopLeft, .snapTopRight,
              .snapBottomLeft, .snapBottomRight, .centerWindow, .moveNextDisplay:
             pattern = .levelChange
-        case .missionControl, .appExpose, .showDesktop, .launchpad,
-             .spotlight, .notifCenter, .screenshotArea, .screenshotFull,
-             .hideApp, .hideOthers, .cycleWindows, .switchAppNext, .switchAppPrev,
-             .appSwitcherNext, .appSwitcherPrev:
-            pattern = .alignment
-        case .openApp:
-            pattern = .generic
         case .doNothing:
             return
+        default:
+            pattern = .alignment
         }
-        perform(pattern, time: .now)
+        NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: .now)
     }
 
-    static func switcherStep() {
+    static func switcherStep()   { fire(.alignment) }
+    static func switcherOpen()   { fire(.generic) }
+    static func switcherCommit() { fire(.generic) }
+    static func reciprocal()     { fire(.levelChange) }
+    static func click()          { fire(.generic) }
+
+    private static func fire(_ pattern: NSHapticFeedbackManager.FeedbackPattern) {
         guard Settings.shared.hapticFeedbackEnabled else { return }
-        perform(.alignment, time: .now)
-    }
-
-    static func switcherOpen() {
-        guard Settings.shared.hapticFeedbackEnabled else { return }
-        perform(.generic, time: .now)
-    }
-
-    static func switcherCommit() {
-        guard Settings.shared.hapticFeedbackEnabled else { return }
-        perform(.generic, time: .now)
-    }
-
-    static func reciprocal() {
-        guard Settings.shared.hapticFeedbackEnabled else { return }
-        perform(.levelChange, time: .now)
-    }
-
-    static func click() {
-        guard Settings.shared.hapticFeedbackEnabled else { return }
-        perform(.generic, time: .now)
-    }
-
-    private static func perform(
-        _ pattern: NSHapticFeedbackManager.FeedbackPattern,
-        time: NSHapticFeedbackManager.PerformanceTime
-    ) {
-        NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: time)
+        NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: .now)
     }
 }
 
 // ─────────────────────────────────────────────
-// MARK: - Touch frame data (MT callback → engine)
+// MARK: - Touch frame data
 // ─────────────────────────────────────────────
 
-/// Computed per MT callback frame on the MT thread, passed to onTouches()
-/// on the main queue. Encapsulates all the evidence the engine needs.
 struct TouchFrameData {
     let count: Int32
     let cx: Float
     let cy: Float
-    let spread: Float         // average finger-to-centroid distance
-    let coherence: Float      // 0.0 = chaotic, 1.0 = all fingers same direction
+    let spread: Float
+    let coherence: Float
 }
-
-// ─────────────────────────────────────────────
-// MARK: - GestureEngine
-// ─────────────────────────────────────────────
 
 // ─────────────────────────────────────────────
 // MARK: - Gesture classification
 // ─────────────────────────────────────────────
 
-/// Mutually exclusive gesture type, decided during the candidate phase.
-/// Once set to .swipe or .pinch, it NEVER switches back.
-private enum GestureKind {
-    case unknown
-    case swipe
-    case pinch
-}
+private enum GestureKind { case unknown, swipe, pinch }
+
+// ─────────────────────────────────────────────
+// MARK: - GestureEngine
+// ─────────────────────────────────────────────
 
 final class GestureEngine {
 
@@ -103,63 +69,46 @@ final class GestureEngine {
 
     // MARK: - Session state machine
 
-    /// Candidate-phase data: collected during the first few frames
-    /// to decide if this touch sequence is a swipe.
     private struct CandidateData {
-        let startX: Float
-        let startY: Float
-        let fingers: Int
-        let startTime: TimeInterval
+        let startX: Float; let startY: Float
+        let fingers: Int; let startTime: TimeInterval
         let initialSpread: Float
         var frameCount: Int
-        var cumulativeSpreadDelta: Float  // absolute cumulative change
+        var cumulativeSpreadDelta: Float
         var prevSpread: Float
-        var minCoherence: Float           // worst coherence seen so far
-        var fingerCountStable: Bool
-        // Velocity tracking (InputActions-inspired)
-        var prevCx: Float
-        var prevCy: Float
-        var velocitySamples: [Float]      // per-frame centroid delta magnitudes
-        // Gesture classification (pinch vs swipe)
+        var minCoherence: Float
+        var prevCx: Float; var prevCy: Float
+        var velocitySamples: [Float]
         var gestureKind: GestureKind = .unknown
-        var classificationFrameDelay: Int = 0  // frames elapsed since enough data to classify
+        var classificationFrameDelay: Int = 0
     }
 
-    /// Swipe tracking data: used after locking as swipe to track
-    /// centroid movement toward the threshold.
-    /// Mirrors InputActions' sliding window of per-frame deltas for direction detection.
     private struct SwipeTrackData {
-        let startX: Float
-        let startY: Float
-        var lastX: Float
-        var lastY: Float
-        let fingers: Int
-        let startTime: TimeInterval
-        var velocitySamples: [Float]                // for speed classification
-        var recentDeltas: [(dx: Float, dy: Float)]  // sliding window (InputActions: m_swipeDeltas)
-        // Spread tracking for pre-swipe safety gate
+        let startX: Float; let startY: Float
+        var lastX: Float; var lastY: Float
+        let fingers: Int; let startTime: TimeInterval
+        var velocitySamples: [Float]
+        var recentDeltas: [(dx: Float, dy: Float)]
         let initialSpread: Float
         var prevSpread: Float
         var cumulativeSpreadDelta: Float
     }
 
-    /// App-switcher continuous-scroll data.
     private struct SwitcherData {
-        var refX: Float
-        var index: Int
+        var refX: Float; var index: Int
         let apps: [NSRunningApplication]
+        let finderIndex: Int?   // position of windowless Finder, nil if Finder has windows
+        let effectiveMin: Int   // left boundary (tightened if Finder is at left edge)
+        let effectiveMax: Int   // right boundary (tightened if Finder is at right edge)
     }
 
-    /// The unified session state machine.
-    /// `idle → candidate → lockedSwipe → fired → idle`
-    ///                    `↘ ignored → idle`
     private enum GesturePhase {
         case idle
         case candidate(CandidateData)
         case lockedSwipe(SwipeTrackData)
-        case ignored                        // not a swipe — do nothing until lift
-        case fired                          // action fired, absorb remaining touches
-        case switchingApps(SwitcherData)     // app-switcher continuous mode
+        case ignored
+        case fired
+        case switchingApps(SwitcherData)
     }
 
     // MARK: - Reciprocal token
@@ -167,66 +116,67 @@ final class GestureEngine {
     private struct ReciprocalToken {
         let inverseAction: GestureAction
         let fingers: Int
-        let direction: GestureDirection   // the reverse direction needed to consume
-        let contextApp: String?           // bundle ID at creation time
-        let sessionGeneration: UInt64     // which gesture session created this
-        let createdAt: TimeInterval       // safety timeout reference
+        let direction: GestureDirection
     }
 
     // MARK: - State
 
     private var phase: GesturePhase = .idle
     private var reciprocalToken: ReciprocalToken?
-    private var sessionGeneration: UInt64 = 0
     private var isRunning = false
 
-    /// Timer that detects when the MT callback stops firing (device went stale)
-    /// and force-restarts the multitouch bridge.
-    private var mtWatchdogTimer: Timer?
+    /// Tracks app activation order (most-recently-used first).
+    /// Updated via NSWorkspace.didActivateApplicationNotification so the
+    /// switcher's app array matches the actual Cmd+Tab MRU ordering.
+    private var mruAppOrder: [pid_t] = []
+    private var mruObserver: Any?
+
+    /// Single periodic timer — checks both MT bridge liveness and CGEvent tap health.
+    private var healthTimer: Timer?
 
     private var suppressionTap: CFMachPort?
     private var suppressionSource: CFRunLoopSource?
-    private var suppressionEnabled = false
+    private(set) var suppressionEnabled = false
 
-    /// Dedicated listen-only event tap for click detection.
-    /// Unlike the suppression tap (.defaultTap), listen-only taps are NOT
-    /// disabled by macOS after sleep/wake. This tap PERSISTS across
-    /// engine stop/start cycles — it is only torn down on app quit.
+    /// Listen-only tap for click detection — created once and kept alive across stop/start cycles.
+    /// `.listenOnly` taps are never disabled by macOS timeout; no health check needed.
     private var clickObservationTap: CFMachPort?
     private var clickObservationSource: CFRunLoopSource?
     private var clickTapInstalled = false
 
-    /// Prevents double-processing a click from both the NSEvent monitor
-    /// and the listenOnly CGEvent tap.
+    /// Dedup guard — prevents both the NSEvent monitor and the CGEvent tap
+    /// from processing the same click.
     private var lastClickProcessedTime: TimeInterval = 0
 
     private var interactionMonitors: [Any] = []
-    private var workspaceObservers: [NSObjectProtocol] = []
+    
+    private var lastClickEventTime: TimeInterval = 0
+    
+    private var pressureMonitor: Any?
+    private var lastForceClickTime: TimeInterval = 0
+    private let forceCooldown: TimeInterval = 0.4
 
     private var lastStepTime: TimeInterval = 0
     private lazy var keyEventSource = CGEventSource(stateID: .hidSystemState)
+
+    /// Work item that resets the peak finger count after a short delay, keeping
+    /// the peak alive long enough for the click handler to read it.
+    var peakResetWorkItem: DispatchWorkItem?
 
     private let kCmd:   CGKeyCode = 0x37
     private let kShift: CGKeyCode = 0x38
     private let kTab:   CGKeyCode = 0x30
     private let kOpt:   CGKeyCode = 0x3A
 
-    // MARK: - Observable state (for UI)
+    // MARK: - Observable state
 
     private(set) var currentPhaseName: String = "Idle"
     private(set) var currentFingerCount: Int = 0
     private(set) var isReciprocalActive: Bool = false
-    /// Last known centroid position (0–1 normalised), updated on every MT frame.
-    /// Exposed so the trackpad margin preview can show a live dot.
     private(set) var currentCentroidX: Float = 0.5
     private(set) var currentCentroidY: Float = 0.5
 
-    /// Callback invoked on main queue whenever the engine's observable state
-    /// changes. Used by PreferencesStore to avoid 0.1s polling.
     var onStateChange: (() -> Void)?
-
-    // (suppressContextClear was removed to prevent time-based reciprocal expiration)
-    // MARK: - Tuning shorthand
 
     private var tuning: GestureTuning { Settings.shared.tuning }
 
@@ -236,19 +186,17 @@ final class GestureEngine {
         guard AXIsProcessTrusted() else { print("[Engine] Not trusted"); return }
         guard !isRunning else { return }
 
-        // Full reset before starting
-        resetAllGlobalState()
+        resetGlobalMTState()
         phase = .idle
         reciprocalToken = nil
-        sessionGeneration = 0
         lastClickProcessedTime = 0
 
         setupSuppressionTap()
-        setupClickObservationTap()   // persistent — only created once
-        startMultitouch()
+        setupClickObservationTap()    // persistent — created at most once
+        MultitouchBridge.shared.start(callback: glideMTCallback)
         installInteractionMonitors()
-        installWorkspaceObservers()
-        startMTWatchdog()
+        startHealthTimer()
+        startMRUTracking()
         isRunning = true
         updateObservableState()
         AppLogger.debug("[Engine] Started")
@@ -257,8 +205,8 @@ final class GestureEngine {
     func stop() {
         guard isRunning else { return }
 
-        mtWatchdogTimer?.invalidate()
-        mtWatchdogTimer = nil
+        healthTimer?.invalidate()
+        healthTimer = nil
 
         MultitouchBridge.shared.stop()
         teardownSuppressionTap()
@@ -266,12 +214,7 @@ final class GestureEngine {
         interactionMonitors.forEach { NSEvent.removeMonitor($0) }
         interactionMonitors.removeAll()
 
-        let wnc = NSWorkspace.shared.notificationCenter
-        workspaceObservers.forEach { wnc.removeObserver($0) }
-        workspaceObservers.removeAll()
-
-        // Full symmetric cleanup
-        resetAllGlobalState()
+        resetGlobalMTState()
         phase = .idle
         reciprocalToken = nil
         lastStepTime = 0
@@ -281,59 +224,93 @@ final class GestureEngine {
         AppLogger.debug("[Engine] Stopped")
     }
 
-    /// Zero all global MT state so no stale values survive stop/start.
-    private func resetAllGlobalState() {
+    private func resetGlobalMTState() {
+        // Clear device-keyed state under lock so stale pre-sleep device
+        // pointers don't corrupt sessionPeakActiveTouches on the next wake.
+        // Without this, a prior peak of 4 would permanently block 3-finger
+        // clicks because count (3) != peak (4) after every sleep/wake cycle.
+        countsLock.lock()
+        deviceFingerCounts.removeAll(keepingCapacity: true)
+        sessionPeakActiveTouches = 0
+        countsLock.unlock()
+
         glideActiveTouches = 0
         glideClickFingerCount = 0
         glidePeakFingerCount = 0
         glideLastMTTimestamp = 0
         glideLastDispatchedCount = 0
-        glideLastDispatchedCx = 0
-        glideLastDispatchedCy = 0
+        glideFingerFirstSeen.removeAll(keepingCapacity: true)
+        glideOldestFingerAge = 0
+        glideNewestFingerAge = 0
     }
 
-    // MARK: - Multitouch
+    // MARK: - Health timer (MT watchdog + tap health, combined)
 
-    private func startMultitouch() {
-        MultitouchBridge.shared.start(callback: glideMTCallback)
-    }
-
-    /// Periodically checks that the MT callback is still firing.
-    /// If no MT data arrives for 8 seconds while the engine is running,
-    /// the trackpad device is presumed stale and the MT bridge is restarted.
-    private func startMTWatchdog() {
-        mtWatchdogTimer?.invalidate()
-        // Seed the timestamp so we don't false-trigger immediately on start
+    private func startHealthTimer() {
+        healthTimer?.invalidate()
         glideLastMTTimestamp = ProcessInfo.processInfo.systemUptime
-        let timer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { [weak self] _ in
+        lastClickEventTime = ProcessInfo.processInfo.systemUptime
+
+        let timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             guard let self, self.isRunning else { return }
-            let lastMT = glideLastMTTimestamp
-            let now = ProcessInfo.processInfo.systemUptime
-            // If no MT callback has fired in 8 seconds, the device is dead.
-            // (During normal usage, MT fires at ~60 Hz whenever fingers touch.)
-            // We use 8s to avoid false positives when the user simply isn't
-            // touching the trackpad — the check only matters after wake.
-            guard lastMT > 0, now - lastMT > 8.0 else { return }
-            // Verify the user actually touched the trackpad recently by checking
-            // if there are active touches right now. If glideActiveTouches > 0
-            // but no callback arrived, the bridge is definitely stale.
-            // However, after sleep MT usually goes silent completely (activeTouches = 0
-            // and no callbacks), so we also restart if we detect a system wake
-            // happened recently (the wake handler sets a flag).
-            AppLogger.debug("[Engine] MT watchdog: no callback for \(now - lastMT)s — restarting MT bridge")
-            MultitouchBridge.shared.stop()
-            self.startMultitouch()
-            glideLastMTTimestamp = now
+            self.checkMTHealth()
+            self.checkTapHealth()
         }
-        timer.tolerance = 1.0   // Allow macOS to coalesce ±1s for battery savings
-        mtWatchdogTimer = timer
+        timer.tolerance = 2.0
+        healthTimer = timer
+    }
+
+    /// Restarts the MT bridge if no callback has fired in the last 8 seconds.
+    private func checkMTHealth() {
+        let lastMT = glideLastMTTimestamp
+        let now = ProcessInfo.processInfo.systemUptime
+        guard lastMT > 0, now - lastMT > 8.0 else { return }
+        AppLogger.debug("[Engine] MT watchdog: no callback for \(now - lastMT)s — restarting")
+        MultitouchBridge.shared.stop()
+        MultitouchBridge.shared.start(callback: glideMTCallback)
+        glideLastMTTimestamp = now
+    }
+
+    /// Re-enables or recreates CGEvent taps if macOS has disabled/invalidated them.
+    private func checkTapHealth() {
+        // Suppression tap
+        if let tap = suppressionTap {
+            if !CFMachPortIsValid(tap) {
+                AppLogger.debug("[Engine] Tap health: suppression port invalid — recreating")
+                teardownSuppressionTap()
+                setupSuppressionTap()
+            } else if !CGEvent.tapIsEnabled(tap: tap) && suppressionEnabled {
+                AppLogger.debug("[Engine] Tap health: suppression disabled — re-enabling")
+                CGEvent.tapEnable(tap: tap, enable: true)
+            }
+        } else {
+            setupSuppressionTap()
+        }
+
+        // Click observation tap (listenOnly)
+        let now = ProcessInfo.processInfo.systemUptime
+        if let tap = clickObservationTap {
+            let stale = now - lastClickEventTime > 10.0 // 10s without a tap (aggressive but safe for listen-only)
+            
+            if !CFMachPortIsValid(tap) {
+                AppLogger.debug("[Engine] Tap health: click port invalid — recreating")
+                teardownClickObservationTap()
+                setupClickObservationTap()
+            } else if !CGEvent.tapIsEnabled(tap: tap) {
+                AppLogger.debug("[Engine] Tap health: click disabled — re-enabling")
+                CGEvent.tapEnable(tap: tap, enable: true)
+            } else if stale && glideActiveTouches >= 3 {
+                // If fingers are on pad but tap hasn't fired in 10s, it's likely a zombie
+                AppLogger.debug("[Engine] Tap health: click tap stale with active touches — rebuilding")
+                teardownClickObservationTap()
+                setupClickObservationTap()
+            }
+        } else {
+            setupClickObservationTap()
+        }
     }
 
     // MARK: - Suppression tap
-
-    /// Timer that periodically checks whether the CGEvent tap is still alive.
-    /// macOS can silently invalidate taps after sleep/wake.
-    private var tapHealthTimer: Timer?
 
     private func setupSuppressionTap() {
         let mask = UInt64(NSEvent.EventTypeMask.gesture.rawValue)
@@ -346,21 +323,20 @@ final class GestureEngine {
             options: .defaultTap,
             eventsOfInterest: mask,
             callback: { _, type, cgEvent, _ in
-                // macOS disables taps that take too long or after sleep.
-                // Re-enable immediately when notified.
                 if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                    AppLogger.debug("[Engine] Suppression tap was disabled by system — re-enabling")
-                    if let tap = GestureEngine.shared.suppressionTap {
+                    // Only re-enable if the tap is *supposed* to be active (≥3 fingers on pad).
+                    // macOS can fire tapDisabledByTimeout even for an intentionally-disabled tap;
+                    // blindly re-enabling it leaves the tap intercepting scroll/gesture events
+                    // during normal cursor movement, causing 2–3 % idle CPU usage.
+                    if GestureEngine.shared.suppressionEnabled,
+                       let tap = GestureEngine.shared.suppressionTap {
+                        AppLogger.debug("[Engine] Suppression tap timed out — re-enabling (active)")
                         CGEvent.tapEnable(tap: tap, enable: true)
                     }
-                    // Return nil — the cgEvent is NULL for tap-disabled notifications
                     return nil
                 }
                 if type == .leftMouseDown {
-                    let n = glideActiveTouches
-                    if n >= 3 {
-                        glideClickFingerCount = n
-                    }
+                    if glideActiveTouches >= 3 { glideClickFingerCount = glideActiveTouches }
                     return Unmanaged.passUnretained(cgEvent)
                 }
                 if glideActiveTouches >= 3 { return nil }
@@ -372,7 +348,6 @@ final class GestureEngine {
             suppressionSource = CFMachPortCreateRunLoopSource(nil, tap, 0)
             CFRunLoopAddSource(CFRunLoopGetCurrent(), suppressionSource, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: false)
-            startTapHealthTimer()
             AppLogger.debug("[Engine] Suppression tap created")
         } else {
             print("[Engine] Could not create suppression tap")
@@ -386,8 +361,6 @@ final class GestureEngine {
     }
 
     private func teardownSuppressionTap() {
-        tapHealthTimer?.invalidate()
-        tapHealthTimer = nil
         if let tap = suppressionTap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let src = suppressionSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), src, .commonModes) }
         suppressionTap    = nil
@@ -395,89 +368,37 @@ final class GestureEngine {
         suppressionEnabled = false
     }
 
-    /// Periodically verifies the CGEvent taps are still valid.
-    /// If macOS silently killed them (e.g. after sleep), tear down and recreate.
-    private func startTapHealthTimer() {
-        tapHealthTimer?.invalidate()
-        let healthTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            guard let self, self.isRunning else { return }
+    // MARK: - Click observation tap (listenOnly — persists across stop/start)
 
-            // ── Suppression tap health ──
-            if let tap = self.suppressionTap {
-                if !CGEvent.tapIsEnabled(tap: tap) {
-                    AppLogger.debug("[Engine] Tap health: suppression tap disabled, re-enabling")
-                    CGEvent.tapEnable(tap: tap, enable: true)
-                }
-                if !CFMachPortIsValid(tap) {
-                    AppLogger.debug("[Engine] Tap health: suppression mach port invalid, recreating")
-                    self.teardownSuppressionTap()
-                    self.setupSuppressionTap()
-                }
-            } else {
-                AppLogger.debug("[Engine] Tap health: suppression tap nil, recreating")
-                self.setupSuppressionTap()
-            }
-
-            // ── Click observation tap health ──
-            if let tap = self.clickObservationTap {
-                if !CGEvent.tapIsEnabled(tap: tap) {
-                    AppLogger.debug("[Engine] Tap health: click tap disabled, re-enabling")
-                    CGEvent.tapEnable(tap: tap, enable: true)
-                }
-                if !CFMachPortIsValid(tap) {
-                    AppLogger.debug("[Engine] Tap health: click mach port invalid, recreating")
-                    self.teardownClickObservationTap()
-                    self.setupClickObservationTap()
-                }
-            } else {
-                AppLogger.debug("[Engine] Tap health: click tap nil, recreating")
-                self.setupClickObservationTap()
-            }
-        }
-        healthTimer.tolerance = 2.0   // Allow macOS to coalesce ±2s for battery savings
-        tapHealthTimer = healthTimer
-    }
-
-    // MARK: - Click observation tap (listenOnly — survives sleep/wake)
-
-    /// Creates a `.listenOnly` CGEvent tap that observes leftMouseDown.
-    /// Unlike the suppression tap, this tap:
-    /// - Cannot be disabled by macOS timeout (it doesn't filter/block events)
-    /// - Is NOT torn down during engine stop/start cycles
-    /// - Provides a redundant click detection path independent of NSEvent monitors
     private func setupClickObservationTap() {
-        guard !clickTapInstalled else { return }   // only create once
+        guard !clickTapInstalled else { return }
 
-        let mask = UInt64(1 << CGEventType.leftMouseDown.rawValue)
-
+        let mask = CGEventMask(1 << CGEventType.leftMouseDown.rawValue)
         clickObservationTap = CGEvent.tapCreate(
             tap: .cghidEventTap,
-            place: .tailAppendEventTap,       // after other taps
-            options: .listenOnly,             // passive — never disabled by macOS
+            place: .headInsertEventTap,
+            options: .listenOnly,
             eventsOfInterest: mask,
-            callback: { _, type, cgEvent, _ in
+            callback: { _, type, event, _ in
+                GestureEngine.shared.lastClickEventTime = ProcessInfo.processInfo.systemUptime
+
                 if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                     if let tap = GestureEngine.shared.clickObservationTap {
                         CGEvent.tapEnable(tap: tap, enable: true)
                     }
                     return nil
                 }
-                guard type == .leftMouseDown else {
-                    return nil
+                guard type == .leftMouseDown else { return Unmanaged.passUnretained(event) }
+
+                let count = getThreeFingerCount()
+                let peak = getSessionPeakActiveTouches()
+                AppLogger.debug("🖱️ leftMouseDown (fingers detected: \(count), peak: \(peak))")
+
+                if count >= 3 && count == peak {
+                    AppLogger.debug("✅ Click match! Triggering action...")
+                    DispatchQueue.main.async { GestureEngine.shared.processClick(fingerCount: count) }
                 }
-                // Read finger count from all available sources
-                let tapCount  = glideClickFingerCount
-                let peakCount = glidePeakFingerCount
-                let liveCount = glideActiveTouches
-                let n = max(tapCount, peakCount, liveCount)
-                if n >= 3 {
-                    // Dispatch click processing to main queue
-                    let fingerCount = Int(n)
-                    DispatchQueue.main.async {
-                        GestureEngine.shared.processClick(fingerCount: fingerCount)
-                    }
-                }
-                return nil   // listenOnly — return value is ignored
+                return Unmanaged.passUnretained(event)
             },
             userInfo: nil)
 
@@ -486,7 +407,7 @@ final class GestureEngine {
             CFRunLoopAddSource(CFRunLoopGetMain(), clickObservationSource, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: true)
             clickTapInstalled = true
-            AppLogger.debug("[Engine] Click observation tap created (listenOnly)")
+            AppLogger.debug("[Engine] Click observation tap created")
         } else {
             print("[Engine] Could not create click observation tap")
         }
@@ -500,60 +421,60 @@ final class GestureEngine {
         clickTapInstalled      = false
     }
 
+    func forceReinitializeInputPipeline() {
+        AppLogger.debug("[Engine] Force reinitializing input pipeline")
+        teardownClickObservationTap()
+        stop()
+        start()
+    }
+
     // MARK: - Interaction monitors
 
     private func installInteractionMonitors() {
-        if let m = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown, handler: { [weak self] _ in
-            self?.handleLeftClickFromMonitor()
-        }) { interactionMonitors.append(m) }
-        AppLogger.debug("[Engine] Installed \(interactionMonitors.count) interaction monitors")
-
         if let m = NSEvent.addGlobalMonitorForEvents(matching: [.rightMouseDown, .otherMouseDown], handler: { [weak self] _ in
             self?.handleExternalInteraction()
         }) { interactionMonitors.append(m) }
+
+        startForceClickDetection()
+
+        AppLogger.debug("[Engine] Installed \(interactionMonitors.count) interaction monitors")
     }
 
-    private func installWorkspaceObservers() {
-        // App-switch token clearing has been intentionally removed to prevent time-based expiration
-        // of reciprocal gestures like Mission Control.
-    }
+    private func startForceClickDetection() {
+        let pressureMask = NSEvent.EventTypeMask(rawValue: 1 << NSEvent.EventType.pressure.rawValue)
+        pressureMonitor = NSEvent.addGlobalMonitorForEvents(matching: pressureMask) { [weak self] event in
+            guard let self = self, self.isRunning else { return }
+            let count = getThreeFingerCount()
+            let peak = getSessionPeakActiveTouches()
+            guard count >= 3 && count == peak, event.stage >= 2 else { return }
 
-    /// Called from the NSEvent global monitor (backup path).
-    private func handleLeftClickFromMonitor() {
-        let tapCount  = Int(glideClickFingerCount)
-        let peakCount = Int(glidePeakFingerCount)
-        let liveCount = Int(glideActiveTouches)
-        let n = max(tapCount, peakCount, liveCount)
+            let now = Date().timeIntervalSinceReferenceDate
+            guard now - self.lastForceClickTime > self.forceCooldown else { return }
+            self.lastForceClickTime = now
 
-        if n >= 3 {
-            processClick(fingerCount: n)
-        } else {
-            // Normal 1-finger click: clear reciprocal state
-            glideClickFingerCount = 0
-            clearReciprocalToken()
+            AppLogger.debug("✅ Force click (stage=\(event.stage))")
+            DispatchQueue.main.async { self.processClick(fingerCount: count) }
         }
+        if let pm = pressureMonitor { interactionMonitors.append(pm) }
     }
 
-    /// Core click handler — called from both the listenOnly CGEvent tap
-    /// and the NSEvent global monitor. Uses a timestamp to dedup.
-    func processClick(fingerCount n: Int) {
+    func processClick(fingerCount n: Int, isForce: Bool = false) {
         if case .switchingApps = phase { return }
 
-        // Dedup: if this click was already processed within 100ms, skip.
+        // ── Strict simultaneous-touch guard ────────────────────────────────────
+        // Replaced by exact Archive logic (no age-spread validation).
+        // ───────────────────────────────────────────────────────────────────────
+
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastClickProcessedTime > 0.1 else { return }
         lastClickProcessedTime = now
-
         glideClickFingerCount = 0
 
-        guard let rule = bestRule(fingers: n, direction: .click) else {
-            return
-        }
+        guard let rule = bestRule(fingers: n, direction: .click) else { return }
 
         AppLogger.debug("[Engine] Click — \(n) fingers → \(rule.action.rawValue)")
         clearReciprocalToken()
         phase = .fired
-
         Haptic.click()
 
         if rule.action == .quitApp {
@@ -572,17 +493,14 @@ final class GestureEngine {
         clearReciprocalToken()
     }
 
-    // MARK: - Touch update (phase-driven dispatcher)
+    // MARK: - Touch update (main entry point)
 
     func onTouches(_ frame: TouchFrameData) {
-        // Note: glideActiveTouches is updated on the MT thread now
-        // (before dispatch to main) so the CGEvent tap can see it immediately.
         setSuppressionActive(frame.count >= 3)
 
         let n = Int(frame.count)
         currentFingerCount = n
 
-        // ── Fingers lifted: reset session ──
         if n < 3 {
             glideClickFingerCount = 0
             finishIfNeeded()
@@ -590,220 +508,104 @@ final class GestureEngine {
             return
         }
 
-        // Update centroid for UI live preview
         currentCentroidX = frame.cx
         currentCentroidY = frame.cy
 
-        // ── Click-in-progress guard ──
-        if glideClickFingerCount >= 3 {
-            return
-        }
+        if glideClickFingerCount >= 3 { return }
 
         let now = ProcessInfo.processInfo.systemUptime
 
         switch phase {
 
-        // ──────────────────────────────────────────────
-        // IDLE: fingers appeared — start a candidate session
-        // ──────────────────────────────────────────────
         case .idle:
             guard hasAnySwipeRule(fingers: n) else { return }
-            // ── Edge margin guard ──
-            // Ignore gestures that begin inside the configured dead zones near
-            // the trackpad bezel. cx/cy are normalised (0.0–1.0); cy=0 is bottom.
             if tuning.edgeMarginEnabled {
                 let m = tuning.edgeMargin
-                let inEdge = frame.cx < m.left
-                          || frame.cx > (1.0 - m.right)
-                          || frame.cy < m.bottom
-                          || frame.cy > (1.0 - m.top)
-                if inEdge { return }  // stay idle — don't start a candidate
+                if frame.cx < m.left || frame.cx > (1.0 - m.right)
+                || frame.cy < m.bottom || frame.cy > (1.0 - m.top) { return }
             }
-            sessionGeneration &+= 1
-            let data = CandidateData(
+            phase = .candidate(CandidateData(
                 startX: frame.cx, startY: frame.cy,
                 fingers: n, startTime: now,
                 initialSpread: frame.spread,
-                frameCount: 1,
-                cumulativeSpreadDelta: 0,
-                prevSpread: frame.spread,
-                minCoherence: frame.coherence,
-                fingerCountStable: true,
-                prevCx: frame.cx,
-                prevCy: frame.cy,
-                velocitySamples: [],
-                gestureKind: .unknown,
-                classificationFrameDelay: 0
-            )
-            phase = .candidate(data)
+                frameCount: 1, cumulativeSpreadDelta: 0,
+                prevSpread: frame.spread, minCoherence: frame.coherence,
+                prevCx: frame.cx, prevCy: frame.cy,
+                velocitySamples: []
+            ))
 
-        // ──────────────────────────────────────────────
-        // CANDIDATE: collecting evidence before locking
-        // ──────────────────────────────────────────────
         case .candidate(var data):
-            // Finger count increased (more fingers landing) → restart candidate
-            // with higher count. Only common for 4/5 finger gestures where
-            // fingers don't all land at the same instant.
             if n > data.fingers {
-                guard hasAnySwipeRule(fingers: n) else {
-                    phase = .ignored
-                    updateObservableState()
-                    return
-                }
-                data = CandidateData(
+                guard hasAnySwipeRule(fingers: n) else { phase = .ignored; updateObservableState(); return }
+                phase = .candidate(CandidateData(
                     startX: frame.cx, startY: frame.cy,
                     fingers: n, startTime: now,
                     initialSpread: frame.spread,
-                    frameCount: 1,
-                    cumulativeSpreadDelta: 0,
-                    prevSpread: frame.spread,
-                    minCoherence: frame.coherence,
-                    fingerCountStable: true,
-                    prevCx: frame.cx,
-                    prevCy: frame.cy,
-                    velocitySamples: [],
-                    gestureKind: .unknown,
-                    classificationFrameDelay: 0
-                )
-                phase = .candidate(data)
-                AppLogger.debug("[Engine] Candidate restarted — finger count increased to \(n)")
+                    frameCount: 1, cumulativeSpreadDelta: 0,
+                    prevSpread: frame.spread, minCoherence: frame.coherence,
+                    prevCx: frame.cx, prevCy: frame.cy,
+                    velocitySamples: []
+                ))
+                AppLogger.debug("[Engine] Candidate restarted — \(n) fingers")
                 return
             }
-            // Finger count decreased → veto
-            if n < data.fingers {
-                phase = .ignored
-                AppLogger.debug("[Engine] Session ignored — finger count decreased (\(data.fingers) → \(n))")
-                updateObservableState()
-                return
-            }
+            if n < data.fingers { phase = .ignored; updateObservableState(); return }
 
             data.frameCount += 1
 
-            // ── Velocity sampling (InputActions-inspired) ──
-            // Compute per-frame centroid displacement and accumulate
             let frameDx = frame.cx - data.prevCx
             let frameDy = frame.cy - data.prevCy
-            let frameDist = (frameDx * frameDx + frameDy * frameDy).squareRoot()
-            // Only sample up to speedSampleCount frames for velocity
             if data.velocitySamples.count < tuning.speedSampleCount {
-                data.velocitySamples.append(frameDist)
+                data.velocitySamples.append((frameDx * frameDx + frameDy * frameDy).squareRoot())
             }
-            data.prevCx = frame.cx
-            data.prevCy = frame.cy
+            data.prevCx = frame.cx; data.prevCy = frame.cy
 
-            // Accumulate spread evidence
             let frameDelta = abs(frame.spread - data.prevSpread)
             data.cumulativeSpreadDelta += frameDelta
             data.prevSpread = frame.spread
+            if frame.coherence < data.minCoherence { data.minCoherence = frame.coherence }
 
-            // Track worst coherence
-            if frame.coherence < data.minCoherence {
-                data.minCoherence = frame.coherence
-            }
-
-            // ── Immediate veto: very large per-frame spread change ──
-            // This catches aggressive pinch/spread early regardless of frame count
             if frameDelta > tuning.pinchFrameSpreadThreshold * 1.5 {
-                data.gestureKind = .pinch
-                phase = .ignored
-                AppLogger.debug("[Engine] Session ignored — large frame spread delta \(frameDelta), locked as pinch")
-                updateObservableState()
-                return
+                phase = .ignored; updateObservableState(); return
             }
 
-            // ── Compute centroid movement vs spread (used for classification) ──
-            let centroidMovement = (
-                (frame.cx - data.startX) * (frame.cx - data.startX) +
-                (frame.cy - data.startY) * (frame.cy - data.startY)
-            ).squareRoot()
+            let centroidMovement = ((frame.cx - data.startX) * (frame.cx - data.startX)
+                                  + (frame.cy - data.startY) * (frame.cy - data.startY)).squareRoot()
             let totalSpreadChange = abs(frame.spread - data.initialSpread)
 
-            // ── Early pinch dominance override ──
-            // Even before full classification, if spread change is significantly
-            // larger than centroid movement, immediately lock as pinch.
-            // This catches pinch gestures that start before the classification
-            // delay window completes. Uses 0.8x ratio (generous toward swipes).
             if totalSpreadChange > 0.002 && totalSpreadChange > centroidMovement * 0.8 && data.frameCount >= 2 {
-                data.gestureKind = .pinch
-                phase = .ignored
-                AppLogger.debug("[Engine] Session ignored — early pinch dominance: spread \(totalSpreadChange) >> centroid \(centroidMovement)")
-                updateObservableState()
-                return
+                phase = .ignored; updateObservableState(); return
             }
 
-            // ── Fix 4: Delay classification — let the gesture reveal itself ──
-            // Minimum 3 frames before any decision. Early frames of pinch
-            // often look like swipes (high coherence, low spread).
             let minFrames = max(Int(tuning.candidateFrames), 3)
-            guard data.frameCount >= minFrames else {
-                phase = .candidate(data)
-                return
-            }
+            guard data.frameCount >= minFrames else { phase = .candidate(data); return }
 
-            // ── Gesture classification (after 2-3 frame delay) ──
-            // Once gestureKind is decided, it NEVER switches.
             if data.gestureKind == .unknown {
                 data.classificationFrameDelay += 1
                 if data.classificationFrameDelay >= 2 {
-                    // Classify: if spread change dominates centroid movement → pinch
-                    if totalSpreadChange > centroidMovement * 0.8 {
-                        data.gestureKind = .pinch
-                    } else {
-                        data.gestureKind = .swipe
-                    }
-                    AppLogger.debug("[Engine] Gesture classified as \(data.gestureKind) — spread \(totalSpreadChange) vs centroid \(centroidMovement)")
+                    data.gestureKind = totalSpreadChange > centroidMovement * 0.8 ? .pinch : .swipe
+                    AppLogger.debug("[Engine] Classified as \(data.gestureKind)")
                 }
             }
 
-            // ── If classified as pinch → permanently block swipe ──
-            if data.gestureKind == .pinch {
-                phase = .ignored
-                AppLogger.debug("[Engine] Session ignored — classified as pinch, swipe permanently blocked")
-                updateObservableState()
-                return
-            }
+            if data.gestureKind == .pinch { phase = .ignored; updateObservableState(); return }
 
-            // ── Fix 3: compare centroid movement vs spread ──
-            // A swipe has high centroid movement and minimal spread change.
-            // A pinch/spread has significant spread with small/incidental centroid drift.
             if totalSpreadChange > 0.002 && totalSpreadChange > centroidMovement * 0.5 {
-                data.gestureKind = .pinch
-                phase = .ignored
-                AppLogger.debug("[Engine] Session ignored — pinch detected: spread \(totalSpreadChange) dominates centroid \(centroidMovement)")
-                updateObservableState()
-                return
+                phase = .ignored; updateObservableState(); return
             }
-
-            // ── Fix 1 & 2: Cumulative spread check (pinch lock, not just veto) ──
             if data.cumulativeSpreadDelta > tuning.pinchSpreadThreshold {
-                data.gestureKind = .pinch
-                phase = .ignored
-                AppLogger.debug("[Engine] Session ignored — cumulative spread \(data.cumulativeSpreadDelta) > \(tuning.pinchSpreadThreshold)")
-                updateObservableState()
-                return
+                phase = .ignored; updateObservableState(); return
             }
-
-            // ── Fix 5: Coherence as positive signal ──
-            // Very low coherence → fingers diverging → pinch territory
             if data.minCoherence < tuning.swipeCoherenceThreshold {
-                data.gestureKind = .pinch
-                phase = .ignored
-                AppLogger.debug("[Engine] Session ignored — coherence \(data.minCoherence) < \(tuning.swipeCoherenceThreshold)")
-                updateObservableState()
-                return
+                phase = .ignored; updateObservableState(); return
             }
 
-            // ── Fix 6: Hard swipe condition — only lock when evidence is clear ──
-            // Require: centroid movement exceeds spread AND spread is small AND coherence OK
-            // AND gestureKind is NOT pinch (locked classification)
-            let spreadIsSmall = data.cumulativeSpreadDelta < tuning.pinchSpreadThreshold
+            let spreadIsSmall    = data.cumulativeSpreadDelta < tuning.pinchSpreadThreshold
             let centroidDominates = centroidMovement > totalSpreadChange
-            let coherenceOK = data.minCoherence >= tuning.swipeCoherenceThreshold
-            let notPinch = data.gestureKind != .pinch
+            let coherenceOK      = data.minCoherence >= tuning.swipeCoherenceThreshold
 
-            if spreadIsSmall && centroidDominates && coherenceOK && notPinch {
-                // All checks passed — lock as swipe
-                data.gestureKind = .swipe  // lock classification
+            if spreadIsSmall && centroidDominates && coherenceOK && data.gestureKind != .pinch {
+                data.gestureKind = .swipe
                 let swipeData = SwipeTrackData(
                     startX: data.startX, startY: data.startY,
                     lastX: frame.cx, lastY: frame.cy,
@@ -815,183 +617,127 @@ final class GestureEngine {
                     cumulativeSpreadDelta: data.cumulativeSpreadDelta
                 )
                 phase = .lockedSwipe(swipeData)
-                AppLogger.debug("[Engine] Session locked as swipe — \(n) fingers, coherence \(data.minCoherence), centroid \(centroidMovement) vs spread \(totalSpreadChange)")
+                AppLogger.debug("[Engine] Locked as swipe — \(n) fingers")
                 updateObservableState()
-                // Fall through to process this frame as a swipe
                 processSwipeFrame(frame, data: swipeData, now: now)
             } else if data.frameCount >= minFrames + 5 {
-                // Safety timeout: too many frames without clear classification → ignore
-                phase = .ignored
-                AppLogger.debug("[Engine] Session ignored — classification timeout at \(data.frameCount) frames")
-                updateObservableState()
+                phase = .ignored; updateObservableState()
             } else {
-                // Not enough evidence yet — continue collecting
                 phase = .candidate(data)
             }
 
-        // ──────────────────────────────────────────────
-        // LOCKED SWIPE: tracking centroid for threshold
-        // ──────────────────────────────────────────────
         case .lockedSwipe(let data):
             guard n == data.fingers else { finishIfNeeded(); return }
             processSwipeFrame(frame, data: data, now: now)
 
-        // ──────────────────────────────────────────────
-        // APP SWITCHER: continuous trackpad-driven Cmd+Tab
-        // ──────────────────────────────────────────────
         case .switchingApps(var data):
             guard n == 3 else { commitAppSwitcher(data: data); return }
             let delta = frame.cx - data.refX
             if abs(delta) > tuning.appSwitcherStepThreshold,
                now - lastStepTime >= tuning.appSwitcherDebounce {
-                if delta > 0, data.index < data.apps.count - 1 {
-                    Haptic.switcherStep()
-                    sendCmdTab()
-                    lastStepTime = now
-                    data.refX = frame.cx
-                    data.index = min(data.index + 1, data.apps.count - 1)
+                // Forward step
+                if delta > 0, data.index < data.effectiveMax {
+                    Haptic.switcherStep(); sendCmdTab()
+                    lastStepTime = now; data.refX = frame.cx
+                    data.index += 1
+                    // If we landed on Finder in the middle, skip one more
+                    if let fi = data.finderIndex, data.index == fi,
+                       data.index < data.effectiveMax {
+                        sendCmdTab()
+                        data.index += 1
+                    }
                     phase = .switchingApps(data)
-                } else if delta < 0, data.index > 0 {
-                    Haptic.switcherStep()
-                    sendCmdShiftTab()
-                    lastStepTime = now
-                    data.refX = frame.cx
-                    data.index = max(data.index - 1, 0)
+                // Backward step
+                } else if delta < 0, data.index > data.effectiveMin {
+                    Haptic.switcherStep(); sendCmdShiftTab()
+                    lastStepTime = now; data.refX = frame.cx
+                    data.index -= 1
+                    // If we landed on Finder in the middle, skip one more
+                    if let fi = data.finderIndex, data.index == fi,
+                       data.index > data.effectiveMin {
+                        sendCmdShiftTab()
+                        data.index -= 1
+                    }
                     phase = .switchingApps(data)
                 }
             }
 
-        // ──────────────────────────────────────────────
-        // IGNORED / FIRED: do nothing until lift
-        // ──────────────────────────────────────────────
         case .ignored, .fired:
             break
         }
     }
 
-    // MARK: - Swipe frame processing (InputActions-inspired)
-    //
-    // Key changes from original:
-    // 1. Magnitude-based threshold: hypot(dx, dy) instead of checking abs(dx) then abs(dy)
-    //    Fixes: diagonal swipes no longer biased toward horizontal
-    // 2. Sliding delta window: direction from recent per-frame deltas, not total displacement
-    //    Matches InputActions' m_swipeDeltas + averageAngle approach
-    // 3. Angle-based direction: atan2 of accumulated delta vector → angle → cardinal direction
-    //    Matches InputActions' SwipeTriggerCore angle range matching
+    // MARK: - Swipe frame processing
 
     private func processSwipeFrame(_ frame: TouchFrameData, data: SwipeTrackData, now: TimeInterval) {
         var updated = data
 
-        // ── Per-frame delta (InputActions: delta.unaccelerated()) ──
         let frameDx = frame.cx - data.lastX
         let frameDy = frame.cy - data.lastY
         let frameDist = (frameDx * frameDx + frameDy * frameDy).squareRoot()
-        updated.lastX = frame.cx
-        updated.lastY = frame.cy
+        updated.lastX = frame.cx; updated.lastY = frame.cy
 
-        // ── Continue tracking spread during locked swipe phase ──
-        // If spread suddenly grows, a pinch started after swipe lock — abort.
-        let swipeFrameSpreadDelta = abs(frame.spread - updated.prevSpread)
-        updated.cumulativeSpreadDelta += swipeFrameSpreadDelta
+        let swipeSpreadDelta = abs(frame.spread - updated.prevSpread)
+        updated.cumulativeSpreadDelta += swipeSpreadDelta
         updated.prevSpread = frame.spread
 
-        let swipeSpreadChange = abs(frame.spread - updated.initialSpread)
-        let swipeCentroidMovement = (
-            (frame.cx - updated.startX) * (frame.cx - updated.startX) +
-            (frame.cy - updated.startY) * (frame.cy - updated.startY)
-        ).squareRoot()
+        let swipeSpreadChange    = abs(frame.spread - updated.initialSpread)
+        let swipeCentroidMovement = ((frame.cx - updated.startX) * (frame.cx - updated.startX)
+                                   + (frame.cy - updated.startY) * (frame.cy - updated.startY)).squareRoot()
 
-        // If spread suddenly dominates during the swipe → pinch intruded, abort
         if swipeSpreadChange > 0.003 && swipeSpreadChange > swipeCentroidMovement * 0.8 {
             phase = .ignored
-            AppLogger.debug("[Engine] Swipe aborted — spread grew during tracking: spread \(swipeSpreadChange) vs centroid \(swipeCentroidMovement)")
-            updateObservableState()
-            return
+            AppLogger.debug("[Engine] Swipe aborted — spread grew mid-swipe")
+            updateObservableState(); return
         }
 
-        // Velocity sampling (continue from candidate phase)
         if updated.velocitySamples.count < tuning.speedSampleCount {
             updated.velocitySamples.append(frameDist)
         }
 
-        // ── Sliding delta window (InputActions: m_swipeDeltas) ──
-        // Prepend newest delta (InputActions inserts at begin)
         updated.recentDeltas.insert((dx: frameDx, dy: frameDy), at: 0)
 
-        // ── Compute accumulated vector from window (InputActions: totalDelta) ──
-        // Walk from most recent, accumulating until magnitude >= threshold.
-        // Then trim older deltas beyond that point (InputActions: erase(++it, end)).
-        var totalDx: Float = 0
-        var totalDy: Float = 0
-        var thresholdIndex: Int? = nil
+        var totalDx: Float = 0, totalDy: Float = 0
+        var thresholdIndex: Int?
         for (i, d) in updated.recentDeltas.enumerated() {
-            totalDx += d.dx
-            totalDy += d.dy
-            let mag = (totalDx * totalDx + totalDy * totalDy).squareRoot()
-            if mag >= tuning.initialThreshold {
-                thresholdIndex = i
-                break
+            totalDx += d.dx; totalDy += d.dy
+            if (totalDx * totalDx + totalDy * totalDy).squareRoot() >= tuning.initialThreshold {
+                thresholdIndex = i; break
             }
         }
 
-        guard let cutoff = thresholdIndex else {
-            // Motion threshold not yet reached — keep accumulating
-            phase = .lockedSwipe(updated)
-            return
-        }
+        guard let cutoff = thresholdIndex else { phase = .lockedSwipe(updated); return }
 
-        // Trim old deltas beyond the threshold window (InputActions: m_swipeDeltas.erase)
         if cutoff + 1 < updated.recentDeltas.count {
             updated.recentDeltas.removeSubrange((cutoff + 1)...)
         }
 
-        // ── Angle-based direction (InputActions: atan2deg360 of totalDelta) ──
-        // Apple MT normalised coords: Y increases upward, so dy > 0 = up.
-        // This matches atan2 convention directly (up = 90°).
-        let angleDeg = atan2(totalDy, totalDx) * (180.0 / .pi)   // -180..+180
-        let angle360 = angleDeg < 0 ? angleDeg + 360 : angleDeg  // 0..360
+        let angleDeg = atan2(totalDy, totalDx) * (180.0 / .pi)
+        let angle360 = angleDeg < 0 ? angleDeg + 360 : angleDeg
 
-        // Match angle to cardinal direction using tolerance wedges
-        // (InputActions: SwipeTriggerCore::canUpdate with angleRange matching)
         guard let direction = directionFromAngle(angle360) else {
-            // In dead zone between cardinal wedges — keep accumulating
-            phase = .lockedSwipe(updated)
-            return
+            phase = .lockedSwipe(updated); return
         }
 
-        // ── Reciprocal check ──
         if consumeReciprocalToken(fingers: data.fingers, direction: direction) {
-            phase = .fired
-            updateObservableState()
-            return
+            phase = .fired; updateObservableState(); return
         }
 
-        // ── Speed classification (velocity-based) ──
         let speed = classifySpeed(velocitySamples: updated.velocitySamples)
 
-        // ── Pre-swipe safety gate ──
-        // Before triggering any swipe, verify that spread hasn't grown
-        // significantly and that coherence is good. This is the final
-        // guard against pinch-induced false swipes.
-        let gateSpreadChange = abs(frame.spread - updated.initialSpread)
-        let gateSpreadSmall = gateSpreadChange < tuning.pinchSpreadThreshold * 0.8
+        // Pre-fire safety gate
+        let gateSpreadOK = abs(frame.spread - updated.initialSpread) < tuning.pinchSpreadThreshold * 0.8
         let gateCoherenceOK = frame.coherence > 0.8
-
-        if !gateSpreadSmall || !gateCoherenceOK {
-            // Safety gate failed — do NOT trigger swipe
+        guard gateSpreadOK && gateCoherenceOK else {
             phase = .ignored
-            AppLogger.debug("[Engine] Swipe blocked by safety gate — spread \(gateSpreadChange), coherence \(frame.coherence)")
-            updateObservableState()
-            return
+            AppLogger.debug("[Engine] Swipe blocked by safety gate")
+            updateObservableState(); return
         }
 
-        // ── Match and fire (InputActions: updateTriggers) ──
         if let rule = bestRule(fingers: data.fingers, direction: direction, speed: speed) {
-            AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers) fingers, \(speed.rawValue) (avgVel=\(averageVelocity(updated.velocitySamples)), angle=\(String(format: "%.1f", angle360))°) → \(rule.action.rawValue)")
+            AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue) → \(rule.action.rawValue)")
             if rule.action == .appSwitcherNext || rule.action == .appSwitcherPrev {
-                if !beginAppSwitcher(for: rule.action, refX: frame.cx) {
-                    phase = .fired
-                }
+                if !beginAppSwitcher(for: rule.action, refX: frame.cx) { phase = .fired }
             } else {
                 executeSwipeRule(rule, fingers: data.fingers, direction: direction)
                 phase = .fired
@@ -1002,44 +748,22 @@ final class GestureEngine {
         updateObservableState()
     }
 
-    // MARK: - Angle-to-direction mapping (InputActions: SwipeTriggerCore::angleRange)
-    //
-    // Maps a 0–360° angle to a cardinal direction using configurable tolerance.
-    // Each direction has a wedge of ±tolerance degrees centered on its axis:
-    //   Right: 0° ± tol    Up: 90° ± tol    Left: 180° ± tol    Down: 270° ± tol
-    // If tolerance < 45°, gaps between wedges form diagonal dead zones where
-    // no direction is returned (gesture keeps accumulating until it becomes clearer).
+    // MARK: - Direction from angle
 
     private func directionFromAngle(_ angle: Float) -> GestureDirection? {
         let tol = tuning.swipeAngleTolerance
-
-        // Right: centered at 0° (wraps around 360°)
-        if angle >= (360 - tol) || angle < tol {
-            return .swipeRight
-        }
-        // Up: centered at 90°
-        if angle >= (90 - tol) && angle < (90 + tol) {
-            return .swipeUp
-        }
-        // Left: centered at 180°
-        if angle >= (180 - tol) && angle < (180 + tol) {
-            return .swipeLeft
-        }
-        // Down: centered at 270°
-        if angle >= (270 - tol) && angle < (270 + tol) {
-            return .swipeDown
-        }
-        // In a dead zone (only when tolerance < 45°)
+        if angle >= (360 - tol) || angle < tol          { return .swipeRight }
+        if angle >= (90 - tol)  && angle < (90 + tol)   { return .swipeUp }
+        if angle >= (180 - tol) && angle < (180 + tol)  { return .swipeLeft }
+        if angle >= (270 - tol) && angle < (270 + tol)  { return .swipeDown }
         return nil
     }
 
     // MARK: - Finish / reset
 
     private func finishIfNeeded() {
-        if case .switchingApps(let data) = phase {
-            commitAppSwitcher(data: data)
-        }
-        phase        = .idle
+        if case .switchingApps(let data) = phase { commitAppSwitcher(data: data) }
+        phase = .idle
         lastStepTime = 0
     }
 
@@ -1048,6 +772,36 @@ final class GestureEngine {
         Haptic.switcherCommit()
         selectInAppSwitcher()
         AppLogger.debug("[Engine] App-switcher committed")
+
+        // After the app activates, restore any minimized windows
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            GestureEngine.restoreMinimizedWindows()
+        }
+    }
+
+    /// Uses the Accessibility API to unminimize all minimized windows
+    /// of the currently frontmost application.
+    private static func restoreMinimizedWindows() {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
+        let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
+
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let windows = windowsRef as? [AXUIElement] else { return }
+
+        var restoredCount = 0
+        for window in windows {
+            var minimizedRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedRef) == .success,
+                  let isMinimized = minimizedRef as? Bool, isMinimized else { continue }
+
+            let result = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, false as CFTypeRef)
+            if result == .success { restoredCount += 1 }
+        }
+
+        if restoredCount > 0 {
+            AppLogger.debug("[Engine] Restored \(restoredCount) minimized window(s)")
+        }
     }
 
     private func selectInAppSwitcher() {
@@ -1057,24 +811,85 @@ final class GestureEngine {
     }
 
     private func beginAppSwitcher(for action: GestureAction, refX: Float) -> Bool {
-        var apps = runningApps()
+        var apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
         guard apps.count > 1 else { return false }
-        if let front = NSWorkspace.shared.frontmostApplication,
-           let idx = apps.firstIndex(where: { $0.processIdentifier == front.processIdentifier }) {
-            apps.remove(at: idx); apps.insert(front, at: 0)
+
+        // Sort by MRU order to match the actual Cmd+Tab ordering.
+        // Apps not yet seen in mruAppOrder go to the end.
+        let mru = self.mruAppOrder
+        apps.sort { a, b in
+            let ai = mru.firstIndex(of: a.processIdentifier) ?? Int.max
+            let bi = mru.firstIndex(of: b.processIdentifier) ?? Int.max
+            return ai < bi
         }
+
+        // Locate windowless Finder in the list (if present)
+        let finderIdx: Int? = {
+            guard !GestureEngine.finderHasVisibleWindows() else { return nil }
+            return apps.firstIndex { $0.bundleIdentifier == "com.apple.finder" }
+        }()
+
+        // Compute effective boundaries — shrink if Finder is at an edge
+        var effMin = 0
+        var effMax = apps.count - 1
+        if let fi = finderIdx {
+            if fi == 0             { effMin = 1 }
+            if fi == apps.count - 1 { effMax = apps.count - 2 }
+        }
+        guard effMin < effMax else { return false }  // nothing to switch to
+
         clearReciprocalToken()
         sendKeyEvent(kCmd, down: true, flags: .maskCommand)
         Haptic.switcherOpen()
 
-        let index: Int
-        if action == .appSwitcherNext { sendCmdTab(); index = 1 }
-        else { sendCmdShiftTab(); index = apps.count - 1 }
+        var index: Int
+        if action == .appSwitcherNext {
+            sendCmdTab(); index = 1
+            // If landed on Finder in the middle, skip one more
+            if let fi = finderIdx, index == fi, index < effMax {
+                sendCmdTab(); index += 1
+            }
+        } else {
+            sendCmdShiftTab(); index = apps.count - 1
+            // If landed on Finder in the middle, skip one more
+            if let fi = finderIdx, index == fi, index > effMin {
+                sendCmdShiftTab(); index -= 1
+            }
+        }
 
         lastStepTime = ProcessInfo.processInfo.systemUptime
-        phase = .switchingApps(SwitcherData(refX: refX, index: index, apps: apps))
+        phase = .switchingApps(SwitcherData(
+            refX: refX, index: index, apps: apps,
+            finderIndex: finderIdx, effectiveMin: effMin, effectiveMax: effMax
+        ))
         updateObservableState()
         return true
+    }
+
+    // MARK: - MRU app tracking
+
+    private func startMRUTracking() {
+        // Seed with current frontmost app
+        if let front = NSWorkspace.shared.frontmostApplication {
+            mruAppOrder = [front.processIdentifier]
+        }
+        // Also seed from running apps so we have coverage immediately
+        for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+            if !mruAppOrder.contains(app.processIdentifier) {
+                mruAppOrder.append(app.processIdentifier)
+            }
+        }
+        // Listen for every app activation to maintain exact MRU order
+        mruObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            let pid = app.processIdentifier
+            self.mruAppOrder.removeAll { $0 == pid }
+            self.mruAppOrder.insert(pid, at: 0)
+        }
     }
 
     // MARK: - Rule matching
@@ -1083,93 +898,68 @@ final class GestureEngine {
         let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let all = Settings.shared.rules.filter { $0.fingers == fingers && $0.direction == direction }
 
-        // ── Smart State Filtering ──
-        // Special filters based on window state (NOT_FULLSCREEN, MAXIMIZED, etc.)
+        // State filters (FULLSCREEN, NOT_FULLSCREEN, etc.)
         let stateRules = all.filter { r in
             guard let filter = r.appFilter else { return false }
             switch filter.uppercased() {
-            case "FULLSCREEN":      return ActionExecutor.shared.isFrontmostWindowFullscreen()
-            case "NOT_FULLSCREEN":  return !ActionExecutor.shared.isFrontmostWindowFullscreen()
-            case "MAXIMIZED":       return ActionExecutor.shared.isFrontmostWindowMaximized()
-            case "NOT_MAXIMIZED":   return !ActionExecutor.shared.isFrontmostWindowMaximized()
+            case "FULLSCREEN":     return ActionExecutor.shared.isFrontmostWindowFullscreen()
+            case "NOT_FULLSCREEN": return !ActionExecutor.shared.isFrontmostWindowFullscreen()
+            case "MAXIMIZED":      return ActionExecutor.shared.isFrontmostWindowMaximized()
+            case "NOT_MAXIMIZED":  return !ActionExecutor.shared.isFrontmostWindowMaximized()
             default: return false
             }
         }
         if let match = bestRuleMatch(in: stateRules, speed: speed) { return match }
 
-        // ── Standard Bundle ID Filtering ──
         let specific = all.filter { $0.appFilter != nil && $0.appFilter == bid }
         if let match = bestRuleMatch(in: specific, speed: speed) { return match }
 
-        // ── Generic (Global) Rules ──
-        let generic = all.filter { $0.appFilter == nil }
-        return bestRuleMatch(in: generic, speed: speed)
+        return bestRuleMatch(in: all.filter { $0.appFilter == nil }, speed: speed)
     }
 
     private func hasAnySwipeRule(fingers: Int) -> Bool {
-        let dirs: [GestureDirection] = [.swipeLeft, .swipeRight, .swipeUp, .swipeDown]
-        return Settings.shared.rules.contains { $0.fingers == fingers && dirs.contains($0.direction) }
+        let swipeDirs: [GestureDirection] = [.swipeLeft, .swipeRight, .swipeUp, .swipeDown]
+        return Settings.shared.rules.contains { $0.fingers == fingers && swipeDirs.contains($0.direction) }
     }
 
     private func bestRuleMatch(in rules: [GestureRule], speed: GestureSpeed) -> GestureRule? {
-        if let exact = rules.first(where: { normalizedSpeed($0.speed) == speed }) { return exact }
+        let normalized = speed == .any ? GestureSpeed.normal : speed
+        if let exact = rules.first(where: { ($0.speed == .any ? .normal : $0.speed) == normalized }) { return exact }
         guard speed != .normal else { return nil }
-        return rules.first(where: { normalizedSpeed($0.speed) == .normal })
+        return rules.first(where: { ($0.speed == .any ? .normal : $0.speed) == .normal })
     }
 
-    private func normalizedSpeed(_ speed: GestureSpeed) -> GestureSpeed {
-        speed == .any ? .normal : speed
-    }
+    // MARK: - Speed classification
 
-    // MARK: - Speed classification (velocity-based, InputActions-inspired)
-
-    /// Compute average velocity from collected per-frame centroid delta samples.
-    private func averageVelocity(_ samples: [Float]) -> Float {
-        guard !samples.isEmpty else { return 0 }
-        return samples.reduce(0, +) / Float(samples.count)
-    }
-
-    /// Classify speed based on average centroid displacement per frame.
-    /// Faster finger movement → higher average delta → Fast.
-    /// This directly measures how fast the finger is moving, rather than
-    /// how long the gesture took (the old time-based approach).
-    /// Inspired by InputActions' MotionTriggerHandler::determineSpeed().
     private func classifySpeed(velocitySamples: [Float]) -> GestureSpeed {
-        let avgVel = averageVelocity(velocitySamples)
-        if avgVel >= tuning.fastVelocityThreshold  { return .fast }
-        if avgVel <= tuning.slowVelocityThreshold   { return .slow }
+        guard !velocitySamples.isEmpty else { return .normal }
+        let avg = velocitySamples.reduce(0, +) / Float(velocitySamples.count)
+        if avg >= tuning.fastVelocityThreshold { return .fast }
+        if avg <= tuning.slowVelocityThreshold { return .slow }
         return .normal
     }
 
-    // MARK: - Reciprocal token system
+    // MARK: - Reciprocal token
 
     private func executeSwipeRule(_ rule: GestureRule, fingers: Int, direction: GestureDirection) {
         Haptic.forAction(rule.action)
-
         ActionExecutor.shared.execute(rule.action, appPath: rule.appPath)
-
-        // Store reciprocal token only if the rule has reciprocal enabled
-        // and the action has a natural inverse
         if rule.reciprocalEnabled {
-            reciprocalToken = createReciprocalToken(for: rule.action, fingers: fingers, direction: direction)
+            reciprocalToken = makeReciprocalToken(for: rule.action, fingers: fingers, direction: direction)
         } else {
             clearReciprocalToken()
         }
         updateObservableState()
     }
 
-    /// Try to consume the reciprocal token. Returns true if consumed.
     private func consumeReciprocalToken(fingers: Int, direction: GestureDirection) -> Bool {
-        guard let token = reciprocalToken else { return false }
-        // Must match: same finger count, exact opposite direction
-        guard token.fingers == fingers, token.direction == direction else { return false }
-        // For restore: check there are actually windows to restore
+        guard let token = reciprocalToken,
+              token.fingers == fingers, token.direction == direction else { return false }
         if token.inverseAction == .restoreMinimizedApps,
            !ActionExecutor.shared.hasRestorableMinimizedApps {
-            clearReciprocalToken()
-            return false
+            clearReciprocalToken(); return false
         }
-        AppLogger.debug("[Engine] Reciprocal \(direction.rawValue) — \(fingers) fingers → \(token.inverseAction.rawValue)")
+        AppLogger.debug("[Engine] Reciprocal \(direction.rawValue) → \(token.inverseAction.rawValue)")
         let action = token.inverseAction
         clearReciprocalToken()
         Haptic.reciprocal()
@@ -1177,17 +967,9 @@ final class GestureEngine {
         return true
     }
 
-    /// Create a reciprocal token using the action's built-in inverse mapping.
-    /// Returns nil if the action has no natural inverse.
-    private func createReciprocalToken(for action: GestureAction, fingers: Int, direction: GestureDirection) -> ReciprocalToken? {
-        guard let rev = opposite(direction),
-              let inverse = action.inverseAction else { return nil }
-
-        let now = ProcessInfo.processInfo.systemUptime
-        let contextApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        return ReciprocalToken(inverseAction: inverse, fingers: fingers,
-                               direction: rev, contextApp: contextApp,
-                               sessionGeneration: sessionGeneration, createdAt: now)
+    private func makeReciprocalToken(for action: GestureAction, fingers: Int, direction: GestureDirection) -> ReciprocalToken? {
+        guard let rev = opposite(direction), let inverse = action.inverseAction else { return nil }
+        return ReciprocalToken(inverseAction: inverse, fingers: fingers, direction: rev)
     }
 
     private func clearReciprocalToken() {
@@ -1205,26 +987,22 @@ final class GestureEngine {
         }
     }
 
-    // MARK: - Observable state update
+    // MARK: - Observable state
 
     private func updateObservableState() {
         switch phase {
-        case .idle:                currentPhaseName = "Idle"
-        case .candidate:           currentPhaseName = "Candidate"
-        case .lockedSwipe:         currentPhaseName = "Locked (Swipe)"
-        case .ignored:             currentPhaseName = "Ignored"
-        case .fired:               currentPhaseName = "Fired"
-        case .switchingApps:       currentPhaseName = "App Switcher"
+        case .idle:          currentPhaseName = "Idle"
+        case .candidate:     currentPhaseName = "Candidate"
+        case .lockedSwipe:   currentPhaseName = "Locked (Swipe)"
+        case .ignored:       currentPhaseName = "Ignored"
+        case .fired:         currentPhaseName = "Fired"
+        case .switchingApps: currentPhaseName = "App Switcher"
         }
         isReciprocalActive = reciprocalToken != nil
         onStateChange?()
     }
 
-    // MARK: - App switcher key events
-
-    private func runningApps() -> [NSRunningApplication] {
-        NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
-    }
+    // MARK: - Key events
 
     private func sendCmdTab() {
         sendKeyEvent(kTab, down: true,  flags: .maskCommand)
@@ -1244,99 +1022,171 @@ final class GestureEngine {
         e.flags = flags
         e.post(tap: .cghidEventTap)
     }
+
+    // MARK: - Finder window inspection (Accessibility API)
+
+    /// Returns `true` if Finder has at least one real, visible directory window.
+    /// A window is considered real/visible only if:
+    ///  - AXRole == "AXWindow"
+    ///  - AXTitle != "Desktop"
+    ///  - AXMinimized == false
+    ///  - AXSize width ≥ 1 and height ≥ 1
+    static func finderHasVisibleWindows() -> Bool {
+        guard let finderApp = NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.apple.finder"
+        ).first else { return false }
+
+        let axApp = AXUIElementCreateApplication(finderApp.processIdentifier)
+
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let windows = windowsRef as? [AXUIElement] else {
+            return false
+        }
+
+        for window in windows {
+            // Check AXRole == "AXWindow"
+            var roleRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(window, kAXRoleAttribute as CFString, &roleRef) == .success,
+                  let role = roleRef as? String, role == "AXWindow" else {
+                continue
+            }
+
+            // Exclude "Desktop" title
+            var titleRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
+               let title = titleRef as? String, title == "Desktop" {
+                continue
+            }
+
+            // Check not minimized
+            var minimizedRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedRef) == .success,
+               let minimized = minimizedRef as? Bool, minimized {
+                continue
+            }
+
+            // Check non-zero size
+            var sizeRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeRef) == .success {
+                var size = CGSize.zero
+                if AXValueGetValue(sizeRef as! AXValue, .cgSize, &size) {
+                    if size.width < 1 || size.height < 1 { continue }
+                }
+            }
+
+            // Passed all checks — this is a real, visible Finder window
+            return true
+        }
+
+        return false
+    }
 }
+
+// ─────────────────────────────────────────────
+// MARK: - Global MT state (written on MT/HID thread, read on main)
+// ─────────────────────────────────────────────
+
+private var deviceFingerCounts: [UnsafeMutableRawPointer: Int] = [:]
+private var sessionPeakActiveTouches: Int = 0
+private let countsLock = NSLock()
+
+func updateDeviceFingerCount(device: UnsafeMutableRawPointer, count: Int) {
+    countsLock.lock()
+    defer { countsLock.unlock() }
+    deviceFingerCounts[device] = count
+    
+    let currentMax = deviceFingerCounts.values.max() ?? 0
+    if currentMax == 0 {
+        sessionPeakActiveTouches = 0
+    } else {
+        sessionPeakActiveTouches = max(sessionPeakActiveTouches, currentMax)
+    }
+}
+
+func getThreeFingerCount() -> Int {
+    countsLock.lock()
+    defer { countsLock.unlock() }
+    return deviceFingerCounts.values.max() ?? 0
+}
+
+func getSessionPeakActiveTouches() -> Int {
+    countsLock.lock()
+    defer { countsLock.unlock() }
+    return sessionPeakActiveTouches
+}
+
+/// Int32 stores/loads are effectively atomic on arm64/x86_64.
+var glideActiveTouches: Int32 = 0
+var glideClickFingerCount: Int32 = 0
+var glidePeakFingerCount: Int32 = 0
+var glideLastMTTimestamp: TimeInterval = 0
+
+/// Frame deduplication counter. For < 3 fingers, skip redundant main-queue
+/// dispatches when the finger count hasn't changed.
+var glideLastDispatchedCount: Int32 = 0
+
+// ── Per-finger age tracking ───────────────────────────────────────────────────
+/// Maps each MultitouchSupport finger identifier to the uptime at which it was
+/// first seen on the pad.  Written and read exclusively from the MT-callback
+/// thread — no locking required.
+private var glideFingerFirstSeen: [Int32: TimeInterval] = [:]
+
+/// Age (seconds) of the oldest / newest currently-active finger.
+/// Written on the MT-callback thread; read on the main thread at click time.
+/// Double is 8-byte aligned → store/load is effectively atomic on arm64 & x86_64.
+var glideOldestFingerAge: Double = 0.0
+var glideNewestFingerAge: Double = 0.0
 
 // ─────────────────────────────────────────────
 // MARK: - Global MT callback
 // ─────────────────────────────────────────────
 
-/// Written by the MT callback (MT thread) and the CGEvent tap callback (HID thread).
-/// Read by the engine on main. Effectively atomic for Int32 on arm64/x86_64.
-var glideActiveTouches: Int32 = 0
-
-/// Set synchronously in the CGEvent tap callback the moment a leftMouseDown
-/// fires with 3+ fingers. Consumed on main in handleLeftClick().
-var glideClickFingerCount: Int32 = 0
-
-/// Peak finger count from the MT callback. Set when count >= 3,
-/// reset to 0 after a 300ms delay. This survives the timing race where
-/// the MT "fingers lifted" callback is dispatched to main before the
-/// NSEvent leftMouseDown monitor fires.
-var glidePeakFingerCount: Int32 = 0
-
-/// Last time the MT callback fired (ProcessInfo.systemUptime).
-/// Used by the engine's watchdog to detect stale MT devices.
-var glideLastMTTimestamp: TimeInterval = 0
-
-/// Work item for resetting the peak finger count after a delay.
-private var peakResetWorkItem: DispatchWorkItem?
-
-/// Frame deduplication state. When 1–2 fingers rest on the trackpad without
-/// meaningful movement, we skip the main-queue dispatch to avoid ~60
-/// unnecessary wake-ups/sec. For count >= 3, every frame is dispatched
-/// because the engine's state machine needs continuous evidence.
-private var glideLastDispatchedCount: Int32 = 0
-private var glideLastDispatchedCx: Float = 0
-private var glideLastDispatchedCy: Float = 0
-
-/// The MT callback. Computes per-frame evidence (centroid, spread, coherence)
-/// and dispatches to the engine on main via TouchFrameData.
-/// Margin fingers are silently excluded — they don't count toward gesture
-/// recognition but do NOT block safe-zone fingers from forming gestures.
-let glideMTCallback: MTContactCallback = { _, data, count, _, _ in
-    // Record that the MT callback is alive (for the watchdog)
+let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
     glideLastMTTimestamp = ProcessInfo.processInfo.systemUptime
 
     var validTouches: [MTTouch] = []
     if let data, count > 0 {
         let n = Int(count)
-        let rawTouches = data.assumingMemoryBound(to: MTTouch.self)
+        let raw = data.assumingMemoryBound(to: MTTouch.self)
         let tuning = Settings.shared.tuning
 
         if tuning.edgeMarginEnabled {
-            // Smart exclusion: only pass safe-zone fingers downstream.
-            // Margin fingers are simply dropped — 1 margin + 3 safe = 3-finger gesture.
             let m = tuning.edgeMargin
             for i in 0..<n {
-                let t = rawTouches[i]
-                let x = t.normalizedPosition.x
-                let y = t.normalizedPosition.y
-                let inMargin = x < m.left || x > (1.0 - m.right)
-                            || y < m.bottom || y > (1.0 - m.top)
-                if !inMargin {
+                let t = raw[i]
+                let x = t.normalizedPosition.x; let y = t.normalizedPosition.y
+                if !(x < m.left || x > 1.0 - m.right || y < m.bottom || y > 1.0 - m.top) {
                     validTouches.append(t)
                 }
             }
         } else {
-            for i in 0..<n {
-                validTouches.append(rawTouches[i])
-            }
+            for i in 0..<n { validTouches.append(raw[i]) }
         }
+    }
+
+    let active = validTouches.filter { $0.state >= 3 && $0.state <= 4 }
+    if let dev = device {
+        updateDeviceFingerCount(device: dev, count: active.count)
     }
 
     let validCount = Int32(validTouches.count)
 
     guard validCount > 0 else {
         if glideActiveTouches > 0 {
-            // Update finger count immediately on MT thread so CGEvent tap sees it
             glideActiveTouches = 0
             glideLastDispatchedCount = 0
-            glideLastDispatchedCx = 0
-            glideLastDispatchedCy = 0
+            // Clear per-finger age tracking — all fingers lifted
+            glideFingerFirstSeen.removeAll(keepingCapacity: true)
+            glideOldestFingerAge = 0
+            glideNewestFingerAge = 0
             DispatchQueue.main.async {
                 glideClickFingerCount = 0
-                // Schedule peak count reset after a short delay.
-                // This keeps the peak count alive long enough for
-                // handleLeftClick to read it even if the finger-lift
-                // callback dispatches to main before the click handler.
-                peakResetWorkItem?.cancel()
+                GestureEngine.shared.peakResetWorkItem?.cancel()
                 let work = DispatchWorkItem { glidePeakFingerCount = 0 }
-                peakResetWorkItem = work
+                GestureEngine.shared.peakResetWorkItem = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
-
-                GestureEngine.shared.onTouches(TouchFrameData(
-                    count: 0, cx: 0, cy: 0, spread: 0, coherence: 1
-                ))
+                GestureEngine.shared.onTouches(TouchFrameData(count: 0, cx: 0, cy: 0, spread: 0, coherence: 1))
             }
         }
         return 0
@@ -1344,84 +1194,87 @@ let glideMTCallback: MTContactCallback = { _, data, count, _, _ in
 
     let n = Int(validCount)
 
-    // Update finger count immediately on MT thread (before dispatch to main)
-    // so the CGEvent tap callback can see current count right away.
-    // Int32 stores are effectively atomic on arm64/x86_64.
+    // ── Per-finger age tracking ───────────────────────────────────────────────
+    // Track when each finger ID first appeared on the pad.  This lets click
+    // detection distinguish "all N fingers placed together" (small age spread)
+    // from "M fingers resting + 1 tapping" (large age spread).
+    // Accessed only from this MT-callback thread → no locking needed.
+    // glideOldestFingerAge / glideNewestFingerAge are Double (8-byte aligned) →
+    // store/load is effectively atomic on arm64 & x86_64 (same guarantee as
+    // Int32 used elsewhere in this file).
+    let nowTs = glideLastMTTimestamp
+
+    // Register newly-arrived fingers
+    for touch in validTouches {
+        if glideFingerFirstSeen[touch.identifier] == nil {
+            glideFingerFirstSeen[touch.identifier] = nowTs
+        }
+    }
+    // Remove departed finger records (cheap: dict count rarely mismatches)
+    if glideFingerFirstSeen.count != validTouches.count {
+        let activeIDs = Set(validTouches.map { $0.identifier })
+        glideFingerFirstSeen = glideFingerFirstSeen.filter { activeIDs.contains($0.key) }
+    }
+    // Publish oldest/newest ages for the main-thread click handler
+    if let oldest = glideFingerFirstSeen.values.min(),
+       let newest = glideFingerFirstSeen.values.max() {
+        glideOldestFingerAge = nowTs - oldest
+        glideNewestFingerAge = nowTs - newest
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Save previous count before updating so we can detect threshold crossing
+    let prevActiveTouches = glideActiveTouches
     glideActiveTouches = validCount
 
-    // Track peak finger count for click detection
     if validCount >= 3 {
         glidePeakFingerCount = validCount
-        // Cancel any pending reset
-        DispatchQueue.main.async { peakResetWorkItem?.cancel() }
+        // Cancel the peak-reset work item only when first crossing the 3-finger
+        // threshold — not on every frame (which was dispatching 120×/s and
+        // causing measurable CPU overhead at idle).
+        if prevActiveTouches < 3 {
+            DispatchQueue.main.async { GestureEngine.shared.peakResetWorkItem?.cancel() }
+        }
     }
 
-    // ── Compute centroid ──
+    // Skip redundant dispatches for < 3 fingers (prevents drag/scroll lag)
+    if validCount < 3 && validCount == glideLastDispatchedCount { return 0 }
+    glideLastDispatchedCount = validCount
+
+    // Centroid
     var sumX: Float = 0, sumY: Float = 0
-    for i in 0..<n {
-        sumX += validTouches[i].normalizedPosition.x
-        sumY += validTouches[i].normalizedPosition.y
-    }
+    for i in 0..<n { sumX += validTouches[i].normalizedPosition.x; sumY += validTouches[i].normalizedPosition.y }
     let cx = sumX / Float(n)
     let cy = sumY / Float(n)
 
-    // ── Frame deduplication for low-finger counts ──
-    // For count < 3, the engine ONLY cares about transitions (finger down / up).
-    // Dispatching centroid movement for 1 or 2 fingers floods the main thread and causes severe drag/scroll lag.
-    // For count >= 3, we track movement because 3+ finger gestures and swipes need live coordinates.
-    if validCount < 3 {
-        if validCount == glideLastDispatchedCount {
-            return 0
-        }
-    }
-    glideLastDispatchedCount = validCount
-    glideLastDispatchedCx = cx
-    glideLastDispatchedCy = cy
-
-    // ── Compute spread (average finger-to-centroid distance) ──
+    // Spread (average finger-to-centroid distance)
     var spread: Float = 0
     if n >= 3 {
-        var spreadSum: Float = 0
+        var s: Float = 0
         for i in 0..<n {
             let dx = validTouches[i].normalizedPosition.x - cx
             let dy = validTouches[i].normalizedPosition.y - cy
-            spreadSum += (dx * dx + dy * dy).squareRoot()
+            s += (dx * dx + dy * dy).squareRoot()
         }
-        spread = spreadSum / Float(n)
+        spread = s / Float(n)
     }
 
-    // ── Compute directional coherence ──
-    // Average of per-finger unit velocity vectors.
-    // If all fingers move the same direction → magnitude ≈ 1.0 (swipe).
-    // If fingers move in opposite directions → magnitude ≈ 0.0 (pinch).
+    // Directional coherence (1.0 = all fingers same direction, 0.0 = diverging)
     var coherence: Float = 1.0
     if n >= 3 {
-        var avgDirX: Float = 0
-        var avgDirY: Float = 0
-        var movingFingers: Int = 0
+        var avgDirX: Float = 0, avgDirY: Float = 0, movingFingers = 0
         for i in 0..<n {
-            let vx = validTouches[i].velocity.x
-            let vy = validTouches[i].velocity.y
+            let vx = validTouches[i].velocity.x; let vy = validTouches[i].velocity.y
             let mag = (vx * vx + vy * vy).squareRoot()
-            if mag > 0.01 {  // only count fingers that are actually moving
-                avgDirX += vx / mag
-                avgDirY += vy / mag
-                movingFingers += 1
-            }
+            if mag > 0.01 { avgDirX += vx / mag; avgDirY += vy / mag; movingFingers += 1 }
         }
         if movingFingers > 0 {
-            avgDirX /= Float(movingFingers)
-            avgDirY /= Float(movingFingers)
+            avgDirX /= Float(movingFingers); avgDirY /= Float(movingFingers)
             coherence = (avgDirX * avgDirX + avgDirY * avgDirY).squareRoot()
         }
-        // else: no fingers moving yet → default coherence 1.0 (don't veto idle fingers)
     }
 
-    let frameData = TouchFrameData(count: validCount, cx: cx, cy: cy,
-                                   spread: spread, coherence: coherence)
-
-    DispatchQueue.main.async {
-        GestureEngine.shared.onTouches(frameData)
-    }
+    let frameData = TouchFrameData(count: validCount, cx: cx, cy: cy, spread: spread, coherence: coherence)
+    DispatchQueue.main.async { GestureEngine.shared.onTouches(frameData) }
     return 0
 }
