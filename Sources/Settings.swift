@@ -33,6 +33,129 @@ enum WindowTargetingMode: String, Codable, CaseIterable {
     var label: String { rawValue }
 }
 
+/// Restricts a gesture rule to the frontmost window's layout state.
+/// Modifier keys held when the gesture begins (same finger count placed on the trackpad).
+enum ModifierFilter: String, Codable, CaseIterable {
+    case any           = "Any"
+    case shiftHeld     = "⇧ Shift Held"
+    case shiftNotHeld  = "⇧ Shift Not Held"
+    case controlHeld   = "⌃ Control Held"
+    case controlNotHeld = "⌃ Control Not Held"
+    case optionHeld    = "⌥ Option Held"
+    case optionNotHeld = "⌥ Option Not Held"
+    case commandHeld   = "⌘ Command Held"
+    case commandNotHeld = "⌘ Command Not Held"
+    case noModifiers   = "No Modifier Keys"
+
+    init?(yamlValue: String?) {
+        guard let yamlValue else { return nil }
+        let key = yamlValue.lowercased().replacingOccurrences(of: " ", with: "_")
+        switch key {
+        case "any", "none":                    self = .any
+        case "shift", "shift_held":            self = .shiftHeld
+        case "shift_not_held", "no_shift":     self = .shiftNotHeld
+        case "control", "control_held":        self = .controlHeld
+        case "control_not_held", "no_control": self = .controlNotHeld
+        case "option", "option_held", "alt":    self = .optionHeld
+        case "option_not_held", "no_option":   self = .optionNotHeld
+        case "command", "command_held":        self = .commandHeld
+        case "command_not_held", "no_command": self = .commandNotHeld
+        case "no_modifiers":                   self = .noModifiers
+        default:                               return nil
+        }
+    }
+
+    var yamlValue: String? {
+        switch self {
+        case .any:            return nil
+        case .shiftHeld:      return "shift_held"
+        case .shiftNotHeld:   return "shift_not_held"
+        case .controlHeld:    return "control_held"
+        case .controlNotHeld: return "control_not_held"
+        case .optionHeld:     return "option_held"
+        case .optionNotHeld:  return "option_not_held"
+        case .commandHeld:    return "command_held"
+        case .commandNotHeld: return "command_not_held"
+        case .noModifiers:    return "no_modifiers"
+        }
+    }
+}
+
+/// Snapshot of modifier keys at gesture start.
+struct CapturedModifiers: Equatable {
+    let shift: Bool
+    let control: Bool
+    let option: Bool
+    let command: Bool
+
+    init(_ flags: NSEvent.ModifierFlags) {
+        let f = flags.intersection(.deviceIndependentFlagsMask)
+        shift   = f.contains(.shift)
+        control = f.contains(.control)
+        option  = f.contains(.option)
+        command = f.contains(.command)
+    }
+
+    func matches(_ filter: ModifierFilter) -> Bool {
+        switch filter {
+        case .any:            return true
+        case .shiftHeld:      return shift
+        case .shiftNotHeld:   return !shift
+        case .controlHeld:    return control
+        case .controlNotHeld: return !control
+        case .optionHeld:     return option
+        case .optionNotHeld:  return !option
+        case .commandHeld:    return command
+        case .commandNotHeld: return !command
+        case .noModifiers:    return !shift && !control && !option && !command
+        }
+    }
+}
+
+enum WindowStateFilter: String, Codable, CaseIterable {
+    case any            = "Any"
+    case fullscreen     = "Fullscreen"
+    case notFullscreen  = "Not Fullscreen"
+    case maximized      = "Maximized"
+    case notMaximized   = "Not Maximized"
+
+    /// Legacy `app_filter` values in config.yaml.
+    init?(legacyAppFilter value: String) {
+        switch value.uppercased() {
+        case "FULLSCREEN":     self = .fullscreen
+        case "NOT_FULLSCREEN": self = .notFullscreen
+        case "MAXIMIZED":      self = .maximized
+        case "NOT_MAXIMIZED":  self = .notMaximized
+        default:                return nil
+        }
+    }
+
+    init?(yamlValue: String?) {
+        guard let yamlValue else { return nil }
+        if let legacy = WindowStateFilter(legacyAppFilter: yamlValue) {
+            self = legacy
+            return
+        }
+        switch yamlValue.lowercased().replacingOccurrences(of: "_", with: "") {
+        case "fullscreen":     self = .fullscreen
+        case "notfullscreen":  self = .notFullscreen
+        case "maximized":      self = .maximized
+        case "notmaximized":   self = .notMaximized
+        default:                return nil
+        }
+    }
+
+    var yamlValue: String? {
+        switch self {
+        case .any:            return nil
+        case .fullscreen:     return "fullscreen"
+        case .notFullscreen:  return "not_fullscreen"
+        case .maximized:      return "maximized"
+        case .notMaximized:   return "not_maximized"
+        }
+    }
+}
+
 enum GestureAction: String, Codable, CaseIterable {
     case quitApp          = "Quit App Under Cursor"
     case forceQuitApp     = "Force Quit App Under Cursor"
@@ -70,9 +193,51 @@ enum GestureAction: String, Codable, CaseIterable {
     case notifCenter      = "Notification Center"
     case lockScreen       = "Lock Screen"
     case sleep            = "Sleep"
-    case screenshotArea   = "Screenshot (Area)"
-    case screenshotFull   = "Screenshot (Full)"
+    case screenshotArea            = "Screenshot (Area)"
+    case screenshotFull            = "Screenshot (Full)"
+    case screenshotAreaClipboard   = "Screenshot (Area → Clipboard)"
+    case screenshotFullClipboard   = "Screenshot (Full → Clipboard)"
+    case screenshotToolbar         = "Screenshot Toolbar"
+    case copy                      = "Copy"
+    case paste                     = "Paste"
+    case cut                       = "Cut"
+    case undo                      = "Undo"
+    case redo                      = "Redo"
+    case selectAll                 = "Select All"
+    case find                      = "Find"
+    case emojiPicker               = "Emoji & Symbols"
+    case reloadPage                = "Reload Page"
+    case newTab                    = "New Tab"
+    case volumeUp                  = "Volume Up"
+    case volumeDown                = "Volume Down"
+    case mute                      = "Mute"
+    case playPause                 = "Play / Pause"
+    case nextTrack                 = "Next Track"
+    case previousTrack             = "Previous Track"
+    case brightnessUp              = "Brightness Up"
+    case brightnessDown            = "Brightness Down"
+    case emptyTrash                = "Empty Trash"
+    case openFinder                = "Open Finder"
+    case openDownloads             = "Open Downloads"
     case doNothing        = "Do Nothing"
+
+    /// Grouped for the preferences action picker.
+    static let catalog: [(category: String, actions: [GestureAction])] = [
+        ("Apps", [.quitApp, .forceQuitApp, .quitFrontmost, .hideApp, .hideOthers, .openApp,
+                  .appSwitcherNext, .appSwitcherPrev, .switchAppNext, .switchAppPrev]),
+        ("Windows", [.minimizeWindow, .minimizeAllApps, .restoreMinimizedApps, .maximizeWindow,
+                     .restoreWindow, .closeWindow, .enterFullscreen, .exitFullscreen, .toggleFullscreen,
+                     .cycleWindows, .snapLeft, .snapRight, .snapTopLeft, .snapTopRight,
+                     .snapBottomLeft, .snapBottomRight, .centerWindow, .moveNextDisplay]),
+        ("Screenshots", [.screenshotArea, .screenshotFull, .screenshotAreaClipboard,
+                         .screenshotFullClipboard, .screenshotToolbar]),
+        ("Editing", [.copy, .paste, .cut, .undo, .redo, .selectAll, .find, .emojiPicker, .reloadPage, .newTab]),
+        ("Media & Display", [.volumeUp, .volumeDown, .mute, .playPause, .nextTrack, .previousTrack,
+                             .brightnessUp, .brightnessDown]),
+        ("System", [.missionControl, .appExpose, .showDesktop, .launchpad, .spotlight, .notifCenter,
+                    .lockScreen, .sleep, .emptyTrash, .openFinder, .openDownloads]),
+        ("Other", [.doNothing]),
+    ]
 
     var inverseAction: GestureAction? {
         switch self {
@@ -106,6 +271,16 @@ enum GestureAction: String, Codable, CaseIterable {
 // MARK: - GestureRule
 // ─────────────────────────────────────────────
 
+/// Identifies rules that compete for the same gesture slot (latest in the list wins).
+struct GestureMatchSignature: Hashable {
+    let fingers: Int
+    let direction: GestureDirection
+    let speed: GestureSpeed
+    let appFilter: String?
+    let windowStateFilter: WindowStateFilter
+    let modifierFilter: ModifierFilter
+}
+
 struct GestureRule: Codable, Identifiable, Equatable {
     var id        = UUID()
     var fingers:   Int              = 3
@@ -113,19 +288,49 @@ struct GestureRule: Codable, Identifiable, Equatable {
     var speed:     GestureSpeed     = .normal
     var action:    GestureAction    = .doNothing
     var appPath:   String?
+    /// Bundle ID (e.g. `com.apple.Safari`) — not window-state keywords.
     var appFilter: String?
+    var windowStateFilter: WindowStateFilter = .any
+    var modifierFilter: ModifierFilter = .any
     var reciprocalEnabled: Bool     = true
+    /// New rules start as drafts until configured in the editor.
+    var isDraft: Bool               = false
+
+    var matchSignature: GestureMatchSignature {
+        GestureMatchSignature(
+            fingers: fingers,
+            direction: direction,
+            speed: (speed == .any || direction == .click) ? .normal : speed,
+            appFilter: appFilter,
+            windowStateFilter: windowStateFilter,
+            modifierFilter: modifierFilter
+        )
+    }
+
+    /// Rules the gesture engine will consider.
+    var isActive: Bool { !isDraft && action != .doNothing }
+
+    static func newDraft() -> GestureRule {
+        var rule = GestureRule(fingers: 3, direction: .click, speed: .normal, action: .doNothing)
+        rule.isDraft = true
+        return rule
+    }
 
     init(fingers: Int, direction: GestureDirection, speed: GestureSpeed = .normal,
          action: GestureAction, appPath: String? = nil, appFilter: String? = nil,
-         reciprocalEnabled: Bool = true) {
-        self.fingers           = fingers
-        self.direction         = direction
-        self.speed             = speed
-        self.action            = action
-        self.appPath           = appPath
-        self.appFilter         = appFilter
-        self.reciprocalEnabled = reciprocalEnabled
+         windowStateFilter: WindowStateFilter = .any,
+         modifierFilter: ModifierFilter = .any,
+         reciprocalEnabled: Bool = true, isDraft: Bool = false) {
+        self.fingers             = fingers
+        self.direction           = direction
+        self.speed               = speed
+        self.action              = action
+        self.appPath             = appPath
+        self.appFilter           = appFilter
+        self.windowStateFilter   = windowStateFilter
+        self.modifierFilter      = modifierFilter
+        self.reciprocalEnabled   = reciprocalEnabled
+        self.isDraft             = isDraft
     }
 
     // Robust decoding — tolerates unknown future enum cases
@@ -138,7 +343,22 @@ struct GestureRule: Codable, Identifiable, Equatable {
         action    = (try? c.decode(GestureAction.self,          forKey: .action))    ?? .doNothing
         appPath   = try? c.decodeIfPresent(String.self,         forKey: .appPath)
         appFilter = try? c.decodeIfPresent(String.self,         forKey: .appFilter)
+        windowStateFilter = (try? c.decodeIfPresent(WindowStateFilter.self, forKey: .windowStateFilter)) ?? .any
+        modifierFilter    = (try? c.decodeIfPresent(ModifierFilter.self,    forKey: .modifierFilter))    ?? .any
         reciprocalEnabled = (try? c.decodeIfPresent(Bool.self,  forKey: .reciprocalEnabled)) ?? true
+        isDraft           = (try? c.decodeIfPresent(Bool.self,  forKey: .isDraft)) ?? false
+        self = Self.migratingLegacyAppFilter(self)
+    }
+
+    /// Moves window-state keywords out of `appFilter` (legacy config.yaml).
+    static func migratingLegacyAppFilter(_ rule: GestureRule) -> GestureRule {
+        var r = rule
+        guard let filter = r.appFilter else { return r }
+        if let state = WindowStateFilter(legacyAppFilter: filter) {
+            if r.windowStateFilter == .any { r.windowStateFilter = state }
+            r.appFilter = nil
+        }
+        return r
     }
 }
 
@@ -160,8 +380,8 @@ struct GestureTuning: Codable, Equatable {
     var appSwitcherStepThreshold:   Float        = 0.003
     var appSwitcherDebounce:        TimeInterval = 0.10
     var fastVelocityThreshold:      Float        = 0.008
-    var slowVelocityThreshold:      Float        = 0.003
-    var speedSampleCount:           Int          = 3
+    var slowVelocityThreshold:      Float        = 0.004
+    var speedSampleCount:           Int          = 5
     var candidateFrames:            Int          = 3
     var pinchSpreadThreshold:       Float        = 0.015
     var pinchFrameSpreadThreshold:  Float        = 0.008
@@ -178,8 +398,8 @@ struct GestureTuning: Codable, Equatable {
         appSwitcherStepThreshold  = try c.decodeIfPresent(Float.self,        forKey: .appSwitcherStepThreshold)  ?? 0.003
         appSwitcherDebounce       = try c.decodeIfPresent(TimeInterval.self, forKey: .appSwitcherDebounce)       ?? 0.10
         fastVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .fastVelocityThreshold)     ?? 0.008
-        slowVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .slowVelocityThreshold)     ?? 0.003
-        speedSampleCount          = try c.decodeIfPresent(Int.self,          forKey: .speedSampleCount)          ?? 3
+        slowVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .slowVelocityThreshold)     ?? 0.004
+        speedSampleCount          = try c.decodeIfPresent(Int.self,          forKey: .speedSampleCount)          ?? 5
         candidateFrames           = try c.decodeIfPresent(Int.self,          forKey: .candidateFrames)           ?? 3
         pinchSpreadThreshold      = try c.decodeIfPresent(Float.self,        forKey: .pinchSpreadThreshold)      ?? 0.015
         pinchFrameSpreadThreshold = try c.decodeIfPresent(Float.self,        forKey: .pinchFrameSpreadThreshold) ?? 0.008
@@ -202,7 +422,7 @@ final class Settings {
     static let shared = Settings()
 
     private init() {
-        _rules = Self.canonicalizeRules(Self.defaultRules)
+        _rules = Self.normalizeRules(Self.defaultRules)
     }
 
     // MARK: Backing stores
@@ -218,32 +438,32 @@ final class Settings {
 
     var rules: [GestureRule] {
         get { _rules }
-        set { _rules = Self.canonicalizeRules(newValue); GlideConfigStore.shared.save() }
+        set { _rules = Self.normalizeRules(newValue); GlideConfigStore.shared.scheduleSave() }
     }
 
     var tuning: GestureTuning {
         get { _tuning }
-        set { _tuning = Self.normalizedTuning(newValue); GlideConfigStore.shared.save() }
+        set { _tuning = Self.normalizedTuning(newValue); GlideConfigStore.shared.scheduleSave() }
     }
 
     var windowTargetingMode: WindowTargetingMode {
         get { _windowTargeting }
-        set { _windowTargeting = newValue; GlideConfigStore.shared.save() }
+        set { _windowTargeting = newValue; GlideConfigStore.shared.scheduleSave() }
     }
 
     var hapticFeedbackEnabled: Bool {
         get { _hapticFeedback }
-        set { _hapticFeedback = newValue; GlideConfigStore.shared.save() }
+        set { _hapticFeedback = newValue; GlideConfigStore.shared.scheduleSave() }
     }
 
     var debugLoggingEnabled: Bool {
         get { _debugLogging }
-        set { _debugLogging = newValue; GlideConfigStore.shared.save() }
+        set { _debugLogging = newValue; GlideConfigStore.shared.scheduleSave() }
     }
 
     var launchAtLoginEnabled: Bool {
         get { _launchAtLogin }
-        set { _launchAtLogin = newValue; GlideConfigStore.shared.save() }
+        set { _launchAtLogin = newValue; GlideConfigStore.shared.scheduleSave() }
     }
 
     func resetTuning() { tuning = GestureTuning() }
@@ -251,7 +471,7 @@ final class Settings {
     // MARK: Batch load — bypasses per-field saves (called by GlideConfigStore.load)
 
     func apply(_ config: GlideConfig) {
-        _rules           = Self.canonicalizeRules(config.toRules())
+        _rules           = Self.normalizeRules(config.toRules())
         _tuning          = Self.normalizedTuning(config.toTuning())
         _windowTargeting = WindowTargetingMode(rawValue: config.preferences.windowTargeting) ?? .focusedThenCursor
         _hapticFeedback  = config.preferences.hapticFeedback
@@ -259,27 +479,14 @@ final class Settings {
         _launchAtLogin   = config.preferences.launchAtLogin
     }
 
-    // MARK: Rule deduplication
+    // MARK: Rule normalization (duplicates are allowed — latest match wins at runtime)
 
-    private struct RuleIdentity: Hashable {
-        let fingers: Int; let direction: GestureDirection
-        let speed: GestureSpeed; let appFilter: String?
-    }
-
-    private static func canonicalizeRules(_ rules: [GestureRule]) -> [GestureRule] {
-        var seen: Set<RuleIdentity> = []
-        var result: [GestureRule] = []
-        for rule in rules.reversed() {
-            let r = normalizedRule(rule)
-            let id = RuleIdentity(fingers: r.fingers, direction: r.direction,
-                                  speed: r.speed, appFilter: r.appFilter)
-            if seen.insert(id).inserted { result.append(r) }
-        }
-        return result.reversed()
+    private static func normalizeRules(_ rules: [GestureRule]) -> [GestureRule] {
+        rules.map { normalizedRule($0) }
     }
 
     private static func normalizedRule(_ rule: GestureRule) -> GestureRule {
-        var r = rule
+        var r = GestureRule.migratingLegacyAppFilter(rule)
         r.fingers = min(max(r.fingers, 2), 5)
         r.speed   = (r.speed == .any || r.direction == .click) ? .normal : r.speed
         return r
