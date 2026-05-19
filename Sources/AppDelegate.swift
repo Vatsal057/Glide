@@ -34,6 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        GlideConfigStore.shared.flushPendingSave()
         engine.stop()
     }
 
@@ -90,6 +91,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func systemWillSleep() {
+        GlideConfigStore.shared.flushPendingSave()
         guard enabled else { return }
         AppLogger.debug("[Glide] System sleeping — stopping engine")
         engine.stop()
