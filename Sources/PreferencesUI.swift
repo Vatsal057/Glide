@@ -82,9 +82,31 @@ final class PreferencesStore: ObservableObject {
         GestureEngine.shared.onStateChange = nil
     }
 
-    func addRule() {
-        rules.append(nextAvailableRule() ?? GestureRule(fingers: 3, direction: .swipeUp, speed: .normal, action: .doNothing))
+    @discardableResult
+    func addRule() -> UUID {
+        let rule = GestureRule.newDraft()
+        rules.append(rule)
         persistRules()
+        return rule.id
+    }
+
+    func markRuleConfigured(_ ruleID: UUID) {
+        guard var rule = rules.first(where: { $0.id == ruleID }), rule.isDraft else { return }
+        rule.isDraft = false
+        updateRule(rule)
+    }
+
+    /// `true` when a newer rule in the list overrides this one (same gesture signature).
+    func isRuleShadowed(_ rule: GestureRule) -> Bool {
+        guard rule.isActive else { return false }
+        guard let winner = rules.last(where: { $0.isActive && $0.matchSignature == rule.matchSignature }) else {
+            return false
+        }
+        return winner.id != rule.id
+    }
+
+    func duplicateCount(for rule: GestureRule) -> Int {
+        rules.filter { $0.isActive && $0.matchSignature == rule.matchSignature }.count
     }
 
     func resetRules() {
@@ -201,6 +223,18 @@ final class PreferencesStore: ObservableObject {
         updateRule(rule)
     }
 
+    func setWindowStateFilter(_ state: WindowStateFilter, for ruleID: UUID) {
+        guard var rule = rules.first(where: { $0.id == ruleID }) else { return }
+        rule.windowStateFilter = state
+        updateRule(rule)
+    }
+
+    func setModifierFilter(_ filter: ModifierFilter, for ruleID: UUID) {
+        guard var rule = rules.first(where: { $0.id == ruleID }) else { return }
+        rule.modifierFilter = filter
+        updateRule(rule)
+    }
+
     func binding(for ruleID: UUID) -> Binding<GestureRule> {
         Binding(
             get: { self.rules.first(where: { $0.id == ruleID }) ?? GestureRule(fingers: 3, direction: .click, action: .doNothing) },
@@ -218,10 +252,14 @@ final class PreferencesStore: ObservableObject {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    func filterLabel(for bundleID: String?) -> String {
+    func appFilterLabel(for bundleID: String?) -> String {
         guard let bundleID else { return "Any App" }
         return runningApps().first(where: { $0.bundleID == bundleID })?.name
             ?? bundleID.components(separatedBy: ".").last?.capitalized ?? bundleID
+    }
+
+    func windowStateLabel(_ state: WindowStateFilter) -> String {
+        state.rawValue
     }
 
     func appLabel(for path: String?) -> String {
@@ -229,9 +267,14 @@ final class PreferencesStore: ObservableObject {
         return URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
     }
 
-    /// Group rules by finger count for sectioned display.
+    var draftRules: [GestureRule] {
+        rules.filter(\.isDraft)
+    }
+
+    /// Configured rules grouped by finger count (preserves list order within each group).
     func rulesGroupedByFingers() -> [(fingers: Int, rules: [GestureRule])] {
-        let grouped = Dictionary(grouping: rules) { $0.fingers }
+        let configured = rules.filter { !$0.isDraft }
+        let grouped = Dictionary(grouping: configured) { $0.fingers }
         return grouped.keys.sorted().map { (fingers: $0, rules: grouped[$0]!) }
     }
 
@@ -241,34 +284,17 @@ final class PreferencesStore: ObservableObject {
         diagnostics = buildDiagnostics(for: rules)
     }
 
-    private func nextAvailableRule() -> GestureRule? {
-        for fingers in 3...5 {
-            for direction in GestureDirection.allCases {
-                let speeds: [GestureSpeed] = direction == .click ? [.normal] : GestureSpeed.allCases
-                for speed in speeds {
-                    let candidate = GestureRule(fingers: fingers, direction: direction, speed: speed, action: .doNothing)
-                    guard !containsRule(matching: candidate) else { continue }
-                    return candidate
-                }
-            }
-        }
-        return nil
-    }
-
-    private func containsRule(matching c: GestureRule) -> Bool {
-        rules.contains { $0.fingers == c.fingers && $0.direction == c.direction && $0.speed == c.speed && $0.appFilter == c.appFilter }
-    }
-
     private func sanitizedRule(_ r: GestureRule) -> GestureRule {
         var copy = r
         if copy.direction == .click { copy.speed = .normal }
+        if copy.action != .doNothing { copy.isDraft = false }
         return copy
     }
 
     private func buildDiagnostics(for rules: [GestureRule]) -> RuleDiagnostics {
         RuleDiagnostics(
             configuredFingerCounts: Set(rules.map(\.fingers)).count,
-            appSpecificRules: rules.filter { $0.appFilter != nil }.count,
+            appSpecificRules: rules.filter { $0.appFilter != nil || $0.windowStateFilter != .any }.count,
             openAppRulesMissingTarget: rules.filter { $0.action == .openApp && (($0.appPath?.isEmpty) != false) }.count
         )
     }
@@ -307,7 +333,10 @@ struct PreferencesRootView: View {
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 620)
         .onAppear { store.startPollingEngineState() }
-        .onDisappear { store.stopPollingEngineState() }
+        .onDisappear {
+            store.stopPollingEngineState()
+            GlideConfigStore.shared.flushPendingSave()
+        }
     }
 
     // MARK: Sidebar
@@ -336,16 +365,6 @@ struct PreferencesRootView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                if selection == .gestures {
-                    Button { store.addRule() } label: {
-                        Image(systemName: "plus")
-                    }
-                    .help("Add Gesture Rule")
-                }
             }
         }
     }
@@ -390,10 +409,10 @@ struct PreferencesRootView: View {
                 .font(.system(size: 44))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.tertiary)
-            Text("Select a Rule")
+            Text("Select a Gesture")
                 .font(.title3)
                 .foregroundStyle(.secondary)
-            Text("Choose a gesture from the list\nto edit its action and options.")
+            Text("Pick a rule from the list, or click + to add\na new empty gesture.")
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -410,6 +429,15 @@ struct GestureListView: View {
     @ObservedObject var store: PreferencesStore
     @Binding var selectedID: UUID?
 
+    private var gesturesSubtitle: String {
+        let active = store.rules.filter(\.isActive).count
+        let drafts = store.draftRules.count
+        if drafts == 0 {
+            return "\(store.rules.count) rule\(store.rules.count == 1 ? "" : "s") · \(active) active"
+        }
+        return "\(store.rules.count) rules · \(drafts) draft\(drafts == 1 ? "" : "s")"
+    }
+
     var body: some View {
         Group {
             if store.rules.isEmpty {
@@ -421,12 +449,25 @@ struct GestureListView: View {
                     Text("No Rules")
                         .font(.title3)
                         .foregroundStyle(.secondary)
-                    Button("Add Gesture Rule") { store.addRule() }
+                    Button("Add Gesture") { selectedID = store.addRule() }
                         .buttonStyle(.bordered)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(selection: $selectedID) {
+                    if !store.draftRules.isEmpty {
+                        Section {
+                            ForEach(store.draftRules) { rule in
+                                RuleRowView(rule: rule, store: store)
+                                    .tag(rule.id)
+                            }
+                        } header: {
+                            Label("New — Not Configured", systemImage: "sparkles")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+
                     ForEach(store.rulesGroupedByFingers(), id: \.fingers) { group in
                         Section {
                             ForEach(group.rules) { rule in
@@ -453,8 +494,14 @@ struct GestureListView: View {
             }
         }
         .navigationTitle("Gestures")
-        .navigationSubtitle("\(store.rules.count) rule\(store.rules.count == 1 ? "" : "s")")
+        .navigationSubtitle(gesturesSubtitle)
         .toolbar {
+            ToolbarItem {
+                Button { selectedID = store.addRule() } label: {
+                    Image(systemName: "plus")
+                }
+                .help("Add a new gesture rule")
+            }
             ToolbarItem {
                 Button(role: .destructive) { store.resetRules() } label: {
                     Image(systemName: "arrow.counterclockwise")
@@ -479,41 +526,83 @@ struct RuleRowView: View {
     let rule: GestureRule
     let store: PreferencesStore
 
+    private var isShadowed: Bool { store.isRuleShadowed(rule) }
+    private var hasDuplicates: Bool { store.duplicateCount(for: rule) > 1 }
+
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(badgeColor(rule.fingers).opacity(0.12))
-                Image(systemName: directionIcon(rule.direction))
+                    .fill(badgeColor(rule.fingers).opacity(rule.isDraft ? 0.06 : 0.12))
+                Image(systemName: rule.isDraft ? "plus" : directionIcon(rule.direction))
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(badgeColor(rule.fingers))
+                    .foregroundStyle(rule.isDraft ? .orange : badgeColor(rule.fingers))
             }
             .frame(width: 38, height: 38)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(rule.action.rawValue)
+                Text(rule.isDraft ? "New Gesture" : rule.action.rawValue)
                     .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(rule.isDraft ? .secondary : .primary)
                     .lineLimit(1)
                 HStack(spacing: 6) {
-                    Text(rule.direction.rawValue)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    if rule.direction != .click {
-                        speedBadge(rule.speed)
+                    if rule.isDraft {
+                        Text("Choose fingers, direction, and action →")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        Text(rule.direction.rawValue)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        if rule.direction != .click {
+                            speedBadge(rule.speed)
+                        }
+                    }
+                    if rule.modifierFilter != .any {
+                        Text(rule.modifierFilter.rawValue)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.purple)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.purple.opacity(0.10)))
+                    }
+                    if rule.windowStateFilter != .any {
+                        Text(rule.windowStateFilter.rawValue)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.teal)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.teal.opacity(0.10)))
                     }
                     if let bid = rule.appFilter {
-                        Text(store.filterLabel(for: bid))
+                        Text(store.appFilterLabel(for: bid))
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Capsule().fill(Color.accentColor.opacity(0.10)))
                     }
+                    if isShadowed {
+                        Text("Overridden")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                    } else if hasDuplicates && !rule.isDraft {
+                        Text("Active")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.green.opacity(0.10)))
+                    }
                 }
             }
 
             Spacer(minLength: 0)
         }
+        .opacity(isShadowed ? 0.55 : 1)
         .padding(.vertical, 4)
         .contextMenu {
             Button(role: .destructive) {
@@ -564,6 +653,26 @@ struct RuleDetailView: View {
 
     var body: some View {
         Form {
+            if rule.isDraft {
+                Section {
+                    Label("Set the gesture and action below. This rule won't run until you choose an action other than \"Do Nothing\".", systemImage: "sparkles")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } else if store.isRuleShadowed(rule) {
+                Section {
+                    Label("A newer duplicate of this gesture exists lower in the list — only that one runs.", systemImage: "arrow.down.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } else if store.duplicateCount(for: rule) > 1 {
+                Section {
+                    Label("Duplicate gestures are allowed. The newest matching rule in the list wins.", systemImage: "info.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Gesture") {
                 Picker("Fingers", selection: $rule.fingers) {
                     ForEach(3...5, id: \.self) { n in Text("\(n) Fingers").tag(n) }
@@ -584,8 +693,12 @@ struct RuleDetailView: View {
 
             Section("Action") {
                 Picker("Action", selection: $rule.action) {
-                    ForEach(GestureAction.allCases, id: \.self) { action in
-                        Text(action.rawValue).tag(action)
+                    ForEach(GestureAction.catalog, id: \.category) { group in
+                        Section(group.category) {
+                            ForEach(group.actions, id: \.self) { action in
+                                Text(action.rawValue).tag(action)
+                            }
+                        }
                     }
                 }
 
@@ -604,8 +717,26 @@ struct RuleDetailView: View {
                 }
             }
 
-            Section("App Filter") {
-                Picker("Active In", selection: Binding(
+            Section("Conditions") {
+                Picker("Modifier keys", selection: Binding(
+                    get: { rule.modifierFilter },
+                    set: { store.setModifierFilter($0, for: rule.id) })) {
+                    ForEach(ModifierFilter.allCases, id: \.self) { filter in
+                        Text(filter.rawValue).tag(filter)
+                    }
+                }
+                .help("Hold the chosen key(s) on your keyboard while placing fingers on the trackpad. Example: ⇧ Shift Held for clipboard screenshot vs not held for saved screenshot.")
+
+                Picker("When window is", selection: Binding(
+                    get: { rule.windowStateFilter },
+                    set: { store.setWindowStateFilter($0, for: rule.id) })) {
+                    ForEach(WindowStateFilter.allCases, id: \.self) { state in
+                        Text(state.rawValue).tag(state)
+                    }
+                }
+                .help("Run this gesture only when the frontmost window matches this state (e.g. fullscreen vs not).")
+
+                Picker("When app is", selection: Binding(
                     get: { rule.appFilter },
                     set: { store.setAppFilter($0, for: rule.id) })) {
                     Text("Any App").tag(String?.none)
@@ -614,7 +745,7 @@ struct RuleDetailView: View {
                         Text(app.name).tag(Optional(app.bundleID))
                     }
                 }
-                .help("Restrict this rule to a specific app, or leave as Any App.")
+                .help("Optionally restrict this rule to a specific app.")
             }
 
             if rule.action.supportsReciprocal, rule.direction != .click {
@@ -649,7 +780,11 @@ struct RuleDetailView: View {
         .navigationSubtitle("\(rule.fingers) fingers · \(rule.direction.rawValue)")
         .onChange(of: rule.direction) { newDirection in
             if newDirection == .click { rule.speed = .normal }
+            store.markRuleConfigured(rule.id)
         }
+        .onChange(of: rule.fingers) { _ in store.markRuleConfigured(rule.id) }
+        .onChange(of: rule.speed) { _ in store.markRuleConfigured(rule.id) }
+        .onChange(of: rule.action) { _ in store.markRuleConfigured(rule.id) }
     }
 }
 
@@ -726,7 +861,7 @@ struct TuningFormView: View {
                 Text("Speed Classification")
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Speed is based on how fast the finger moves (average displacement per frame), not how long the gesture takes.")
+                    Text("Speed uses recent frame movement and overall swipe duration so slow, normal, and fast gestures stay distinct.")
                     HStack(spacing: 0) {
                         Text("Fast").foregroundStyle(.orange).fontWeight(.medium)
                         Text(" ≥ \(String(format: "%.3f", store.tuning.fastVelocityThreshold))")
