@@ -73,6 +73,7 @@ final class GestureEngine {
         let startX: Float; let startY: Float
         let fingers: Int; let startTime: TimeInterval
         let initialSpread: Float
+        let modifiersAtStart: CapturedModifiers
         var frameCount: Int
         var cumulativeSpreadDelta: Float
         var prevSpread: Float
@@ -87,6 +88,7 @@ final class GestureEngine {
         let startX: Float; let startY: Float
         var lastX: Float; var lastY: Float
         let fingers: Int; let startTime: TimeInterval
+        let modifiersAtStart: CapturedModifiers
         var velocitySamples: [Float]
         var recentDeltas: [(dx: Float, dy: Float)]
         let initialSpread: Float
@@ -470,9 +472,10 @@ final class GestureEngine {
         lastClickProcessedTime = now
         glideClickFingerCount = 0
 
-        guard let rule = bestRule(fingers: n, direction: .click) else { return }
+        let modifiers = captureModifiers()
+        guard let rule = bestRule(fingers: n, direction: .click, modifiers: modifiers) else { return }
 
-        AppLogger.debug("[Engine] Click — \(n) fingers → \(rule.action.rawValue)")
+        AppLogger.debug("[Engine] Click — \(n) fingers \(modifierDebugLabel(modifiers)) → \(rule.action.rawValue)")
         clearReciprocalToken()
         phase = .fired
         Haptic.click()
@@ -528,6 +531,7 @@ final class GestureEngine {
                 startX: frame.cx, startY: frame.cy,
                 fingers: n, startTime: now,
                 initialSpread: frame.spread,
+                modifiersAtStart: captureModifiers(),
                 frameCount: 1, cumulativeSpreadDelta: 0,
                 prevSpread: frame.spread, minCoherence: frame.coherence,
                 prevCx: frame.cx, prevCy: frame.cy,
@@ -541,6 +545,7 @@ final class GestureEngine {
                     startX: frame.cx, startY: frame.cy,
                     fingers: n, startTime: now,
                     initialSpread: frame.spread,
+                    modifiersAtStart: captureModifiers(),
                     frameCount: 1, cumulativeSpreadDelta: 0,
                     prevSpread: frame.spread, minCoherence: frame.coherence,
                     prevCx: frame.cx, prevCy: frame.cy,
@@ -555,8 +560,11 @@ final class GestureEngine {
 
             let frameDx = frame.cx - data.prevCx
             let frameDy = frame.cy - data.prevCy
-            if data.velocitySamples.count < tuning.speedSampleCount {
-                data.velocitySamples.append((frameDx * frameDx + frameDy * frameDy).squareRoot())
+            let movedFromStart = ((frame.cx - data.startX) * (frame.cx - data.startX)
+                                + (frame.cy - data.startY) * (frame.cy - data.startY)).squareRoot()
+            // Ignore placement frames — only sample once the centroid is actually moving.
+            if movedFromStart >= max(0.002, tuning.initialThreshold * 0.12) {
+                appendVelocitySample((frameDx * frameDx + frameDy * frameDy).squareRoot(), to: &data.velocitySamples)
             }
             data.prevCx = frame.cx; data.prevCy = frame.cy
 
@@ -610,6 +618,7 @@ final class GestureEngine {
                     startX: data.startX, startY: data.startY,
                     lastX: frame.cx, lastY: frame.cy,
                     fingers: data.fingers, startTime: data.startTime,
+                    modifiersAtStart: data.modifiersAtStart,
                     velocitySamples: data.velocitySamples,
                     recentDeltas: [],
                     initialSpread: data.initialSpread,
@@ -691,9 +700,7 @@ final class GestureEngine {
             updateObservableState(); return
         }
 
-        if updated.velocitySamples.count < tuning.speedSampleCount {
-            updated.velocitySamples.append(frameDist)
-        }
+        appendVelocitySample(frameDist, to: &updated.velocitySamples)
 
         updated.recentDeltas.insert((dx: frameDx, dy: frameDy), at: 0)
 
@@ -723,7 +730,12 @@ final class GestureEngine {
             phase = .fired; updateObservableState(); return
         }
 
-        let speed = classifySpeed(velocitySamples: updated.velocitySamples)
+        let elapsed = max(now - updated.startTime, 0.001)
+        let speed = classifySpeed(
+            velocitySamples: updated.velocitySamples,
+            totalDisplacement: swipeCentroidMovement,
+            elapsedSeconds: elapsed
+        )
 
         // Pre-fire safety gate
         let gateSpreadOK = abs(frame.spread - updated.initialSpread) < tuning.pinchSpreadThreshold * 0.8
@@ -734,8 +746,9 @@ final class GestureEngine {
             updateObservableState(); return
         }
 
-        if let rule = bestRule(fingers: data.fingers, direction: direction, speed: speed) {
-            AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue) → \(rule.action.rawValue)")
+        if let rule = bestRule(fingers: data.fingers, direction: direction, speed: speed,
+                               modifiers: updated.modifiersAtStart) {
+            AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue) \(modifierDebugLabel(updated.modifiersAtStart)) (Δ=\(String(format: "%.3f", swipeCentroidMovement)) t=\(String(format: "%.2f", elapsed))s) → \(rule.action.rawValue)")
             if rule.action == .appSwitcherNext || rule.action == .appSwitcherPrev {
                 if !beginAppSwitcher(for: rule.action, refX: frame.cx) { phase = .fired }
             } else {
@@ -743,6 +756,7 @@ final class GestureEngine {
                 phase = .fired
             }
         } else {
+            AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue): no matching rule")
             phase = .fired
         }
         updateObservableState()
@@ -894,48 +908,128 @@ final class GestureEngine {
 
     // MARK: - Rule matching
 
-    private func bestRule(fingers: Int, direction: GestureDirection, speed: GestureSpeed = .normal) -> GestureRule? {
+    private func captureModifiers() -> CapturedModifiers {
+        CapturedModifiers(NSEvent.modifierFlags)
+    }
+
+    private func modifierDebugLabel(_ m: CapturedModifiers) -> String {
+        var parts: [String] = []
+        if m.shift { parts.append("⇧") }
+        if m.control { parts.append("⌃") }
+        if m.option { parts.append("⌥") }
+        if m.command { parts.append("⌘") }
+        return parts.isEmpty ? "" : "[\(parts.joined())]"
+    }
+
+    private func bestRule(
+        fingers: Int,
+        direction: GestureDirection,
+        speed: GestureSpeed = .normal,
+        modifiers: CapturedModifiers
+    ) -> GestureRule? {
         let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let all = Settings.shared.rules.filter { $0.fingers == fingers && $0.direction == direction }
+        let isFullscreen = ActionExecutor.shared.isFrontmostWindowFullscreen()
+        let isMaximized  = ActionExecutor.shared.isFrontmostWindowMaximized()
 
-        // State filters (FULLSCREEN, NOT_FULLSCREEN, etc.)
-        let stateRules = all.filter { r in
-            guard let filter = r.appFilter else { return false }
-            switch filter.uppercased() {
-            case "FULLSCREEN":     return ActionExecutor.shared.isFrontmostWindowFullscreen()
-            case "NOT_FULLSCREEN": return !ActionExecutor.shared.isFrontmostWindowFullscreen()
-            case "MAXIMIZED":      return ActionExecutor.shared.isFrontmostWindowMaximized()
-            case "NOT_MAXIMIZED":  return !ActionExecutor.shared.isFrontmostWindowMaximized()
-            default: return false
-            }
+        let matching = Settings.shared.rules.filter { rule in
+            rule.isActive
+                && rule.fingers == fingers
+                && rule.direction == direction
+                && matchesWindowState(rule, isFullscreen: isFullscreen, isMaximized: isMaximized)
+                && matchesAppFilter(rule, bundleID: bid)
+                && modifiers.matches(rule.modifierFilter)
         }
-        if let match = bestRuleMatch(in: stateRules, speed: speed) { return match }
 
-        let specific = all.filter { $0.appFilter != nil && $0.appFilter == bid }
-        if let match = bestRuleMatch(in: specific, speed: speed) { return match }
+        return bestRuleMatch(in: matching, speed: speed)
+    }
 
-        return bestRuleMatch(in: all.filter { $0.appFilter == nil }, speed: speed)
+    private func matchesWindowState(_ rule: GestureRule, isFullscreen: Bool, isMaximized: Bool) -> Bool {
+        switch rule.windowStateFilter {
+        case .any:            return true
+        case .fullscreen:     return isFullscreen
+        case .notFullscreen:  return !isFullscreen
+        case .maximized:      return isMaximized
+        case .notMaximized:   return !isMaximized
+        }
+    }
+
+    private func matchesAppFilter(_ rule: GestureRule, bundleID: String?) -> Bool {
+        guard let filter = rule.appFilter, !filter.isEmpty else { return true }
+        return filter == bundleID
     }
 
     private func hasAnySwipeRule(fingers: Int) -> Bool {
         let swipeDirs: [GestureDirection] = [.swipeLeft, .swipeRight, .swipeUp, .swipeDown]
-        return Settings.shared.rules.contains { $0.fingers == fingers && swipeDirs.contains($0.direction) }
+        return Settings.shared.rules.contains {
+            $0.isActive && $0.fingers == fingers && swipeDirs.contains($0.direction)
+        }
     }
 
     private func bestRuleMatch(in rules: [GestureRule], speed: GestureSpeed) -> GestureRule? {
         let normalized = speed == .any ? GestureSpeed.normal : speed
-        if let exact = rules.first(where: { ($0.speed == .any ? .normal : $0.speed) == normalized }) { return exact }
+        // Latest rule in the list wins when several share the same gesture signature.
+        if let exact = rules.last(where: { ($0.speed == .any ? .normal : $0.speed) == normalized }) {
+            return exact
+        }
+        // When slow/normal/fast are all configured for the same gesture, never fall back
+        // to a different speed — that caused slow swipes to trigger normal-speed actions.
+        let configuredSpeeds = Set(rules.map { $0.speed == .any ? GestureSpeed.normal : $0.speed })
+        if configuredSpeeds.count > 1 { return nil }
         guard speed != .normal else { return nil }
-        return rules.first(where: { ($0.speed == .any ? .normal : $0.speed) == .normal })
+        return rules.last(where: { ($0.speed == .any ? .normal : $0.speed) == .normal })
     }
 
     // MARK: - Speed classification
 
-    private func classifySpeed(velocitySamples: [Float]) -> GestureSpeed {
-        guard !velocitySamples.isEmpty else { return .normal }
-        let avg = velocitySamples.reduce(0, +) / Float(velocitySamples.count)
-        if avg >= tuning.fastVelocityThreshold { return .fast }
-        if avg <= tuning.slowVelocityThreshold { return .slow }
+    /// Rolling window of recent per-frame centroid displacements (movement-gated in candidate phase).
+    private func appendVelocitySample(_ distance: Float, to samples: inout [Float]) {
+        guard distance > 0 else { return }
+        samples.append(distance)
+        let cap = tuning.speedSampleCount
+        if samples.count > cap {
+            samples.removeFirst(samples.count - cap)
+        }
+    }
+
+    /// Classifies swipe speed using median frame displacement and overall displacement / duration.
+    private func classifySpeed(
+        velocitySamples: [Float],
+        totalDisplacement: Float,
+        elapsedSeconds: TimeInterval
+    ) -> GestureSpeed {
+        let slowFrame = tuning.slowVelocityThreshold
+        let fastFrame = tuning.fastVelocityThreshold
+        // Approximate MT callback rate for mapping frame thresholds to units/sec.
+        let fps: Float = 60
+        let slowPerSecond = slowFrame * fps
+        let fastPerSecond = fastFrame * fps
+
+        let medianFrame: Float = {
+            guard !velocitySamples.isEmpty else { return 0 }
+            let sorted = velocitySamples.sorted()
+            return sorted[sorted.count / 2]
+        }()
+
+        let perSecond: Float = totalDisplacement / Float(max(elapsedSeconds, 0.05))
+
+        let frameSaysSlow = medianFrame > 0 && medianFrame <= slowFrame
+        let frameSaysFast = medianFrame >= fastFrame
+        let timeSaysSlow = perSecond <= slowPerSecond * 1.2
+        let timeSaysFast = perSecond >= fastPerSecond * 0.85
+
+        // Short flicks: trust recent frame peaks; long deliberate swipes: trust average speed.
+        let isShortGesture = elapsedSeconds < 0.22
+
+        if isShortGesture {
+            if frameSaysFast { return .fast }
+            if frameSaysSlow && timeSaysSlow { return .slow }
+        } else {
+            if timeSaysSlow && !frameSaysFast { return .slow }
+            if timeSaysFast || frameSaysFast { return .fast }
+        }
+
+        if frameSaysSlow && timeSaysSlow { return .slow }
+        if frameSaysFast || timeSaysFast { return .fast }
         return .normal
     }
 
