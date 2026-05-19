@@ -19,8 +19,8 @@ struct GlideConfig {
     struct Speed {
         var swipeThreshold: Float = 0.018
         var fastVelocityThreshold: Float = 0.008
-        var slowVelocityThreshold: Float = 0.003
-        var speedSampleCount: Int = 3
+        var slowVelocityThreshold: Float = 0.004
+        var speedSampleCount: Int = 5
     }
 
     struct Preferences {
@@ -52,8 +52,11 @@ struct GlideConfig {
         var speed: String?          // "slow" | "normal" | "fast" — nil for click
         var action: String
         var appFilter: String?
+        var windowState: String?
+        var modifierFilter: String?
         var appPath: String?
         var reciprocal: Bool
+        var draft: Bool = false
     }
 
     var speed: Speed = Speed()
@@ -100,15 +103,19 @@ extension GlideConfig {
 
         cfg.gestures = s.rules.map { rule in
             let isClick = rule.direction == .click
+            let normalized = GestureRule.migratingLegacyAppFilter(rule)
             return GlideConfig.Gesture(
-                type:       isClick ? "click" : "swipe",
-                direction:  isClick ? nil     : yamlDirection(rule.direction),
-                fingers:    rule.fingers,
-                speed:      isClick ? nil     : rule.speed.rawValue.lowercased(),
-                action:     rule.action.rawValue,
-                appFilter:  rule.appFilter,
-                appPath:    rule.appPath,
-                reciprocal: rule.reciprocalEnabled
+                type:        isClick ? "click" : "swipe",
+                direction:   isClick ? nil     : yamlDirection(rule.direction),
+                fingers:     rule.fingers,
+                speed:       isClick ? nil     : rule.speed.rawValue.lowercased(),
+                action:      rule.action.rawValue,
+                appFilter:      normalized.appFilter,
+                windowState:    normalized.windowStateFilter.yamlValue,
+                modifierFilter: normalized.modifierFilter.yamlValue,
+                appPath:        rule.appPath,
+                reciprocal:  rule.reciprocalEnabled,
+                draft:       rule.isDraft
             )
         }
         return cfg
@@ -157,15 +164,19 @@ extension GlideConfig {
                 }
             }()
 
-            return GestureRule(
-                fingers:           g.fingers,
-                direction:         direction,
-                speed:             speed,
-                action:            action,
-                appPath:           g.appPath,
-                appFilter:         g.appFilter,
-                reciprocalEnabled: g.reciprocal
-            )
+            let migrated = GestureRule.migratingLegacyAppFilter(GestureRule(
+                fingers:   g.fingers,
+                direction: direction,
+                speed:     speed,
+                action:    action,
+                appPath:   g.appPath,
+                appFilter: g.appFilter,
+                windowStateFilter: WindowStateFilter(yamlValue: g.windowState) ?? .any,
+                modifierFilter:    ModifierFilter(yamlValue: g.modifierFilter) ?? .any,
+                reciprocalEnabled: g.reciprocal,
+                isDraft:           g.draft
+            ))
+            return migrated
         }
     }
 
@@ -265,7 +276,10 @@ enum GlideConfigSerializer {
         if let d = g.direction { lines.append("      direction: \(d)") }
         lines.append("      fingers: \(g.fingers)")
         if let s = g.speed { lines.append("      speed: \(s)") }
+        if g.draft { lines.append("      draft: true") }
         lines.append("      action: \"\(escape(g.action))\"")
+        if let ws = g.windowState { lines.append("      window_state: \(ws)") }
+        if let mf = g.modifierFilter { lines.append("      modifier_filter: \(mf)") }
         lines.append("      app_filter: \(g.appFilter.map { "\"\($0)\"" } ?? "null")")
         if g.type == "swipe" || g.appPath != nil {
             lines.append("      app_path: \(g.appPath.map { "\"\(escape($0))\"" } ?? "null")")
@@ -398,7 +412,8 @@ enum GlideConfigParser {
 
     private static func parseGestureBlock(_ lines: [String], from i: inout Int) -> GlideConfig.Gesture {
         var g = GlideConfig.Gesture(type: "", direction: nil, fingers: 3,
-                                    speed: nil, action: "", appFilter: nil, appPath: nil, reciprocal: true)
+                                    speed: nil, action: "", appFilter: nil, windowState: nil,
+                                    modifierFilter: nil, appPath: nil, reciprocal: true, draft: false)
         let firstLine = lines[i].trimmingCharacters(in: .whitespaces).dropFirst()
         if let colon = firstLine.firstIndex(of: ":") {
             let k = String(firstLine[..<colon]).trimmingCharacters(in: .whitespaces)
@@ -421,9 +436,12 @@ enum GlideConfigParser {
             case "fingers":    g.fingers   = intVal(val) ?? g.fingers
             case "speed":      g.speed     = val
             case "action":     g.action    = mapActionSynonym(stringVal(val) ?? g.action)
-            case "app_filter": g.appFilter = nullableStringVal(val)
-            case "app_path":   g.appPath   = nullableStringVal(val)
+            case "app_filter":    g.appFilter    = nullableStringVal(val)
+            case "window_state":    g.windowState    = nullableStringVal(val)
+            case "modifier_filter": g.modifierFilter = nullableStringVal(val)
+            case "app_path":        g.appPath        = nullableStringVal(val)
             case "reciprocal": g.reciprocal = boolVal(val) ?? g.reciprocal
+            case "draft":      g.draft      = boolVal(val) ?? g.draft
             default: break
             }
             i += 1
@@ -487,8 +505,11 @@ enum GlideConfigParser {
         switch s.lowercased() {
         case "launch app":           return "Open App…"
         case "open spotlight":       return "Spotlight"
-        case "screenshot selection": return "Screenshot (Area)"
-        case "take screenshot":      return "Screenshot (Full)"
+        case "screenshot selection":       return "Screenshot (Area)"
+        case "take screenshot":            return "Screenshot (Full)"
+        case "screenshot clipboard":       return "Screenshot (Area → Clipboard)"
+        case "screenshot full clipboard":  return "Screenshot (Full → Clipboard)"
+        case "screenshot toolbar":         return "Screenshot Toolbar"
         default: return s
         }
     }
@@ -508,6 +529,11 @@ final class GlideConfigStore {
     static let shared = GlideConfigStore()
     private init() {}
 
+    /// Coalesces rapid preference edits (e.g. slider drags) into a single disk write.
+    private var pendingSave: DispatchWorkItem?
+    private var isDirty = false
+    private let saveDebounceInterval: TimeInterval = 0.4
+
     // MARK: Path
 
     var configURL: URL {
@@ -522,8 +548,33 @@ final class GlideConfigStore {
 
     // MARK: Save
 
+    /// Queues a debounced write. In-memory `Settings` are already updated; the engine sees changes immediately.
+    func scheduleSave() {
+        isDirty = true
+        pendingSave?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingSave = nil
+            _ = self.save()
+        }
+        pendingSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + saveDebounceInterval, execute: work)
+    }
+
+    /// Writes immediately if a debounced save is still pending (prefs close, quit, sleep).
+    func flushPendingSave() {
+        pendingSave?.cancel()
+        pendingSave = nil
+        guard isDirty else { return }
+        _ = save()
+    }
+
     @discardableResult
     func save() -> Bool {
+        pendingSave?.cancel()
+        pendingSave = nil
+        isDirty = false
+
         let url = configURL
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
