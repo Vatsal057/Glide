@@ -293,6 +293,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
     var windowStateFilter: WindowStateFilter = .any
     var modifierFilter: ModifierFilter = .any
     var reciprocalEnabled: Bool     = true
+    var reciprocalAction: GestureAction?
     /// New rules start as drafts until configured in the editor.
     var isDraft: Bool               = false
 
@@ -320,7 +321,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
          action: GestureAction, appPath: String? = nil, appFilter: String? = nil,
          windowStateFilter: WindowStateFilter = .any,
          modifierFilter: ModifierFilter = .any,
-         reciprocalEnabled: Bool = true, isDraft: Bool = false) {
+         reciprocalEnabled: Bool = true, reciprocalAction: GestureAction? = nil, isDraft: Bool = false) {
         self.fingers             = fingers
         self.direction           = direction
         self.speed               = speed
@@ -330,6 +331,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
         self.windowStateFilter   = windowStateFilter
         self.modifierFilter      = modifierFilter
         self.reciprocalEnabled   = reciprocalEnabled
+        self.reciprocalAction    = reciprocalAction
         self.isDraft             = isDraft
     }
 
@@ -346,6 +348,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
         windowStateFilter = (try? c.decodeIfPresent(WindowStateFilter.self, forKey: .windowStateFilter)) ?? .any
         modifierFilter    = (try? c.decodeIfPresent(ModifierFilter.self,    forKey: .modifierFilter))    ?? .any
         reciprocalEnabled = (try? c.decodeIfPresent(Bool.self,  forKey: .reciprocalEnabled)) ?? true
+        reciprocalAction  = try? c.decodeIfPresent(GestureAction.self, forKey: .reciprocalAction)
         isDraft           = (try? c.decodeIfPresent(Bool.self,  forKey: .isDraft)) ?? false
         self = Self.migratingLegacyAppFilter(self)
     }
