@@ -32,7 +32,7 @@ private enum Haptic {
     static func switcherOpen()   { fire(.generic) }
     static func switcherCommit() { fire(.generic) }
     static func reciprocal()     { fire(.levelChange) }
-    static func click()          { fire(.generic) }
+    static func click()          { fire(.levelChange) }
 
     private static func fire(_ pattern: NSHapticFeedbackManager.FeedbackPattern) {
         guard Settings.shared.hapticFeedbackEnabled else { return }
@@ -397,6 +397,9 @@ final class GestureEngine {
                 AppLogger.debug("🖱️ leftMouseDown (fingers detected: \(count), peak: \(peak))")
 
                 if count >= 3 && count == peak {
+                    if Settings.shared.hapticFeedbackEnabled {
+                        NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+                    }
                     AppLogger.debug("✅ Click match! Triggering action...")
                     DispatchQueue.main.async { GestureEngine.shared.processClick(fingerCount: count) }
                 }
@@ -468,7 +471,7 @@ final class GestureEngine {
         // ───────────────────────────────────────────────────────────────────────
 
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastClickProcessedTime > 0.1 else { return }
+        guard now - lastClickProcessedTime > 0.5 else { return }
         lastClickProcessedTime = now
         glideClickFingerCount = 0
 
@@ -478,7 +481,6 @@ final class GestureEngine {
         AppLogger.debug("[Engine] Click — \(n) fingers \(modifierDebugLabel(modifiers)) → \(rule.action.rawValue)")
         clearReciprocalToken()
         phase = .fired
-        Haptic.click()
 
         if rule.action == .quitApp {
             let loc = NSEvent.mouseLocation
@@ -1039,7 +1041,7 @@ final class GestureEngine {
         Haptic.forAction(rule.action)
         ActionExecutor.shared.execute(rule.action, appPath: rule.appPath)
         if rule.reciprocalEnabled {
-            reciprocalToken = makeReciprocalToken(for: rule.action, fingers: fingers, direction: direction)
+            reciprocalToken = makeReciprocalToken(inverseAction: rule.reciprocalAction ?? rule.action.inverseAction, fingers: fingers, direction: direction)
         } else {
             clearReciprocalToken()
         }
@@ -1061,8 +1063,8 @@ final class GestureEngine {
         return true
     }
 
-    private func makeReciprocalToken(for action: GestureAction, fingers: Int, direction: GestureDirection) -> ReciprocalToken? {
-        guard let rev = opposite(direction), let inverse = action.inverseAction else { return nil }
+    private func makeReciprocalToken(inverseAction: GestureAction?, fingers: Int, direction: GestureDirection) -> ReciprocalToken? {
+        guard let rev = opposite(direction), let inverse = inverseAction else { return nil }
         return ReciprocalToken(inverseAction: inverse, fingers: fingers, direction: rev)
     }
 

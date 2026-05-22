@@ -1,35 +1,44 @@
-import Cocoa
 import SwiftUI
 
-@MainActor
-final class PreferencesWindowController: NSWindowController {
+enum PrefsTab: String, CaseIterable, Identifiable {
+    case gestures      = "Gestures"
+    case tuning        = "Tuning"
+    case general       = "General"
+    case configuration = "Configuration"
 
-    static let shared = PreferencesWindowController()
+    var id: String { rawValue }
 
-    private let store = PreferencesStore.shared
-
-    private init() {
-        let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 960, height: 620),
-            styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: true)   // FIX: Defer backing-store allocation until window is first shown
-        win.title = "Glide"
-        win.minSize = NSSize(width: 860, height: 520)
-        win.center()
-        win.titlebarAppearsTransparent = false
-        win.toolbarStyle = .unified
-
-        super.init(window: win)
-
-        win.contentViewController = NSHostingController(rootView: PreferencesRootView(store: store))
+    var systemImage: String {
+        switch self {
+        case .gestures:      return "hand.draw"
+        case .tuning:        return "slider.horizontal.3"
+        case .general:       return "gearshape"
+        case .configuration: return "doc.text"
+        }
     }
+}
 
-    required init?(coder: NSCoder) { nil }
+struct PreferencesWindow: View {
+    @State private var selectedTab: PrefsTab = .gestures
+    @EnvironmentObject var preferencesStore: PreferencesStore
+    @EnvironmentObject var engineBridge: EngineBridge
 
-    func show() {
-        store.reload()
-        window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+    var body: some View {
+        NavigationSplitView {
+            List(PrefsTab.allCases, selection: $selectedTab) { tab in
+                Label(tab.rawValue, systemImage: tab.systemImage)
+                    .tag(tab)
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 200)
+        } detail: {
+            switch selectedTab {
+            case .gestures:      GesturesTab()
+            case .tuning:        TuningTab()
+            case .general:       GeneralTab()
+            case .configuration: ConfigurationTab()
+            }
+        }
+        .frame(minWidth: 760, minHeight: 520)
     }
 }
