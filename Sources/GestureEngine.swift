@@ -339,7 +339,13 @@ final class GestureEngine {
                     return nil
                 }
                 if type == .leftMouseDown {
-                    if glideActiveTouches >= 3 { glideClickFingerCount = glideActiveTouches }
+                    let fingers = Int(glideActiveTouches)
+                    if fingers >= 3 {
+                        glideClickFingerCount = glideActiveTouches
+                        DispatchQueue.main.async {
+                            GestureEngine.shared.processClick(fingerCount: fingers)
+                        }
+                    }
                     return Unmanaged.passUnretained(cgEvent)
                 }
                 if glideActiveTouches >= 3 { return nil }
@@ -397,11 +403,13 @@ final class GestureEngine {
                 let peak = getSessionPeakActiveTouches()
                 AppLogger.debug("🖱️ leftMouseDown (fingers detected: \(count), peak: \(peak))")
 
-                if count >= 3 && count == peak {
+                // Use current finger count; do not require count == peak (peak can stay
+                // higher after briefly lifting a finger, which blocked 4-finger clicks).
+                if count >= 3, peak >= count {
                     if Settings.shared.hapticFeedbackEnabled {
                         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
                     }
-                    AppLogger.debug("✅ Click match! Triggering action...")
+                    AppLogger.debug("✅ Click match! \(count) fingers (peak \(peak))")
                     DispatchQueue.main.async { GestureEngine.shared.processClick(fingerCount: count) }
                 }
                 return Unmanaged.passUnretained(event)
@@ -452,7 +460,7 @@ final class GestureEngine {
             guard let self = self, self.isRunning else { return }
             let count = getThreeFingerCount()
             let peak = getSessionPeakActiveTouches()
-            guard count >= 3 && count == peak, event.stage >= 2 else { return }
+            guard count >= 3, peak >= count, event.stage >= 2 else { return }
 
             let now = Date().timeIntervalSinceReferenceDate
             guard now - self.lastForceClickTime > self.forceCooldown else { return }
@@ -487,9 +495,13 @@ final class GestureEngine {
             let loc = NSEvent.mouseLocation
             DispatchQueue.main.async { ActionExecutor.shared.quitAppAtCursor(loc) }
         } else {
+            let action = rule.action
+            let appPath = rule.appPath
+            let menuPath = rule.menuItemPath
+            let menuBundle = rule.appFilter
             DispatchQueue.main.async {
-                ActionExecutor.shared.execute(rule.action, appPath: rule.appPath,
-                                              menuItemPath: rule.menuItemPath, menuTargetBundleID: rule.appFilter)
+                ActionExecutor.shared.execute(action, appPath: appPath,
+                                              menuItemPath: menuPath, menuTargetBundleID: menuBundle)
             }
         }
         updateObservableState()
