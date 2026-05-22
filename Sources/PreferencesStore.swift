@@ -18,6 +18,7 @@ final class PreferencesStore: ObservableObject {
         var configuredFingerCounts: Int = 0
         var appSpecificRules: Int = 0
         var openAppRulesMissingTarget: Int = 0
+        var menuItemRulesMissingTarget: Int = 0
     }
 
     static let shared = PreferencesStore()
@@ -27,6 +28,7 @@ final class PreferencesStore: ObservableObject {
             persistRules()
         }
     }
+    @Published private(set) var appSwitcher: AppSwitcherSettings = .init()
     @Published private(set) var tuning: GestureTuning = .init()
     @Published private(set) var windowTargetingMode: WindowTargetingMode = .focusedThenCursor
     @Published private(set) var hapticFeedbackEnabled = true
@@ -41,6 +43,7 @@ final class PreferencesStore: ObservableObject {
     func reload() {
         let s = Settings.shared
         rules = s.rules.map(sanitizedRule)
+        appSwitcher = s.appSwitcher
         tuning = s.tuning
         windowTargetingMode = s.windowTargetingMode
         hapticFeedbackEnabled = s.hapticFeedbackEnabled
@@ -82,6 +85,27 @@ final class PreferencesStore: ObservableObject {
 
     func resetRules() {
         rules = Settings.defaultRules.map(sanitizedRule)
+    }
+
+    func updateAppSwitcher(_ mutate: (inout AppSwitcherSettings) -> Void) {
+        var copy = appSwitcher
+        mutate(&copy)
+        copy = AppSwitcherSettings.normalized(copy)
+        let fingersChanged = copy.enabled && copy.fingers != appSwitcher.fingers
+        let turnedOn = copy.enabled && !appSwitcher.enabled
+        if copy.enabled && (turnedOn || fingersChanged) {
+            var updatedRules = rules
+            Settings.stripReservedHorizontalSwipes(from: &updatedRules, fingerCount: copy.fingers)
+            rules = updatedRules.map(sanitizedRule)
+        }
+        Settings.shared.appSwitcher = copy
+        appSwitcher = Settings.shared.appSwitcher
+    }
+
+    /// Horizontal swipes reserved for app switcher on this finger count (when enabled).
+    func isDirectionReservedByAppSwitcher(fingers: Int, direction: GestureDirection) -> Bool {
+        guard appSwitcher.enabled, fingers == appSwitcher.fingers else { return false }
+        return direction == .swipeLeft || direction == .swipeRight
     }
 
     func updateRule(_ r: GestureRule) {
@@ -235,6 +259,15 @@ final class PreferencesStore: ObservableObject {
         return URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
     }
 
+    func menuItemTargetLabel(bundleID: String?) -> String {
+        guard let bundleID else { return "Frontmost App" }
+        return appFilterLabel(for: bundleID)
+    }
+
+    func menuItemOptions(bundleID: String?) -> [MenuItemOption] {
+        MenuItemCatalog.options(bundleID: bundleID)
+    }
+
     var draftRules: [GestureRule] {
         rules.filter(\.isDraft)
     }
@@ -262,7 +295,10 @@ final class PreferencesStore: ObservableObject {
         RuleDiagnostics(
             configuredFingerCounts: Set(rules.map(\.fingers)).count,
             appSpecificRules: rules.filter { $0.appFilter != nil || $0.windowStateFilter != .any }.count,
-            openAppRulesMissingTarget: rules.filter { $0.action == .openApp && (($0.appPath?.isEmpty) != false) }.count
+            openAppRulesMissingTarget: rules.filter { $0.action == .openApp && (($0.appPath?.isEmpty) != false) }.count,
+            menuItemRulesMissingTarget: rules.filter {
+                $0.action == .customMenuItem && ($0.menuItemPath == nil || ($0.menuItemPath?.count ?? 0) < 2)
+            }.count
         )
     }
 }

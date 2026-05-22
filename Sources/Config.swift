@@ -30,6 +30,11 @@ struct GlideConfig {
         var launchAtLogin: Bool = false
     }
 
+    struct AppSwitcher {
+        var enabled: Bool = true
+        var fingers: Int = 3
+    }
+
     struct Tuning {
         var appSwitcherStepThreshold: Float = 0.003
         var appSwitcherDebounce: Double = 0.10
@@ -55,12 +60,14 @@ struct GlideConfig {
         var windowState: String?
         var modifierFilter: String?
         var appPath: String?
+        var menuPath: [String]?
         var reciprocal: Bool
         var draft: Bool = false
     }
 
     var speed: Speed = Speed()
     var preferences: Preferences = Preferences()
+    var appSwitcher: AppSwitcher = AppSwitcher()
     var tuning: Tuning = Tuning()
     var gestures: [Gesture] = []
 }
@@ -88,6 +95,9 @@ extension GlideConfig {
         cfg.preferences.debugLogging     = s.debugLoggingEnabled
         cfg.preferences.launchAtLogin    = s.launchAtLoginEnabled
 
+        cfg.appSwitcher.enabled = s.appSwitcher.enabled
+        cfg.appSwitcher.fingers = s.appSwitcher.fingers
+
         cfg.tuning.appSwitcherStepThreshold  = t.appSwitcherStepThreshold
         cfg.tuning.appSwitcherDebounce       = t.appSwitcherDebounce
         cfg.tuning.candidateFrames           = t.candidateFrames
@@ -114,6 +124,7 @@ extension GlideConfig {
                 windowState:    normalized.windowStateFilter.yamlValue,
                 modifierFilter: normalized.modifierFilter.yamlValue,
                 appPath:        rule.appPath,
+                menuPath:       rule.menuItemPath,
                 reciprocal:  rule.reciprocalEnabled,
                 draft:       rule.isDraft
             )
@@ -122,6 +133,13 @@ extension GlideConfig {
     }
 
     // ── Convert to Settings-domain types (used by Settings.apply(_:)) ──
+
+    func toAppSwitcher() -> AppSwitcherSettings {
+        var s = AppSwitcherSettings()
+        s.enabled = appSwitcher.enabled
+        s.fingers = appSwitcher.fingers
+        return AppSwitcherSettings.normalized(s)
+    }
 
     func toTuning() -> GestureTuning {
         var t = GestureTuning()
@@ -174,6 +192,7 @@ extension GlideConfig {
                 windowStateFilter: WindowStateFilter(yamlValue: g.windowState) ?? .any,
                 modifierFilter:    ModifierFilter(yamlValue: g.modifierFilter) ?? .any,
                 reciprocalEnabled: g.reciprocal,
+                menuItemPath:      g.menuPath,
                 isDraft:           g.draft
             ))
             return migrated
@@ -230,6 +249,11 @@ enum GlideConfigSerializer {
             "    debug_logging: \(config.preferences.debugLogging ? "true" : "false")",
             "    launch_at_login: \(config.preferences.launchAtLogin ? "true" : "false")",
             "",
+            "  # ── App Switcher (hold + swipe to browse, release to confirm) ──",
+            "  app_switcher:",
+            "    enabled: \(config.appSwitcher.enabled ? "true" : "false")",
+            "    fingers: \(config.appSwitcher.fingers)",
+            "",
             "  # ── Tuning ─────────────────────────────────────────",
             "  tuning:",
             "    app_switcher_step_threshold: \(fmt(config.tuning.appSwitcherStepThreshold))",
@@ -285,6 +309,12 @@ enum GlideConfigSerializer {
             lines.append("      app_path: \(g.appPath.map { "\"\(escape($0))\"" } ?? "null")")
             lines.append("      reciprocal: \(g.reciprocal ? "true" : "false")")
         }
+        if g.action == GestureAction.customMenuItem.rawValue, let path = g.menuPath, !path.isEmpty {
+            lines.append("      menu_path:")
+            for segment in path {
+                lines.append("        - \"\(escape(segment))\"")
+            }
+        }
         return lines
     }
 
@@ -314,8 +344,9 @@ enum GlideConfigParser {
             if indent == 0 && key != nil && key != "touchpad" { break }
             switch key {
             case "speed":       i += 1; parseSpeed(lines, from: &i, into: &cfg.speed)
-            case "preferences": i += 1; parsePreferences(lines, from: &i, into: &cfg.preferences)
-            case "tuning":      i += 1; parseTuning(lines, from: &i, into: &cfg.tuning)
+            case "preferences":  i += 1; parsePreferences(lines, from: &i, into: &cfg.preferences)
+            case "app_switcher": i += 1; parseAppSwitcher(lines, from: &i, into: &cfg.appSwitcher)
+            case "tuning":       i += 1; parseTuning(lines, from: &i, into: &cfg.tuning)
             case "gestures":    i += 1; parseGestures(lines, from: &i, into: &cfg.gestures); return cfg
             default:            i += 1
             }
@@ -349,6 +380,20 @@ enum GlideConfigParser {
             case "haptic_feedback":  prefs.hapticFeedback  = boolVal(val)   ?? prefs.hapticFeedback
             case "debug_logging":    prefs.debugLogging    = boolVal(val)   ?? prefs.debugLogging
             case "launch_at_login":  prefs.launchAtLogin   = boolVal(val)   ?? prefs.launchAtLogin
+            default: break
+            }
+            i += 1
+        }
+    }
+
+    private static func parseAppSwitcher(_ lines: [String], from i: inout Int, into switcher: inout GlideConfig.AppSwitcher) {
+        let base = indentOf(lines, at: i)
+        while i < lines.count {
+            let (ind, key, val) = tokenize(lines[i])
+            if ind < base { return }
+            switch key {
+            case "enabled": switcher.enabled = boolVal(val) ?? switcher.enabled
+            case "fingers": switcher.fingers = intVal(val) ?? switcher.fingers
             default: break
             }
             i += 1
@@ -410,10 +455,30 @@ enum GlideConfigParser {
         }
     }
 
+    private static func parseMenuPathList(_ lines: [String], from i: inout Int) -> [String]? {
+        var path: [String] = []
+        let base = indentOf(lines, at: i)
+        while i < lines.count {
+            let line = lines[i].trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { i += 1; continue }
+            let ind = leadingSpaces(lines[i])
+            if ind < base && !line.hasPrefix("-") { break }
+            if line.hasPrefix("-") {
+                let item = line.dropFirst().trimmingCharacters(in: .whitespaces)
+                if let s = stringVal(String(item)) { path.append(s) }
+                i += 1
+                continue
+            }
+            break
+        }
+        return path.isEmpty ? nil : path
+    }
+
     private static func parseGestureBlock(_ lines: [String], from i: inout Int) -> GlideConfig.Gesture {
         var g = GlideConfig.Gesture(type: "", direction: nil, fingers: 3,
                                     speed: nil, action: "", appFilter: nil, windowState: nil,
-                                    modifierFilter: nil, appPath: nil, reciprocal: true, draft: false)
+                                    modifierFilter: nil, appPath: nil, menuPath: nil,
+                                    reciprocal: true, draft: false)
         let firstLine = lines[i].trimmingCharacters(in: .whitespaces).dropFirst()
         if let colon = firstLine.firstIndex(of: ":") {
             let k = String(firstLine[..<colon]).trimmingCharacters(in: .whitespaces)
@@ -440,6 +505,10 @@ enum GlideConfigParser {
             case "window_state":    g.windowState    = nullableStringVal(val)
             case "modifier_filter": g.modifierFilter = nullableStringVal(val)
             case "app_path":        g.appPath        = nullableStringVal(val)
+            case "menu_path":
+                i += 1
+                g.menuPath = parseMenuPathList(lines, from: &i)
+                continue
             case "reciprocal": g.reciprocal = boolVal(val) ?? g.reciprocal
             case "draft":      g.draft      = boolVal(val) ?? g.draft
             default: break

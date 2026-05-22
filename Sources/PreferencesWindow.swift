@@ -1,6 +1,7 @@
 import SwiftUI
 
 enum PrefsTab: String, CaseIterable, Identifiable {
+    case appSwitcher   = "App Switcher"
     case gestures      = "Gestures"
     case tuning        = "Tuning"
     case general       = "General"
@@ -10,6 +11,7 @@ enum PrefsTab: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .appSwitcher:   return "rectangle.2.swap"
         case .gestures:      return "hand.draw"
         case .tuning:        return "slider.horizontal.3"
         case .general:       return "gearshape"
@@ -19,7 +21,7 @@ enum PrefsTab: String, CaseIterable, Identifiable {
 }
 
 struct PreferencesWindow: View {
-    @State private var selectedTab: PrefsTab = .gestures
+    @State private var selectedTab: PrefsTab = .appSwitcher
     @EnvironmentObject var preferencesStore: PreferencesStore
     @EnvironmentObject var engineBridge: EngineBridge
 
@@ -33,6 +35,7 @@ struct PreferencesWindow: View {
             .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 200)
         } detail: {
             switch selectedTab {
+            case .appSwitcher:   AppSwitcherTab()
             case .gestures:      GesturesTab()
             case .tuning:        TuningTab()
             case .general:       GeneralTab()

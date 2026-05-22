@@ -98,6 +98,7 @@ final class GestureEngine {
 
     private struct SwitcherData {
         var refX: Float; var index: Int
+        let fingerCount: Int
         let apps: [NSRunningApplication]
         let finderIndex: Int?   // position of windowless Finder, nil if Finder has windows
         let effectiveMin: Int   // left boundary (tightened if Finder is at left edge)
@@ -486,7 +487,10 @@ final class GestureEngine {
             let loc = NSEvent.mouseLocation
             DispatchQueue.main.async { ActionExecutor.shared.quitAppAtCursor(loc) }
         } else {
-            DispatchQueue.main.async { ActionExecutor.shared.execute(rule.action, appPath: rule.appPath) }
+            DispatchQueue.main.async {
+                ActionExecutor.shared.execute(rule.action, appPath: rule.appPath,
+                                              menuItemPath: rule.menuItemPath, menuTargetBundleID: rule.appFilter)
+            }
         }
         updateObservableState()
     }
@@ -642,7 +646,7 @@ final class GestureEngine {
             processSwipeFrame(frame, data: data, now: now)
 
         case .switchingApps(var data):
-            guard n == 3 else { commitAppSwitcher(data: data); return }
+            guard n == data.fingerCount else { commitAppSwitcher(data: data); return }
             let delta = frame.cx - data.refX
             if abs(delta) > tuning.appSwitcherStepThreshold,
                now - lastStepTime >= tuning.appSwitcherDebounce {
@@ -748,15 +752,16 @@ final class GestureEngine {
             updateObservableState(); return
         }
 
-        if let rule = bestRule(fingers: data.fingers, direction: direction, speed: speed,
-                               modifiers: updated.modifiersAtStart) {
-            AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue) \(modifierDebugLabel(updated.modifiersAtStart)) (Δ=\(String(format: "%.3f", swipeCentroidMovement)) t=\(String(format: "%.2f", elapsed))s) → \(rule.action.rawValue)")
-            if rule.action == .appSwitcherNext || rule.action == .appSwitcherPrev {
-                if !beginAppSwitcher(for: rule.action, refX: frame.cx) { phase = .fired }
-            } else {
-                executeSwipeRule(rule, fingers: data.fingers, direction: direction)
+        if let switcherAction = appSwitcherAction(fingers: data.fingers, direction: direction) {
+            AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F → App Switcher")
+            if !beginAppSwitcher(for: switcherAction, refX: frame.cx, fingerCount: data.fingers) {
                 phase = .fired
             }
+        } else if let rule = bestRule(fingers: data.fingers, direction: direction, speed: speed,
+                                      modifiers: updated.modifiersAtStart) {
+            AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue) \(modifierDebugLabel(updated.modifiersAtStart)) (Δ=\(String(format: "%.3f", swipeCentroidMovement)) t=\(String(format: "%.2f", elapsed))s) → \(rule.action.rawValue)")
+            executeSwipeRule(rule, fingers: data.fingers, direction: direction)
+            phase = .fired
         } else {
             AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue): no matching rule")
             phase = .fired
@@ -826,7 +831,17 @@ final class GestureEngine {
         sendKeyEvent(kOpt, down: false, flags: [])
     }
 
-    private func beginAppSwitcher(for action: GestureAction, refX: Float) -> Bool {
+    private func appSwitcherAction(fingers: Int, direction: GestureDirection) -> GestureAction? {
+        let cfg = Settings.shared.appSwitcher
+        guard cfg.enabled, fingers == cfg.fingers else { return nil }
+        switch direction {
+        case .swipeRight: return .appSwitcherNext
+        case .swipeLeft:  return .appSwitcherPrev
+        default:          return nil
+        }
+    }
+
+    private func beginAppSwitcher(for action: GestureAction, refX: Float, fingerCount: Int) -> Bool {
         var apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
         guard apps.count > 1 else { return false }
 
@@ -875,7 +890,7 @@ final class GestureEngine {
 
         lastStepTime = ProcessInfo.processInfo.systemUptime
         phase = .switchingApps(SwitcherData(
-            refX: refX, index: index, apps: apps,
+            refX: refX, index: index, fingerCount: fingerCount, apps: apps,
             finderIndex: finderIdx, effectiveMin: effMin, effectiveMax: effMax
         ))
         updateObservableState()
@@ -1039,7 +1054,8 @@ final class GestureEngine {
 
     private func executeSwipeRule(_ rule: GestureRule, fingers: Int, direction: GestureDirection) {
         Haptic.forAction(rule.action)
-        ActionExecutor.shared.execute(rule.action, appPath: rule.appPath)
+        ActionExecutor.shared.execute(rule.action, appPath: rule.appPath,
+                                      menuItemPath: rule.menuItemPath, menuTargetBundleID: rule.appFilter)
         if rule.reciprocalEnabled {
             reciprocalToken = makeReciprocalToken(inverseAction: rule.reciprocalAction ?? rule.action.inverseAction, fingers: fingers, direction: direction)
         } else {
