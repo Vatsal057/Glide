@@ -47,7 +47,7 @@ final class ActionExecutor {
 
     // MARK: - Action dispatch
 
-    func execute(_ action: GestureAction, appPath: String? = nil) {
+    func execute(_ action: GestureAction, appPath: String? = nil, menuItemPath: [String]? = nil, menuTargetBundleID: String? = nil) {
         AppLogger.debug("[Action] \(action.rawValue)")
         switch action {
 
@@ -105,25 +105,10 @@ final class ActionExecutor {
         case .screenshotFullClipboard: sendKey(0x14, [.maskCommand, .maskShift, .maskControl])
         case .screenshotToolbar:       sendKey(0x16, [.maskCommand, .maskShift])
 
-        case .copy:       sendKey(0x08, .maskCommand)
-        case .paste:      sendKey(0x09, .maskCommand)
-        case .cut:        sendKey(0x07, .maskCommand)
-        case .undo:       sendKey(0x06, .maskCommand)
-        case .redo:       sendKey(0x06, [.maskCommand, .maskShift])
-        case .selectAll:  sendKey(0x00, .maskCommand)
-        case .find:       sendKey(0x03, .maskCommand)
-        case .emojiPicker: sendKey(0x31, [.maskCommand, .maskControl])
-        case .reloadPage: sendKey(0x0F, .maskCommand)
-        case .newTab:     sendKey(0x11, .maskCommand)
-
-        case .volumeUp:       pressMediaKey(0)
-        case .volumeDown:     pressMediaKey(1)
-        case .mute:           pressMediaKey(7)
-        case .playPause:      pressMediaKey(16)
-        case .nextTrack:      pressMediaKey(17)
-        case .previousTrack:  pressMediaKey(18)
-        case .brightnessUp:   pressMediaKey(21)
-        case .brightnessDown: pressMediaKey(22)
+        case .customMenuItem:
+            if let path = menuItemPath {
+                MenuItemExecutor.perform(path: path, bundleID: menuTargetBundleID)
+            }
 
         case .emptyTrash:    emptyTrash()
         case .openFinder:    openFinder()
@@ -636,22 +621,4 @@ final class ActionExecutor {
         ku.flags = flags; ku.post(tap: .cghidEventTap)
     }
 
-    /// Posts a macOS media / brightness key (NX_KEYTYPE).
-    private func pressMediaKey(_ keyType: UInt32) {
-        let data1 = Int((keyType << 16) | (0x0A << 8))
-        for data2: Int in [0x8000_0001, 0x8000_0000] {
-            guard let event = NSEvent.otherEvent(
-                with: .systemDefined,
-                location: .zero,
-                modifierFlags: NSEvent.ModifierFlags(rawValue: 0xA00),
-                timestamp: 0,
-                windowNumber: 0,
-                context: nil,
-                subtype: 8,
-                data1: data1,
-                data2: data2
-            ) else { continue }
-            event.cgEvent?.post(tap: .cgSessionEventTap)
-        }
-    }
 }

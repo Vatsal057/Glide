@@ -78,6 +78,7 @@ struct GesturesTab: View {
 
 struct RuleRow: View {
     let rule: GestureRule
+    @EnvironmentObject var store: PreferencesStore
 
     var body: some View {
         HStack(spacing: 10) {
@@ -86,7 +87,7 @@ struct RuleRow: View {
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(rule.action.rawValue)
+                Text(rule.menuItemLabel ?? rule.action.rawValue)
                     .font(.body)
                     .lineLimit(1)
 
@@ -95,6 +96,10 @@ struct RuleRow: View {
                     if rule.direction != .click {
                         Text("·")
                         Text(rule.speed.rawValue)
+                    }
+                    if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction) {
+                        Text("·")
+                        Image(systemName: "rectangle.2.swap")
                     }
                 }
                 .font(.caption)
@@ -119,9 +124,22 @@ struct RuleRow: View {
 struct RuleEditor: View {
     @Binding var rule: GestureRule
     @EnvironmentObject var store: PreferencesStore
+    @State private var showMenuPicker = false
+
+    private var displayTitle: String {
+        rule.menuItemLabel ?? rule.action.rawValue
+    }
 
     private var categorizedActions: [(String, [GestureAction])] {
-        GestureAction.catalog.map { ($0.category, $0.actions) }
+        GestureAction.catalog.map { category, actions in
+            (category, actions.filter { !Settings.isAppSwitcherAction($0) })
+        }
+    }
+
+    private var reservedBanner: String? {
+        guard store.appSwitcher.enabled else { return nil }
+        let n = store.appSwitcher.fingers
+        return "Swipe left and right with \(n) fingers are reserved for App Switcher. Configure that under the App Switcher tab."
     }
 
     var body: some View {
@@ -134,7 +152,7 @@ struct RuleEditor: View {
                         .font(.title)
                         .foregroundStyle(Color.accentColor)
                     VStack(alignment: .leading) {
-                        Text(rule.action.rawValue)
+                        Text(displayTitle)
                             .font(.title2.bold())
                     }
                     Spacer()
@@ -149,6 +167,19 @@ struct RuleEditor: View {
                 .background(.quinary)
 
                 Divider()
+
+                if let banner = reservedBanner,
+                   store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "rectangle.2.swap")
+                            .foregroundStyle(.orange)
+                        Text(banner)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                }
 
                 VStack(alignment: .leading, spacing: 20) {
 
@@ -165,12 +196,21 @@ struct RuleEditor: View {
                         }
 
                         EditorRow(label: "Gesture") {
+                            let availableDirections = GestureDirection.allCases.filter {
+                                !store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: $0)
+                            }
                             Picker("", selection: $rule.direction) {
-                                ForEach(GestureDirection.allCases, id: \.self) { t in
+                                ForEach(availableDirections, id: \.self) { t in
                                     Text(t.rawValue.capitalized).tag(t)
                                 }
                             }
                             .frame(maxWidth: 200)
+                            .onChange(of: rule.fingers) { _ in
+                                if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction),
+                                   let fallback = availableDirections.first {
+                                    rule.direction = fallback
+                                }
+                            }
                         }
 
                         if rule.direction != .click {
@@ -201,8 +241,51 @@ struct RuleEditor: View {
                             }
                             .frame(maxWidth: 260)
                             .onChange(of: rule.action) { newValue in
-                                if rule.isDraft && newValue != .doNothing {
+                                if newValue == .customMenuItem {
+                                    rule.menuItemPath = nil
+                                }
+                                if rule.isDraft && newValue != .doNothing && newValue != .customMenuItem {
                                     store.markRuleConfigured(rule.id)
+                                }
+                            }
+                        }
+
+                        if rule.action == .customMenuItem {
+                            EditorRow(label: "Target App") {
+                                Picker("", selection: Binding<String?>(
+                                    get: { rule.appFilter },
+                                    set: { rule.appFilter = $0 }
+                                )) {
+                                    Text("Frontmost App").tag(String?.none)
+                                    Divider()
+                                    ForEach(store.runningApps()) { app in
+                                        Text(app.name).tag(String?.some(app.bundleID))
+                                    }
+                                }
+                                .frame(maxWidth: 260)
+                            }
+
+                            EditorRow(label: "Menu Item") {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(rule.menuItemLabel ?? "Not selected")
+                                        .foregroundStyle(rule.menuItemPath == nil ? .secondary : .primary)
+                                    Button("Choose Menu Item…") {
+                                        showMenuPicker = true
+                                    }
+                                    Text("The app must be running. Glide reads its menu bar, like assigning shortcuts in System Settings.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .sheet(isPresented: $showMenuPicker) {
+                                MenuItemPickerSheet(
+                                    bundleID: rule.appFilter,
+                                    selectedPath: $rule.menuItemPath
+                                )
+                                .onDisappear {
+                                    if rule.menuItemPath != nil {
+                                        store.markRuleConfigured(rule.id)
+                                    }
                                 }
                             }
                         }
@@ -282,6 +365,90 @@ struct RuleEditor: View {
     }
 }
 
+// MARK: - Menu Item Picker
+
+struct MenuItemPickerSheet: View {
+    let bundleID: String?
+    @Binding var selectedPath: [String]?
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var store: PreferencesStore
+
+    @State private var searchText = ""
+    @State private var options: [MenuItemOption] = []
+    @State private var didLoad = false
+
+    private var filtered: [MenuItemOption] {
+        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return options }
+        return options.filter { $0.displayTitle.lowercased().contains(q) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Choose Menu Item")
+                .font(.headline)
+
+            Text("Target: \(store.menuItemTargetLabel(bundleID: bundleID))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("Search", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+
+            if !didLoad {
+                ProgressView("Loading menus…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if options.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("No Menu Items Found")
+                        .font(.headline)
+                    Text("Open \(store.menuItemTargetLabel(bundleID: bundleID)) and try again. Accessibility permission is required.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(filtered) { option in
+                    Button {
+                        selectedPath = option.path
+                        dismiss()
+                    } label: {
+                        Text(option.displayTitle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack {
+                Button("Refresh") { reload() }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding()
+        .frame(width: 520, height: 440)
+        .onAppear { reload() }
+    }
+
+    private func reload() {
+        didLoad = false
+        let bundle = bundleID
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loaded = MenuItemCatalog.options(bundleID: bundle)
+            DispatchQueue.main.async {
+                options = loaded
+                didLoad = true
+            }
+        }
+    }
+}
+
 // MARK: - Helpers
 
 struct EditorSection<Content: View>: View {
@@ -334,6 +501,7 @@ extension GestureAction {
         case .appSwitcherPrev:    return "arrow.left.square"
         case .switchAppNext:      return "chevron.right.circle"
         case .switchAppPrev:      return "chevron.left.circle"
+        case .customMenuItem:     return "list.bullet.rectangle"
         // Window management
         case .minimizeWindow:     return "minus.square"
         case .minimizeAllApps:    return "minus.square.fill"
@@ -364,26 +532,6 @@ extension GestureAction {
         case .screenshotAreaClipboard:  return "viewfinder.circle"
         case .screenshotFullClipboard:  return "camera.fill"
         case .screenshotToolbar:        return "camera.viewfinder"
-        // Editing
-        case .copy:       return "doc.on.doc"
-        case .paste:      return "doc.on.clipboard"
-        case .cut:        return "scissors"
-        case .undo:       return "arrow.uturn.backward"
-        case .redo:       return "arrow.uturn.forward"
-        case .selectAll:  return "checkmark.rectangle"
-        case .find:       return "magnifyingglass"
-        case .emojiPicker: return "face.smiling"
-        case .reloadPage: return "arrow.clockwise"
-        case .newTab:     return "plus.rectangle"
-        // Media & Display
-        case .volumeUp:       return "speaker.wave.3"
-        case .volumeDown:     return "speaker.wave.1"
-        case .mute:           return "speaker.slash"
-        case .playPause:      return "playpause"
-        case .nextTrack:      return "forward.end"
-        case .previousTrack:  return "backward.end"
-        case .brightnessUp:   return "sun.max"
-        case .brightnessDown: return "sun.min"
         // System
         case .spotlight:    return "magnifyingglass.circle"
         case .notifCenter:  return "bell"
