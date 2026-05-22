@@ -280,6 +280,7 @@ struct RuleEditor: View {
                             .sheet(isPresented: $showMenuPicker) {
                                 MenuItemPickerSheet(
                                     bundleID: rule.appFilter,
+                                    targetLabel: store.menuItemTargetLabel(bundleID: rule.appFilter),
                                     selectedPath: $rule.menuItemPath
                                 )
                                 .onDisappear {
@@ -369,12 +370,13 @@ struct RuleEditor: View {
 
 struct MenuItemPickerSheet: View {
     let bundleID: String?
+    let targetLabel: String
     @Binding var selectedPath: [String]?
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject var store: PreferencesStore
 
     @State private var searchText = ""
     @State private var options: [MenuItemOption] = []
+    @State private var failureReason: String?
     @State private var didLoad = false
 
     private var filtered: [MenuItemOption] {
@@ -388,7 +390,7 @@ struct MenuItemPickerSheet: View {
             Text("Choose Menu Item")
                 .font(.headline)
 
-            Text("Target: \(store.menuItemTargetLabel(bundleID: bundleID))")
+            Text("Target: \(targetLabel)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -405,10 +407,11 @@ struct MenuItemPickerSheet: View {
                         .foregroundStyle(.secondary)
                     Text("No Menu Items Found")
                         .font(.headline)
-                    Text("Open \(store.menuItemTargetLabel(bundleID: bundleID)) and try again. Accessibility permission is required.")
+                    Text(failureReason ?? "Open \(targetLabel) and try again.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
+                        .frame(maxWidth: 400)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -438,13 +441,13 @@ struct MenuItemPickerSheet: View {
 
     private func reload() {
         didLoad = false
+        failureReason = nil
         let bundle = bundleID
-        DispatchQueue.global(qos: .userInitiated).async {
-            let loaded = MenuItemCatalog.options(bundleID: bundle)
-            DispatchQueue.main.async {
-                options = loaded
-                didLoad = true
-            }
+        Task {
+            let result = await MenuItemCatalog.scanAsync(bundleID: bundle)
+            options = result.options
+            failureReason = result.failureReason
+            didLoad = true
         }
     }
 }

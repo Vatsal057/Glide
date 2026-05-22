@@ -264,10 +264,6 @@ final class PreferencesStore: ObservableObject {
         return appFilterLabel(for: bundleID)
     }
 
-    func menuItemOptions(bundleID: String?) -> [MenuItemOption] {
-        MenuItemCatalog.options(bundleID: bundleID)
-    }
-
     var draftRules: [GestureRule] {
         rules.filter(\.isDraft)
     }
