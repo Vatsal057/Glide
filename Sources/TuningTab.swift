@@ -15,20 +15,6 @@ struct TuningTab: View {
                         format: "%.3f",
                         hint: "How far fingers must travel before registering as a swipe."
                     )
-                    SliderRow(
-                        label: "Switcher Step Threshold",
-                        value: binding(\.appSwitcherStepThreshold),
-                        range: 0.001...0.01,
-                        format: "%.3f",
-                        hint: "Finger travel needed to step to the next app in the switcher."
-                    )
-                    SliderRow(
-                        label: "Switcher Debounce",
-                        value: binding(\.appSwitcherDebounce),
-                        range: 0.05...0.5,
-                        format: "%.2f s",
-                        hint: "Delay that prevents skipping multiple apps too quickly."
-                    )
                 }
 
                 TuningSection(title: "Speed Classification", icon: "speedometer") {

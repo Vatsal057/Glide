@@ -198,24 +198,7 @@ enum GestureAction: String, Codable, CaseIterable {
     case screenshotAreaClipboard   = "Screenshot (Area → Clipboard)"
     case screenshotFullClipboard   = "Screenshot (Full → Clipboard)"
     case screenshotToolbar         = "Screenshot Toolbar"
-    case copy                      = "Copy"
-    case paste                     = "Paste"
-    case cut                       = "Cut"
-    case undo                      = "Undo"
-    case redo                      = "Redo"
-    case selectAll                 = "Select All"
-    case find                      = "Find"
-    case emojiPicker               = "Emoji & Symbols"
-    case reloadPage                = "Reload Page"
-    case newTab                    = "New Tab"
-    case volumeUp                  = "Volume Up"
-    case volumeDown                = "Volume Down"
-    case mute                      = "Mute"
-    case playPause                 = "Play / Pause"
-    case nextTrack                 = "Next Track"
-    case previousTrack             = "Previous Track"
-    case brightnessUp              = "Brightness Up"
-    case brightnessDown            = "Brightness Down"
+    case customMenuItem            = "Menu Item…"
     case emptyTrash                = "Empty Trash"
     case openFinder                = "Open Finder"
     case openDownloads             = "Open Downloads"
@@ -224,16 +207,14 @@ enum GestureAction: String, Codable, CaseIterable {
     /// Grouped for the preferences action picker.
     static let catalog: [(category: String, actions: [GestureAction])] = [
         ("Apps", [.quitApp, .forceQuitApp, .quitFrontmost, .hideApp, .hideOthers, .openApp,
-                  .appSwitcherNext, .appSwitcherPrev, .switchAppNext, .switchAppPrev]),
+                  .switchAppNext, .switchAppPrev]),
         ("Windows", [.minimizeWindow, .minimizeAllApps, .restoreMinimizedApps, .maximizeWindow,
                      .restoreWindow, .closeWindow, .enterFullscreen, .exitFullscreen, .toggleFullscreen,
                      .cycleWindows, .snapLeft, .snapRight, .snapTopLeft, .snapTopRight,
                      .snapBottomLeft, .snapBottomRight, .centerWindow, .moveNextDisplay]),
         ("Screenshots", [.screenshotArea, .screenshotFull, .screenshotAreaClipboard,
                          .screenshotFullClipboard, .screenshotToolbar]),
-        ("Editing", [.copy, .paste, .cut, .undo, .redo, .selectAll, .find, .emojiPicker, .reloadPage, .newTab]),
-        ("Media & Display", [.volumeUp, .volumeDown, .mute, .playPause, .nextTrack, .previousTrack,
-                             .brightnessUp, .brightnessDown]),
+        ("Custom", [.customMenuItem]),
         ("System", [.missionControl, .appExpose, .showDesktop, .launchpad, .spotlight, .notifCenter,
                     .lockScreen, .sleep, .emptyTrash, .openFinder, .openDownloads]),
         ("Other", [.doNothing]),
@@ -294,8 +275,25 @@ struct GestureRule: Codable, Identifiable, Equatable {
     var modifierFilter: ModifierFilter = .any
     var reciprocalEnabled: Bool     = true
     var reciprocalAction: GestureAction?
+    /// Menu path for `.customMenuItem`, e.g. `["File", "New Tab"]`.
+    var menuItemPath: [String]?
     /// New rules start as drafts until configured in the editor.
     var isDraft: Bool               = false
+
+    var menuItemLabel: String? {
+        guard action == .customMenuItem, let menuItemPath, !menuItemPath.isEmpty else { return nil }
+        return menuItemPath.joined(separator: " › ")
+    }
+
+    var isActive: Bool {
+        if isDraft { return false }
+        if action == .doNothing { return false }
+        if action == .customMenuItem {
+            return menuItemPath != nil && (menuItemPath?.count ?? 0) >= 2
+        }
+        if action == .openApp { return appPath != nil && !(appPath?.isEmpty ?? true) }
+        return true
+    }
 
     var matchSignature: GestureMatchSignature {
         GestureMatchSignature(
@@ -308,9 +306,6 @@ struct GestureRule: Codable, Identifiable, Equatable {
         )
     }
 
-    /// Rules the gesture engine will consider.
-    var isActive: Bool { !isDraft && action != .doNothing }
-
     static func newDraft() -> GestureRule {
         var rule = GestureRule(fingers: 3, direction: .click, speed: .normal, action: .doNothing)
         rule.isDraft = true
@@ -321,7 +316,8 @@ struct GestureRule: Codable, Identifiable, Equatable {
          action: GestureAction, appPath: String? = nil, appFilter: String? = nil,
          windowStateFilter: WindowStateFilter = .any,
          modifierFilter: ModifierFilter = .any,
-         reciprocalEnabled: Bool = true, reciprocalAction: GestureAction? = nil, isDraft: Bool = false) {
+         reciprocalEnabled: Bool = true, reciprocalAction: GestureAction? = nil,
+         menuItemPath: [String]? = nil, isDraft: Bool = false) {
         self.fingers             = fingers
         self.direction           = direction
         self.speed               = speed
@@ -332,6 +328,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
         self.modifierFilter      = modifierFilter
         self.reciprocalEnabled   = reciprocalEnabled
         self.reciprocalAction    = reciprocalAction
+        self.menuItemPath        = menuItemPath
         self.isDraft             = isDraft
     }
 
@@ -349,6 +346,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
         modifierFilter    = (try? c.decodeIfPresent(ModifierFilter.self,    forKey: .modifierFilter))    ?? .any
         reciprocalEnabled = (try? c.decodeIfPresent(Bool.self,  forKey: .reciprocalEnabled)) ?? true
         reciprocalAction  = try? c.decodeIfPresent(GestureAction.self, forKey: .reciprocalAction)
+        menuItemPath      = try? c.decodeIfPresent([String].self, forKey: .menuItemPath)
         isDraft           = (try? c.decodeIfPresent(Bool.self,  forKey: .isDraft)) ?? false
         self = Self.migratingLegacyAppFilter(self)
     }
@@ -376,6 +374,21 @@ struct EdgeMargin: Codable, Equatable {
     var bottom: Float = 0.05
 
     static let range: ClosedRange<Float> = 0.0...0.20
+}
+
+/// Hold-to-browse app switcher (Cmd+Tab overlay). Separate from the gesture rule list.
+struct AppSwitcherSettings: Codable, Equatable {
+    var enabled: Bool = true
+    /// 3 or 4 — horizontal swipes with this finger count are reserved for the switcher.
+    var fingers: Int = 3
+
+    static let allowedFingerCounts = [3, 4]
+
+    static func normalized(_ s: AppSwitcherSettings) -> AppSwitcherSettings {
+        var n = s
+        n.fingers = allowedFingerCounts.contains(n.fingers) ? n.fingers : 3
+        return n
+    }
 }
 
 struct GestureTuning: Codable, Equatable {
@@ -431,6 +444,7 @@ final class Settings {
     // MARK: Backing stores
 
     private var _rules:           [GestureRule]
+    private var _appSwitcher:     AppSwitcherSettings = AppSwitcherSettings()
     private var _tuning:          GestureTuning       = GestureTuning()
     private var _windowTargeting: WindowTargetingMode = .focusedThenCursor
     private var _hapticFeedback:  Bool                = true
@@ -442,6 +456,11 @@ final class Settings {
     var rules: [GestureRule] {
         get { _rules }
         set { _rules = Self.normalizeRules(newValue); GlideConfigStore.shared.scheduleSave() }
+    }
+
+    var appSwitcher: AppSwitcherSettings {
+        get { _appSwitcher }
+        set { _appSwitcher = AppSwitcherSettings.normalized(newValue); GlideConfigStore.shared.scheduleSave() }
     }
 
     var tuning: GestureTuning {
@@ -474,7 +493,11 @@ final class Settings {
     // MARK: Batch load — bypasses per-field saves (called by GlideConfigStore.load)
 
     func apply(_ config: GlideConfig) {
-        _rules           = Self.normalizeRules(config.toRules())
+        var switcher = config.toAppSwitcher()
+        var loadedRules = config.toRules()
+        Self.migrateLegacyAppSwitcherRules(into: &switcher, rules: &loadedRules)
+        _appSwitcher     = AppSwitcherSettings.normalized(switcher)
+        _rules           = Self.normalizeRules(loadedRules)
         _tuning          = Self.normalizedTuning(config.toTuning())
         _windowTargeting = WindowTargetingMode(rawValue: config.preferences.windowTargeting) ?? .focusedThenCursor
         _hapticFeedback  = config.preferences.hapticFeedback
@@ -482,10 +505,37 @@ final class Settings {
         _launchAtLogin   = config.preferences.launchAtLogin
     }
 
+    // MARK: App Switcher ↔ gesture rules
+
+    static func isAppSwitcherAction(_ action: GestureAction) -> Bool {
+        action == .appSwitcherNext || action == .appSwitcherPrev
+    }
+
+    /// Pulls legacy app-switcher gesture rules into `AppSwitcherSettings` and removes them from the list.
+    static func migrateLegacyAppSwitcherRules(into switcher: inout AppSwitcherSettings, rules: inout [GestureRule]) {
+        let legacy = rules.filter { isAppSwitcherAction($0.action) }
+        guard !legacy.isEmpty else { return }
+        if !switcher.enabled { switcher.enabled = true }
+        if let f = legacy.first?.fingers, AppSwitcherSettings.allowedFingerCounts.contains(f) {
+            switcher.fingers = f
+        }
+        rules.removeAll { isAppSwitcherAction($0.action) }
+    }
+
+    /// Removes horizontal swipe rules that would conflict with the reserved app-switcher slot.
+    static func stripReservedHorizontalSwipes(from rules: inout [GestureRule], fingerCount: Int) {
+        rules.removeAll {
+            $0.fingers == fingerCount &&
+            ($0.direction == .swipeLeft || $0.direction == .swipeRight)
+        }
+    }
+
     // MARK: Rule normalization (duplicates are allowed — latest match wins at runtime)
 
     private static func normalizeRules(_ rules: [GestureRule]) -> [GestureRule] {
-        rules.map { normalizedRule($0) }
+        var copy = rules
+        copy.removeAll { isAppSwitcherAction($0.action) }
+        return copy.map { normalizedRule($0) }
     }
 
     private static func normalizedRule(_ rule: GestureRule) -> GestureRule {
@@ -521,10 +571,10 @@ final class Settings {
 
     // MARK: Defaults
 
+    static let defaultAppSwitcher = AppSwitcherSettings(enabled: true, fingers: 3)
+
     static let defaultRules: [GestureRule] = [
         GestureRule(fingers: 3, direction: .click,      action: .quitApp),
-        GestureRule(fingers: 3, direction: .swipeRight, action: .appSwitcherNext),
-        GestureRule(fingers: 3, direction: .swipeLeft,  action: .appSwitcherPrev),
         GestureRule(fingers: 3, direction: .swipeUp,    action: .missionControl),
         GestureRule(fingers: 3, direction: .swipeDown,  action: .minimizeAllApps),
         GestureRule(fingers: 4, direction: .swipeUp,    action: .maximizeWindow),
