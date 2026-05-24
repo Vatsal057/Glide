@@ -1,8 +1,8 @@
 import SwiftUI
 
 enum PrefsTab: String, CaseIterable, Identifiable {
-    case appSwitcher   = "App Switcher"
     case gestures      = "Gestures"
+    case appSwitcher   = "App Switcher"
     case tuning        = "Tuning"
     case general       = "General"
     case configuration = "Configuration"
@@ -21,7 +21,7 @@ enum PrefsTab: String, CaseIterable, Identifiable {
 }
 
 struct PreferencesWindow: View {
-    @State private var selectedTab: PrefsTab = .appSwitcher
+    @State private var selectedTab: PrefsTab = .gestures
     @EnvironmentObject var preferencesStore: PreferencesStore
     @EnvironmentObject var engineBridge: EngineBridge
 

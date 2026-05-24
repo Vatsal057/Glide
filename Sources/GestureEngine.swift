@@ -339,13 +339,10 @@ final class GestureEngine {
                     return nil
                 }
                 if type == .leftMouseDown {
-                    let fingers = Int(glideActiveTouches)
-                    if fingers >= 3 {
-                        glideClickFingerCount = glideActiveTouches
-                        DispatchQueue.main.async {
-                            GestureEngine.shared.processClick(fingerCount: fingers)
-                        }
-                    }
+                    // Record click intent only — actual detection uses getThreeFingerCount()
+                    // in the listen-only tap (active MT contacts), not glideActiveTouches,
+                    // so tap-to-click with resting fingers does not false-trigger.
+                    if glideActiveTouches >= 3 { glideClickFingerCount = glideActiveTouches }
                     return Unmanaged.passUnretained(cgEvent)
                 }
                 if glideActiveTouches >= 3 { return nil }
@@ -403,9 +400,7 @@ final class GestureEngine {
                 let peak = getSessionPeakActiveTouches()
                 AppLogger.debug("🖱️ leftMouseDown (fingers detected: \(count), peak: \(peak))")
 
-                // Use current finger count; do not require count == peak (peak can stay
-                // higher after briefly lifting a finger, which blocked 4-finger clicks).
-                if count >= 3, peak >= count {
+                if clickGestureMatchesFingerState(count: count, peak: peak) {
                     if Settings.shared.hapticFeedbackEnabled {
                         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
                     }
@@ -460,7 +455,7 @@ final class GestureEngine {
             guard let self = self, self.isRunning else { return }
             let count = getThreeFingerCount()
             let peak = getSessionPeakActiveTouches()
-            guard count >= 3, peak >= count, event.stage >= 2 else { return }
+            guard clickGestureMatchesFingerState(count: count, peak: peak), event.stage >= 2 else { return }
 
             let now = Date().timeIntervalSinceReferenceDate
             guard now - self.lastForceClickTime > self.forceCooldown else { return }
@@ -475,12 +470,13 @@ final class GestureEngine {
     func processClick(fingerCount n: Int, isForce: Bool = false) {
         if case .switchingApps = phase { return }
 
-        // ── Strict simultaneous-touch guard ────────────────────────────────────
-        // Replaced by exact Archive logic (no age-spread validation).
-        // ───────────────────────────────────────────────────────────────────────
+        guard areClickTouchesSimultaneous() else {
+            AppLogger.debug("[Engine] Click rejected — fingers not placed together (age spread \(String(format: "%.3f", glideOldestFingerAge - glideNewestFingerAge))s)")
+            return
+        }
 
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastClickProcessedTime > 0.5 else { return }
+        guard now - lastClickProcessedTime > 0.1 else { return }
         lastClickProcessedTime = now
         glideClickFingerCount = 0
 
@@ -1238,6 +1234,23 @@ func getSessionPeakActiveTouches() -> Int {
     countsLock.lock()
     defer { countsLock.unlock() }
     return sessionPeakActiveTouches
+}
+
+/// Max age difference (seconds) between oldest and newest active finger for a valid click.
+/// Rejects "N−1 fingers resting + tap-to-click" while allowing a lifted finger before click
+/// (peak > count) when the remaining fingers landed together.
+private let maxClickFingerAgeSpread: TimeInterval = 0.15
+
+func areClickTouchesSimultaneous() -> Bool {
+    let spread = glideOldestFingerAge - glideNewestFingerAge
+    return spread <= maxClickFingerAgeSpread
+}
+
+/// Whether an observed leftMouseDown should count as an N-finger click gesture.
+func clickGestureMatchesFingerState(count: Int, peak: Int) -> Bool {
+    guard count >= 3, peak >= count else { return false }
+    if count == peak { return true }
+    return areClickTouchesSimultaneous()
 }
 
 /// Int32 stores/loads are effectively atomic on arm64/x86_64.
