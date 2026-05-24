@@ -140,6 +140,19 @@ struct RuleEditor: View {
         }
     }
 
+    private var continuousActions: [(String, [GestureAction])] {
+        categorizedActions.compactMap { category, actions in
+            let filtered = actions.filter {
+                $0 != .openApp && $0 != .customMenuItem
+            }
+            return filtered.isEmpty ? nil : (category, filtered)
+        }
+    }
+
+    private var supportsContinuousGestures: Bool {
+        rule.direction == .swipeLeftRight || rule.direction == .swipeUpDown
+    }
+
     private var reservedBanner: String? {
         guard store.appSwitcher.enabled else { return nil }
         return "Plain 3-finger swipes left/right are reserved for App Switcher. Use a modifier key (e.g. Shift) here to assign a different action on the same swipe."
@@ -224,6 +237,11 @@ struct RuleEditor: View {
                                     rule.direction = fallback
                                 }
                             }
+                            .onChange(of: rule.direction) { _ in
+                                if !supportsContinuousGestures {
+                                    rule.continuous = false
+                                }
+                            }
                         }
 
                         if rule.direction != .click {
@@ -241,99 +259,52 @@ struct RuleEditor: View {
 
                     // Action section
                     EditorSection(title: "Action") {
-                        EditorRow(label: "Action") {
-                            Picker("", selection: $rule.action) {
-                                ForEach(categorizedActions, id: \.0) { cat, actions in
-                                    Section(cat) {
-                                        ForEach(actions, id: \.self) { action in
-                                            Label(action.rawValue, systemImage: action.iconName)
-                                                .tag(action)
+                        if rule.continuous && supportsContinuousGestures {
+                            EditorRow(label: "Action") {
+                                Text("Configured in Continuous Gestures")
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            primaryActionEditor(label: "Action")
+                        }
+
+                        if supportsContinuousGestures {
+                            EditorRow(label: "Continuous Gestures") {
+                                Toggle("Continuous gestures", isOn: $rule.continuous)
+                                    .onChange(of: rule.continuous) { enabled in
+                                        if enabled {
+                                            rule.reciprocalEnabled = false
+                                            rule.reciprocalAction = nil
                                         }
                                     }
-                                }
-                            }
-                            .frame(maxWidth: 260)
-                            .onChange(of: rule.action) { newValue in
-                                if newValue == .customMenuItem {
-                                    rule.menuItemPath = nil
-                                }
-                                if newValue == .customShortcut {
-                                    rule.customShortcut = nil
-                                }
-                                if rule.isDraft && newValue != .doNothing
-                                    && newValue != .customMenuItem && newValue != .customShortcut {
-                                    store.markRuleConfigured(rule.id)
-                                }
                             }
                         }
+                    }
 
-                        if rule.action == .customMenuItem {
-                            EditorRow(label: "Target App") {
-                                Picker("", selection: Binding<String?>(
-                                    get: { rule.appFilter },
-                                    set: { rule.appFilter = $0 }
-                                )) {
-                                    Text("Frontmost App").tag(String?.none)
-                                    Divider()
-                                    ForEach(store.runningApps()) { app in
-                                        Text(app.name).tag(String?.some(app.bundleID))
-                                    }
-                                }
-                                .frame(maxWidth: 260)
-                            }
+                    if rule.continuous && supportsContinuousGestures {
+                        EditorSection(title: "Continuous Gestures") {
+                            primaryActionEditor(label: "Begin Action")
 
-                            EditorRow(label: "Menu Item") {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(rule.menuItemLabel ?? "Not selected")
-                                        .foregroundStyle(rule.menuItemPath == nil ? .secondary : .primary)
-                                    Button("Choose Menu Item…") {
-                                        showMenuPicker = true
-                                    }
-                                    Text("The app must be running. Glide reads its menu bar, like assigning shortcuts in System Settings.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .sheet(isPresented: $showMenuPicker) {
-                                MenuItemPickerSheet(
-                                    bundleID: rule.appFilter,
-                                    targetLabel: store.menuItemTargetLabel(bundleID: rule.appFilter),
-                                    selectedPath: $rule.menuItemPath
-                                )
-                                .onDisappear {
-                                    if rule.menuItemPath != nil {
-                                        store.markRuleConfigured(rule.id)
-                                    }
-                                }
-                            }
-                        }
+                            phaseActionEditor(
+                                label: "Update + Action",
+                                action: $rule.continuousPositiveAction,
+                                shortcut: $rule.continuousPositiveShortcut,
+                                keyboard: $rule.continuousPositiveKeyboard
+                            )
 
-                        if rule.action == .openApp {
-                            EditorRow(label: "App") {
-                                HStack {
-                                    Text(store.appLabel(for: rule.appPath))
-                                        .foregroundStyle(rule.appPath == nil ? .secondary : .primary)
-                                    Button("Choose…") {
-                                        store.chooseApp(for: rule.id)
-                                    }
-                                }
-                            }
-                        }
+                            phaseActionEditor(
+                                label: "Update - Action",
+                                action: $rule.continuousNegativeAction,
+                                shortcut: $rule.continuousNegativeShortcut,
+                                keyboard: $rule.continuousNegativeKeyboard
+                            )
 
-                        if rule.action == .customShortcut {
-                            EditorRow(label: "Shortcut") {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    ShortcutRecorderView(shortcut: $rule.customShortcut)
-                                    Text("Records the key combination Glide will send when this gesture fires.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .onChange(of: rule.customShortcut) { _ in
-                                if rule.customShortcut?.isValid == true {
-                                    store.markRuleConfigured(rule.id)
-                                }
-                            }
+                            phaseActionEditor(
+                                label: "End Action",
+                                action: $rule.continuousEndAction,
+                                shortcut: $rule.continuousEndShortcut,
+                                keyboard: $rule.continuousEndKeyboard
+                            )
                         }
                     }
 
@@ -376,26 +347,28 @@ struct RuleEditor: View {
                         }
 
                         if rule.direction != .click {
-                            EditorRow(label: "Reciprocal") {
-                                Toggle("Reverse gesture undoes this action", isOn: $rule.reciprocalEnabled)
-                            }
+                            if !rule.continuous {
+                                EditorRow(label: "Reciprocal") {
+                                    Toggle("Reverse gesture undoes this action", isOn: $rule.reciprocalEnabled)
+                                }
 
-                            if rule.reciprocalEnabled {
-                                EditorRow(label: "Reverse Action") {
-                                    Picker("", selection: Binding<GestureAction>(
-                                        get: { rule.reciprocalAction ?? rule.action.inverseAction ?? .doNothing },
-                                        set: { rule.reciprocalAction = $0 }
-                                    )) {
-                                        ForEach(categorizedActions, id: \.0) { cat, actions in
-                                            Section(cat) {
-                                                ForEach(actions, id: \.self) { action in
-                                                    Label(action.rawValue, systemImage: action.iconName)
-                                                        .tag(action)
+                                if rule.reciprocalEnabled {
+                                    EditorRow(label: "Reverse Action") {
+                                        Picker("", selection: Binding<GestureAction>(
+                                            get: { rule.reciprocalAction ?? rule.action.inverseAction ?? .doNothing },
+                                            set: { rule.reciprocalAction = $0 }
+                                        )) {
+                                            ForEach(categorizedActions, id: \.0) { cat, actions in
+                                                Section(cat) {
+                                                    ForEach(actions, id: \.self) { action in
+                                                        Label(action.rawValue, systemImage: action.iconName)
+                                                            .tag(action)
+                                                    }
                                                 }
                                             }
                                         }
+                                        .frame(maxWidth: 260)
                                     }
-                                    .frame(maxWidth: 260)
                                 }
                             }
                         }
@@ -405,6 +378,226 @@ struct RuleEditor: View {
                 .padding()
             } // outer VStack
         } // ScrollView
+    }
+
+    @ViewBuilder
+    private func primaryActionEditor(label: String) -> some View {
+        EditorRow(label: label) {
+            Picker("", selection: $rule.action) {
+                ForEach(categorizedActions, id: \.0) { cat, actions in
+                    Section(cat) {
+                        ForEach(actions, id: \.self) { action in
+                            Label(action.rawValue, systemImage: action.iconName)
+                                .tag(action)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: 260)
+            .onChange(of: rule.action) { newValue in
+                if newValue == .customMenuItem {
+                    rule.menuItemPath = nil
+                }
+                if newValue == .customShortcut {
+                    rule.customShortcut = nil
+                }
+                if newValue == .advancedKeyboard {
+                    rule.advancedKeyboard = []
+                }
+                if rule.isDraft && newValue != .doNothing
+                    && newValue != .customMenuItem && newValue != .customShortcut && newValue != .advancedKeyboard {
+                    store.markRuleConfigured(rule.id)
+                }
+            }
+        }
+
+        if rule.action == .customMenuItem {
+            EditorRow(label: "Target App") {
+                Picker("", selection: Binding<String?>(
+                    get: { rule.appFilter },
+                    set: { rule.appFilter = $0 }
+                )) {
+                    Text("Frontmost App").tag(String?.none)
+                    Divider()
+                    ForEach(store.runningApps()) { app in
+                        Text(app.name).tag(String?.some(app.bundleID))
+                    }
+                }
+                .frame(maxWidth: 260)
+            }
+
+            EditorRow(label: "Menu Item") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(rule.menuItemLabel ?? "Not selected")
+                        .foregroundStyle(rule.menuItemPath == nil ? .secondary : .primary)
+                    Button("Choose Menu Item…") {
+                        showMenuPicker = true
+                    }
+                    Text("The app must be running. Glide reads its menu bar, like assigning shortcuts in System Settings.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .sheet(isPresented: $showMenuPicker) {
+                MenuItemPickerSheet(
+                    bundleID: rule.appFilter,
+                    targetLabel: store.menuItemTargetLabel(bundleID: rule.appFilter),
+                    selectedPath: $rule.menuItemPath
+                )
+                .onDisappear {
+                    if rule.menuItemPath != nil {
+                        store.markRuleConfigured(rule.id)
+                    }
+                }
+            }
+        }
+
+        if rule.action == .openApp {
+            EditorRow(label: "App") {
+                HStack {
+                    Text(store.appLabel(for: rule.appPath))
+                        .foregroundStyle(rule.appPath == nil ? .secondary : .primary)
+                    Button("Choose…") {
+                        store.chooseApp(for: rule.id)
+                    }
+                }
+            }
+        }
+
+        if rule.action == .customShortcut {
+            EditorRow(label: "Shortcut") {
+                VStack(alignment: .leading, spacing: 8) {
+                    ShortcutRecorderView(shortcut: $rule.customShortcut)
+                    Text("Records the key combination Glide will send when this gesture fires.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .onChange(of: rule.customShortcut) { _ in
+                if rule.customShortcut?.isValid == true {
+                    store.markRuleConfigured(rule.id)
+                }
+            }
+        }
+
+        if rule.action == .advancedKeyboard {
+            EditorRow(label: "Advanced Keyboard") {
+                KeyboardSequenceEditor(steps: $rule.advancedKeyboard)
+            }
+        }
+    }
+
+    private func phaseActionEditor(
+        label: String,
+        action: Binding<GestureAction>,
+        shortcut: Binding<KeyboardShortcut?>,
+        keyboard: Binding<[KeyboardInputStep]>
+    ) -> some View {
+        EditorRow(label: label) {
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("", selection: action) {
+                    ForEach(continuousActions, id: \.0) { cat, actions in
+                        Section(cat) {
+                            ForEach(actions, id: \.self) { action in
+                                Label(action.rawValue, systemImage: action.iconName)
+                                    .tag(action)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: 260)
+
+                if action.wrappedValue == .customShortcut {
+                    ShortcutRecorderView(shortcut: shortcut)
+                }
+
+                if action.wrappedValue == .advancedKeyboard {
+                    KeyboardSequenceEditor(steps: keyboard)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Keyboard Sequence Editor
+
+struct KeyboardSequenceEditor: View {
+    @Binding var steps: [KeyboardInputStep]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if steps.isEmpty {
+                Text("No keyboard input")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach($steps) { $step in
+                    KeyboardStepRow(step: $step) {
+                        steps.removeAll { $0.id == step.id }
+                    }
+                }
+            }
+
+            Button {
+                steps.append(KeyboardInputStep())
+            } label: {
+                Label("Add Keyboard Step", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+}
+
+struct KeyboardStepRow: View {
+    @Binding var step: KeyboardInputStep
+    let onDelete: () -> Void
+
+    private var shortcutBinding: Binding<KeyboardShortcut?> {
+        Binding(
+            get: {
+                KeyboardShortcut(
+                    keyCode: step.keyCode,
+                    command: step.event == .tap && step.command,
+                    shift: step.event == .tap && step.shift,
+                    control: step.event == .tap && step.control,
+                    option: step.event == .tap && step.option
+                )
+            },
+            set: { shortcut in
+                guard let shortcut else { return }
+                step.keyCode = shortcut.keyCode
+                if step.event == .tap {
+                    step.command = shortcut.command
+                    step.shift = shortcut.shift
+                    step.control = shortcut.control
+                    step.option = shortcut.option
+                } else {
+                    step.command = false
+                    step.shift = false
+                    step.control = false
+                    step.option = false
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Picker("", selection: $step.event) {
+                ForEach(KeyboardInputEvent.allCases, id: \.self) { event in
+                    Text(event.label).tag(event)
+                }
+            }
+            .frame(width: 92)
+
+            ShortcutRecorderView(shortcut: shortcutBinding)
+
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+        }
+        .font(.caption)
     }
 }
 
@@ -500,6 +693,9 @@ private func ruleDisplayLabel(_ rule: GestureRule) -> String {
     if rule.action == .customShortcut, let s = rule.customShortcut, s.isValid {
         return "Shortcut: \(s.displayString)"
     }
+    if rule.action == .advancedKeyboard, !rule.advancedKeyboard.isEmpty {
+        return "Advanced Keyboard"
+    }
     return rule.menuItemLabel ?? rule.action.rawValue
 }
 
@@ -555,6 +751,7 @@ extension GestureAction {
         case .switchAppPrev:      return "chevron.left.circle"
         case .customMenuItem:     return "list.bullet.rectangle"
         case .customShortcut:     return "keyboard"
+        case .advancedKeyboard:   return "keyboard.badge.ellipsis"
         // Window management
         case .minimizeWindow:     return "minus.square"
         case .minimizeAllApps:    return "minus.square.fill"

@@ -41,6 +41,8 @@ struct GlideConfig {
     struct Tuning {
         var appSwitcherStepThreshold: Float = 0.003
         var appSwitcherDebounce: Double = 0.10
+        var continuousStepThreshold: Float = 0.025
+        var continuousDebounce: Double = 0.08
         var candidateFrames: Int = 3
         var pinchSpreadThreshold: Float = 0.015
         var pinchFrameSpreadThreshold: Float = 0.008
@@ -66,7 +68,22 @@ struct GlideConfig {
         var menuPath: [String]?
         var shortcutKeyCode: Int?
         var shortcutModifiers: [String]?
+        var advancedKeyboard: [String]?
         var reciprocal: Bool
+        var continuous: Bool = false
+        var continuousNegativeAction: String?
+        var continuousPositiveAction: String?
+        var continuousEndAction: String?
+        var continuousNegativeShortcutKeyCode: Int?
+        var continuousNegativeShortcutModifiers: [String]?
+        var continuousPositiveShortcutKeyCode: Int?
+        var continuousPositiveShortcutModifiers: [String]?
+        var continuousEndShortcutKeyCode: Int?
+        var continuousEndShortcutModifiers: [String]?
+        var continuousBeginKeyboard: [String]?
+        var continuousNegativeKeyboard: [String]?
+        var continuousPositiveKeyboard: [String]?
+        var continuousEndKeyboard: [String]?
         var draft: Bool = false
     }
 
@@ -108,6 +125,8 @@ extension GlideConfig {
 
         cfg.tuning.appSwitcherStepThreshold  = t.appSwitcherStepThreshold
         cfg.tuning.appSwitcherDebounce       = t.appSwitcherDebounce
+        cfg.tuning.continuousStepThreshold   = t.continuousStepThreshold
+        cfg.tuning.continuousDebounce        = t.continuousDebounce
         cfg.tuning.candidateFrames           = t.candidateFrames
         cfg.tuning.pinchSpreadThreshold      = t.pinchSpreadThreshold
         cfg.tuning.pinchFrameSpreadThreshold = t.pinchFrameSpreadThreshold
@@ -135,7 +154,22 @@ extension GlideConfig {
                 menuPath:       rule.menuItemPath,
                 shortcutKeyCode: rule.customShortcut.map { Int($0.keyCode) },
                 shortcutModifiers: rule.customShortcut?.yamlModifiers,
+                advancedKeyboard: rule.advancedKeyboard.map(\.token).nilIfEmpty,
                 reciprocal:  rule.reciprocalEnabled,
+                continuous:  rule.continuous,
+                continuousNegativeAction: rule.continuousNegativeAction == .doNothing ? nil : rule.continuousNegativeAction.rawValue,
+                continuousPositiveAction: rule.continuousPositiveAction == .doNothing ? nil : rule.continuousPositiveAction.rawValue,
+                continuousEndAction:      rule.continuousEndAction == .doNothing ? nil : rule.continuousEndAction.rawValue,
+                continuousNegativeShortcutKeyCode: rule.continuousNegativeAction == .customShortcut ? rule.continuousNegativeShortcut.map { Int($0.keyCode) } : nil,
+                continuousNegativeShortcutModifiers: rule.continuousNegativeAction == .customShortcut ? rule.continuousNegativeShortcut?.yamlModifiers : nil,
+                continuousPositiveShortcutKeyCode: rule.continuousPositiveAction == .customShortcut ? rule.continuousPositiveShortcut.map { Int($0.keyCode) } : nil,
+                continuousPositiveShortcutModifiers: rule.continuousPositiveAction == .customShortcut ? rule.continuousPositiveShortcut?.yamlModifiers : nil,
+                continuousEndShortcutKeyCode: rule.continuousEndAction == .customShortcut ? rule.continuousEndShortcut.map { Int($0.keyCode) } : nil,
+                continuousEndShortcutModifiers: rule.continuousEndAction == .customShortcut ? rule.continuousEndShortcut?.yamlModifiers : nil,
+                continuousBeginKeyboard: rule.continuousBeginKeyboard.map(\.token).nilIfEmpty,
+                continuousNegativeKeyboard: rule.continuousNegativeAction == .advancedKeyboard ? rule.continuousNegativeKeyboard.map(\.token).nilIfEmpty : nil,
+                continuousPositiveKeyboard: rule.continuousPositiveAction == .advancedKeyboard ? rule.continuousPositiveKeyboard.map(\.token).nilIfEmpty : nil,
+                continuousEndKeyboard: rule.continuousEndAction == .advancedKeyboard ? rule.continuousEndKeyboard.map(\.token).nilIfEmpty : nil,
                 draft:       rule.isDraft
             )
         }
@@ -162,6 +196,8 @@ extension GlideConfig {
         t.speedSampleCount          = speed.speedSampleCount
         t.appSwitcherStepThreshold  = tuning.appSwitcherStepThreshold
         t.appSwitcherDebounce       = tuning.appSwitcherDebounce
+        t.continuousStepThreshold   = tuning.continuousStepThreshold
+        t.continuousDebounce        = tuning.continuousDebounce
         t.candidateFrames           = tuning.candidateFrames
         t.pinchSpreadThreshold      = tuning.pinchSpreadThreshold
         t.pinchFrameSpreadThreshold = tuning.pinchFrameSpreadThreshold
@@ -205,6 +241,21 @@ extension GlideConfig {
                 windowStateFilter: WindowStateFilter(yamlValue: g.windowState) ?? .any,
                 modifierFilter:    ModifierFilter(yamlValue: g.modifierFilter) ?? .any,
                 reciprocalEnabled: g.reciprocal,
+                continuous:        g.continuous,
+                continuousNegativeAction: g.continuousNegativeAction.flatMap(GestureAction.init(rawValue:)) ?? .doNothing,
+                continuousPositiveAction: g.continuousPositiveAction.flatMap(GestureAction.init(rawValue:)) ?? .doNothing,
+                continuousEndAction:      g.continuousEndAction.flatMap(GestureAction.init(rawValue:)) ?? .doNothing,
+                advancedKeyboard:          (g.advancedKeyboard ?? []).compactMap(KeyboardInputStep.init(token:)),
+                continuousNegativeShortcut: KeyboardShortcut(yamlKeyCode: g.continuousNegativeShortcutKeyCode,
+                                                             modifiers: g.continuousNegativeShortcutModifiers),
+                continuousPositiveShortcut: KeyboardShortcut(yamlKeyCode: g.continuousPositiveShortcutKeyCode,
+                                                             modifiers: g.continuousPositiveShortcutModifiers),
+                continuousEndShortcut:      KeyboardShortcut(yamlKeyCode: g.continuousEndShortcutKeyCode,
+                                                             modifiers: g.continuousEndShortcutModifiers),
+                continuousBeginKeyboard:    (g.continuousBeginKeyboard ?? []).compactMap(KeyboardInputStep.init(token:)),
+                continuousNegativeKeyboard: (g.continuousNegativeKeyboard ?? []).compactMap(KeyboardInputStep.init(token:)),
+                continuousPositiveKeyboard: (g.continuousPositiveKeyboard ?? []).compactMap(KeyboardInputStep.init(token:)),
+                continuousEndKeyboard:      (g.continuousEndKeyboard ?? []).compactMap(KeyboardInputStep.init(token:)),
                 menuItemPath:      g.menuPath,
                 customShortcut:    KeyboardShortcut(yamlKeyCode: g.shortcutKeyCode,
                                                      modifiers: g.shortcutModifiers),
@@ -218,6 +269,8 @@ extension GlideConfig {
 
     private static func yamlDirection(_ d: GestureDirection) -> String {
         switch d {
+        case .swipeLeftRight: return "left_right"
+        case .swipeUpDown:    return "up_down"
         case .swipeLeft:  return "left"
         case .swipeRight: return "right"
         case .swipeUp:    return "up"
@@ -227,7 +280,9 @@ extension GlideConfig {
     }
 
     private func swiftDirection(_ s: String?) -> GestureDirection? {
-        switch s?.lowercased() {
+        switch s?.lowercased().replacingOccurrences(of: "-", with: "_") {
+        case "left_right", "leftright", "horizontal", "x": return .swipeLeftRight
+        case "up_down", "updown", "vertical", "y":         return .swipeUpDown
         case "left":  return .swipeLeft
         case "right": return .swipeRight
         case "up":    return .swipeUp
@@ -276,6 +331,8 @@ enum GlideConfigSerializer {
             "  tuning:",
             "    app_switcher_step_threshold: \(fmt(config.tuning.appSwitcherStepThreshold))",
             "    app_switcher_debounce: \(String(format: "%.2f", config.tuning.appSwitcherDebounce))",
+            "    continuous_step_threshold: \(fmt(config.tuning.continuousStepThreshold))",
+            "    continuous_debounce: \(String(format: "%.2f", config.tuning.continuousDebounce))",
             "    candidate_frames: \(config.tuning.candidateFrames)",
             "    pinch_spread_threshold: \(fmt(config.tuning.pinchSpreadThreshold))",
             "    pinch_frame_spread_threshold: \(fmt(config.tuning.pinchFrameSpreadThreshold))",
@@ -326,6 +383,27 @@ enum GlideConfigSerializer {
         if g.type == "swipe" || g.appPath != nil {
             lines.append("      app_path: \(g.appPath.map { "\"\(escape($0))\"" } ?? "null")")
             lines.append("      reciprocal: \(g.reciprocal ? "true" : "false")")
+            if g.type == "swipe" {
+                lines.append("      continuous: \(g.continuous ? "true" : "false")")
+                if let action = g.continuousNegativeAction {
+                    lines.append("      continuous_update_negative_action: \"\(escape(action))\"")
+                }
+                if let action = g.continuousPositiveAction {
+                    lines.append("      continuous_update_positive_action: \"\(escape(action))\"")
+                }
+                if let action = g.continuousEndAction {
+                    lines.append("      continuous_end_action: \"\(escape(action))\"")
+                }
+                if g.continuousNegativeAction == GestureAction.advancedKeyboard.rawValue {
+                    appendStringList(g.continuousNegativeKeyboard, key: "continuous_update_negative_keyboard", to: &lines)
+                }
+                if g.continuousPositiveAction == GestureAction.advancedKeyboard.rawValue {
+                    appendStringList(g.continuousPositiveKeyboard, key: "continuous_update_positive_keyboard", to: &lines)
+                }
+                if g.continuousEndAction == GestureAction.advancedKeyboard.rawValue {
+                    appendStringList(g.continuousEndKeyboard, key: "continuous_end_keyboard", to: &lines)
+                }
+            }
         }
         if g.action == GestureAction.customMenuItem.rawValue, let path = g.menuPath, !path.isEmpty {
             lines.append("      menu_path:")
@@ -342,10 +420,44 @@ enum GlideConfigSerializer {
                 }
             }
         }
+        if g.action == GestureAction.advancedKeyboard.rawValue {
+            appendStringList(g.advancedKeyboard, key: "advanced_keyboard", to: &lines)
+        }
+        if g.continuousNegativeAction == GestureAction.customShortcut.rawValue {
+            appendShortcut(g.continuousNegativeShortcutKeyCode, modifiers: g.continuousNegativeShortcutModifiers,
+                           keyPrefix: "continuous_update_negative", to: &lines)
+        }
+        if g.continuousPositiveAction == GestureAction.customShortcut.rawValue {
+            appendShortcut(g.continuousPositiveShortcutKeyCode, modifiers: g.continuousPositiveShortcutModifiers,
+                           keyPrefix: "continuous_update_positive", to: &lines)
+        }
+        if g.continuousEndAction == GestureAction.customShortcut.rawValue {
+            appendShortcut(g.continuousEndShortcutKeyCode, modifiers: g.continuousEndShortcutModifiers,
+                           keyPrefix: "continuous_end", to: &lines)
+        }
         return lines
     }
 
     private static func fmt(_ v: Float) -> String { String(format: "%.3f", v) }
+
+    private static func appendStringList(_ values: [String]?, key: String, to lines: inout [String]) {
+        guard let values, !values.isEmpty else { return }
+        lines.append("      \(key):")
+        for value in values {
+            lines.append("        - \"\(escape(value))\"")
+        }
+    }
+
+    private static func appendShortcut(_ keyCode: Int?, modifiers: [String]?, keyPrefix: String, to lines: inout [String]) {
+        guard let keyCode else { return }
+        lines.append("      \(keyPrefix)_shortcut_key_code: \(keyCode)")
+        if let modifiers, !modifiers.isEmpty {
+            lines.append("      \(keyPrefix)_shortcut_modifiers:")
+            for modifier in modifiers {
+                lines.append("        - \(modifier)")
+            }
+        }
+    }
 
     private static func escape(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
@@ -449,6 +561,8 @@ enum GlideConfigParser {
             switch key {
             case "app_switcher_step_threshold":  tuning.appSwitcherStepThreshold  = floatVal(val)  ?? tuning.appSwitcherStepThreshold
             case "app_switcher_debounce":        tuning.appSwitcherDebounce       = doubleVal(val) ?? tuning.appSwitcherDebounce
+            case "continuous_step_threshold":     tuning.continuousStepThreshold   = floatVal(val)  ?? tuning.continuousStepThreshold
+            case "continuous_debounce":           tuning.continuousDebounce        = doubleVal(val) ?? tuning.continuousDebounce
             case "candidate_frames":             tuning.candidateFrames           = intVal(val)    ?? tuning.candidateFrames
             case "pinch_spread_threshold":       tuning.pinchSpreadThreshold      = floatVal(val)  ?? tuning.pinchSpreadThreshold
             case "pinch_frame_spread_threshold": tuning.pinchFrameSpreadThreshold = floatVal(val)  ?? tuning.pinchFrameSpreadThreshold
@@ -543,7 +657,22 @@ enum GlideConfigParser {
                                     speed: nil, action: "", appFilter: nil, windowState: nil,
                                     modifierFilter: nil, appPath: nil, menuPath: nil,
                                     shortcutKeyCode: nil, shortcutModifiers: nil,
-                                    reciprocal: true, draft: false)
+                                    advancedKeyboard: nil,
+                                    reciprocal: true, continuous: false,
+                                    continuousNegativeAction: nil,
+                                    continuousPositiveAction: nil,
+                                    continuousEndAction: nil,
+                                    continuousNegativeShortcutKeyCode: nil,
+                                    continuousNegativeShortcutModifiers: nil,
+                                    continuousPositiveShortcutKeyCode: nil,
+                                    continuousPositiveShortcutModifiers: nil,
+                                    continuousEndShortcutKeyCode: nil,
+                                    continuousEndShortcutModifiers: nil,
+                                    continuousBeginKeyboard: nil,
+                                    continuousNegativeKeyboard: nil,
+                                    continuousPositiveKeyboard: nil,
+                                    continuousEndKeyboard: nil,
+                                    draft: false)
         let firstLine = lines[i].trimmingCharacters(in: .whitespaces).dropFirst()
         if let colon = firstLine.firstIndex(of: ":") {
             let k = String(firstLine[..<colon]).trimmingCharacters(in: .whitespaces)
@@ -581,7 +710,54 @@ enum GlideConfigParser {
                 i += 1
                 g.shortcutModifiers = parseStringList(lines, from: &i, parentIndent: modIndent)
                 continue
+            case "advanced_keyboard":
+                let listIndent = ind
+                i += 1
+                g.advancedKeyboard = parseStringList(lines, from: &i, parentIndent: listIndent)
+                continue
             case "reciprocal": g.reciprocal = boolVal(val) ?? g.reciprocal
+            case "continuous": g.continuous = boolVal(val) ?? g.continuous
+            case "continuous_update_negative_action": g.continuousNegativeAction = stringVal(val).map(mapActionSynonym)
+            case "continuous_update_positive_action": g.continuousPositiveAction = stringVal(val).map(mapActionSynonym)
+            case "continuous_end_action":             g.continuousEndAction      = stringVal(val).map(mapActionSynonym)
+            case "continuous_update_negative_shortcut_key_code": g.continuousNegativeShortcutKeyCode = intVal(val)
+            case "continuous_update_positive_shortcut_key_code": g.continuousPositiveShortcutKeyCode = intVal(val)
+            case "continuous_end_shortcut_key_code":             g.continuousEndShortcutKeyCode      = intVal(val)
+            case "continuous_update_negative_shortcut_modifiers":
+                let modIndent = ind
+                i += 1
+                g.continuousNegativeShortcutModifiers = parseStringList(lines, from: &i, parentIndent: modIndent)
+                continue
+            case "continuous_update_positive_shortcut_modifiers":
+                let modIndent = ind
+                i += 1
+                g.continuousPositiveShortcutModifiers = parseStringList(lines, from: &i, parentIndent: modIndent)
+                continue
+            case "continuous_end_shortcut_modifiers":
+                let modIndent = ind
+                i += 1
+                g.continuousEndShortcutModifiers = parseStringList(lines, from: &i, parentIndent: modIndent)
+                continue
+            case "continuous_begin_keyboard":
+                let listIndent = ind
+                i += 1
+                g.continuousBeginKeyboard = parseStringList(lines, from: &i, parentIndent: listIndent)
+                continue
+            case "continuous_update_negative_keyboard":
+                let listIndent = ind
+                i += 1
+                g.continuousNegativeKeyboard = parseStringList(lines, from: &i, parentIndent: listIndent)
+                continue
+            case "continuous_update_positive_keyboard":
+                let listIndent = ind
+                i += 1
+                g.continuousPositiveKeyboard = parseStringList(lines, from: &i, parentIndent: listIndent)
+                continue
+            case "continuous_end_keyboard":
+                let listIndent = ind
+                i += 1
+                g.continuousEndKeyboard = parseStringList(lines, from: &i, parentIndent: listIndent)
+                continue
             case "draft":      g.draft      = boolVal(val) ?? g.draft
             default: break
             }
@@ -654,6 +830,10 @@ enum GlideConfigParser {
         default: return s
         }
     }
+}
+
+private extension Array {
+    var nilIfEmpty: [Element]? { isEmpty ? nil : self }
 }
 
 // ─────────────────────────────────────────────

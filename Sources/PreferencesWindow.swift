@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 enum PrefsTab: String, CaseIterable, Identifiable {
     case gestures      = "Gestures"
@@ -43,5 +44,12 @@ struct PreferencesWindow: View {
             }
         }
         .frame(minWidth: 760, minHeight: 520)
+        .onAppear {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .onDisappear {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }

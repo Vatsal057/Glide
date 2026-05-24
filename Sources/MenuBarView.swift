@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct MenuBarView: View {
     @EnvironmentObject var preferencesStore: PreferencesStore
@@ -7,6 +8,7 @@ struct MenuBarView: View {
 
     var body: some View {
         Button("Open Preferences…") {
+            NSApp.setActivationPolicy(.regular)
             openWindow(id: "preferences")
             NSApp.activate(ignoringOtherApps: true)
         }

@@ -64,7 +64,7 @@ struct KeyboardShortcut: Codable, Equatable, Hashable {
     }
 }
 
-private enum KeyCodeLabels {
+enum KeyCodeLabels {
     static func name(for keyCode: UInt16) -> String {
         switch Int(keyCode) {
         case 0x00: return "A"
@@ -119,7 +119,7 @@ private enum KeyCodeLabels {
         case 0x32: return "`"
         case 0x33: return "Delete"
         case 0x35: return "Esc"
-        case 0x37: return "⌘"
+        case 0x36, 0x37: return "⌘"
         case 0x38: return "⇧"
         case 0x39: return "Caps Lock"
         case 0x3A: return "⌥"
@@ -160,6 +160,170 @@ private enum KeyCodeLabels {
         case 0x60: return "Down"
         case 0x61: return "Up"
         default:   return "Key \(keyCode)"
+        }
+    }
+
+    static let commonKeys: [(name: String, keyCode: UInt16)] = [
+        ("Tab", 0x30), ("Space", 0x31), ("Return", 0x24), ("Esc", 0x35), ("Delete", 0x33),
+        ("Left Arrow", 0x5E), ("Right Arrow", 0x5F), ("Down Arrow", 0x60), ("Up Arrow", 0x61),
+        ("Option", 0x3A), ("Shift", 0x38), ("Command", 0x37), ("Control", 0x3B)
+    ]
+
+    static func keyCode(forToken token: String) -> UInt16? {
+        switch token.lowercased().replacingOccurrences(of: "_", with: "") {
+        case "tab": return 0x30
+        case "space": return 0x31
+        case "return", "enter": return 0x24
+        case "esc", "escape": return 0x35
+        case "delete", "backspace": return 0x33
+        case "left", "leftarrow": return 0x5E
+        case "right", "rightarrow": return 0x5F
+        case "down", "downarrow": return 0x60
+        case "up", "uparrow": return 0x61
+        case "leftalt", "rightalt", "alt", "option", "leftoption": return 0x3A
+        case "leftshift", "rightshift", "shift": return 0x38
+        case "leftcmd", "cmd", "command", "leftcommand": return 0x37
+        case "rightcmd", "rightcommand": return 0x36
+        case "leftctrl", "rightctrl", "ctrl", "control", "leftcontrol", "rightcontrol": return 0x3B
+        default:
+            if token.lowercased().hasPrefix("key"),
+               let value = UInt16(token.dropFirst(3)) {
+                return value
+            }
+            return nil
+        }
+    }
+
+    static func tokenName(for keyCode: UInt16) -> String {
+        switch Int(keyCode) {
+        case 0x30: return "tab"
+        case 0x31: return "space"
+        case 0x24: return "return"
+        case 0x35: return "escape"
+        case 0x33: return "delete"
+        case 0x5E: return "left"
+        case 0x5F: return "right"
+        case 0x60: return "down"
+        case 0x61: return "up"
+        case 0x3A: return "leftalt"
+        case 0x38: return "leftshift"
+        case 0x37: return "leftcmd"
+        case 0x36: return "rightcmd"
+        case 0x3B: return "leftctrl"
+        default: return "key\(keyCode)"
+        }
+    }
+}
+
+enum KeyboardInputEvent: String, Codable, CaseIterable {
+    case tap = "tap"
+    case hold = "hold"
+    case release = "release"
+
+    var label: String {
+        switch self {
+        case .tap: return "Tap"
+        case .hold: return "Hold"
+        case .release: return "Release"
+        }
+    }
+}
+
+struct KeyboardInputStep: Codable, Equatable, Hashable, Identifiable {
+    var id = UUID()
+    var event: KeyboardInputEvent = .tap
+    var keyCode: UInt16 = 0x30
+    var command: Bool = false
+    var shift: Bool = false
+    var control: Bool = false
+    var option: Bool = false
+
+    private enum CodingKeys: String, CodingKey {
+        case event, keyCode, command, shift, control, option
+    }
+
+    var modifierFlags: CGEventFlags {
+        var flags: CGEventFlags = []
+        if command { flags.insert(.maskCommand) }
+        if shift { flags.insert(.maskShift) }
+        if control { flags.insert(.maskControl) }
+        if option { flags.insert(.maskAlternate) }
+        return flags
+    }
+
+    var displayString: String {
+        let prefix: String
+        switch event {
+        case .tap: prefix = "Tap "
+        case .hold: prefix = "Hold "
+        case .release: prefix = "Release "
+        }
+        var mods: [String] = []
+        if control { mods.append("⌃") }
+        if option { mods.append("⌥") }
+        if shift { mods.append("⇧") }
+        if command { mods.append("⌘") }
+        return prefix + mods.joined() + KeyCodeLabels.name(for: keyCode)
+    }
+
+    init(event: KeyboardInputEvent = .tap, keyCode: UInt16 = 0x30,
+         command: Bool = false, shift: Bool = false, control: Bool = false, option: Bool = false) {
+        self.event = event
+        self.keyCode = keyCode
+        self.command = command
+        self.shift = shift
+        self.control = control
+        self.option = option
+    }
+
+    init?(token: String) {
+        var raw = token.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !raw.isEmpty else { return nil }
+
+        if raw.hasPrefix("+") {
+            event = .hold
+            raw.removeFirst()
+        } else if raw.hasPrefix("-") {
+            event = .release
+            raw.removeFirst()
+        } else {
+            event = .tap
+        }
+
+        var command = false, shift = false, control = false, option = false
+        let parts = raw.components(separatedBy: "+").filter { !$0.isEmpty }
+        guard let keyToken = parts.last, let keyCode = KeyCodeLabels.keyCode(forToken: keyToken) else { return nil }
+        for mod in parts.dropLast() {
+            switch mod {
+            case "cmd", "command", "leftcmd": command = true
+            case "shift", "leftshift": shift = true
+            case "ctrl", "control", "leftctrl": control = true
+            case "alt", "option", "leftalt": option = true
+            default: break
+            }
+        }
+        self.keyCode = keyCode
+        self.command = command
+        self.shift = shift
+        self.control = control
+        self.option = option
+    }
+
+    var token: String {
+        let key = KeyCodeLabels.tokenName(for: keyCode)
+        switch event {
+        case .hold:
+            return "+\(key)"
+        case .release:
+            return "-\(key)"
+        case .tap:
+            var parts: [String] = []
+            if command { parts.append("leftcmd") }
+            if shift { parts.append("leftshift") }
+            if control { parts.append("leftctrl") }
+            if option { parts.append("leftalt") }
+            parts.append(key)
+            return parts.joined(separator: "+")
         }
     }
 }

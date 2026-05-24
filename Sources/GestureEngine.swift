@@ -94,6 +94,10 @@ final class GestureEngine {
         let initialSpread: Float
         var prevSpread: Float
         var cumulativeSpreadDelta: Float
+        var continuousRefX: Float
+        var continuousRefY: Float
+        var lastContinuousActionTime: TimeInterval
+        var continuousRule: GestureRule?
     }
 
     private struct SwitcherData {
@@ -111,6 +115,7 @@ final class GestureEngine {
         case lockedSwipe(SwipeTrackData)
         case ignored
         case fired
+        case continuousSwipe(SwipeTrackData)
         case switchingApps(SwitcherData)
     }
 
@@ -639,7 +644,11 @@ final class GestureEngine {
                     recentDeltas: [],
                     initialSpread: data.initialSpread,
                     prevSpread: frame.spread,
-                    cumulativeSpreadDelta: data.cumulativeSpreadDelta
+                    cumulativeSpreadDelta: data.cumulativeSpreadDelta,
+                    continuousRefX: frame.cx,
+                    continuousRefY: frame.cy,
+                    lastContinuousActionTime: 0,
+                    continuousRule: nil
                 )
                 phase = .lockedSwipe(swipeData)
                 AppLogger.debug("[Engine] Locked as swipe — \(n) fingers")
@@ -654,6 +663,10 @@ final class GestureEngine {
         case .lockedSwipe(let data):
             guard n == data.fingers else { finishIfNeeded(); return }
             processSwipeFrame(frame, data: data, now: now)
+
+        case .continuousSwipe(let data):
+            guard n == data.fingers else { finishIfNeeded(); return }
+            processContinuousSwipeFrame(frame, data: data, now: now)
 
         case .switchingApps(var data):
             guard n == data.fingerCount else { commitAppSwitcher(data: data); return }
@@ -765,8 +778,18 @@ final class GestureEngine {
         if let rule = bestRule(fingers: data.fingers, direction: direction, speed: speed,
                                modifiers: updated.modifiersAtStart) {
             AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue) \(modifierDebugLabel(updated.modifiersAtStart)) (Δ=\(String(format: "%.3f", swipeCentroidMovement)) t=\(String(format: "%.2f", elapsed))s) → \(rule.action.rawValue)")
-            executeSwipeRule(rule, fingers: data.fingers, direction: direction)
-            phase = .fired
+            if rule.continuous {
+                executeGestureRuleAction(rule)
+                clearReciprocalToken()
+                updated.continuousRefX = frame.cx
+                updated.continuousRefY = frame.cy
+                updated.lastContinuousActionTime = now
+                updated.continuousRule = rule
+                phase = .continuousSwipe(updated)
+            } else {
+                executeSwipeRule(rule, fingers: data.fingers, direction: direction)
+                phase = .fired
+            }
         } else if let switcherAction = appSwitcherAction(
             fingers: data.fingers, direction: direction, modifiers: updated.modifiersAtStart
         ) {
@@ -778,6 +801,78 @@ final class GestureEngine {
             AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue): no matching rule")
             phase = .fired
         }
+        updateObservableState()
+    }
+
+    private func processContinuousSwipeFrame(_ frame: TouchFrameData, data: SwipeTrackData, now: TimeInterval) {
+        var updated = data
+
+        let frameDx = frame.cx - data.lastX
+        let frameDy = frame.cy - data.lastY
+        let frameDist = (frameDx * frameDx + frameDy * frameDy).squareRoot()
+        updated.lastX = frame.cx
+        updated.lastY = frame.cy
+
+        let swipeSpreadDelta = abs(frame.spread - updated.prevSpread)
+        updated.cumulativeSpreadDelta += swipeSpreadDelta
+        updated.prevSpread = frame.spread
+        appendVelocitySample(frameDist, to: &updated.velocitySamples)
+
+        let swipeCentroidMovement = ((frame.cx - updated.startX) * (frame.cx - updated.startX)
+                                   + (frame.cy - updated.startY) * (frame.cy - updated.startY)).squareRoot()
+        let swipeSpreadChange = abs(frame.spread - updated.initialSpread)
+        if swipeSpreadChange > 0.003 && swipeSpreadChange > swipeCentroidMovement * 0.8 {
+            executeContinuousEndAction(for: updated)
+            phase = .ignored
+            AppLogger.debug("[Engine] Continuous swipe aborted — spread grew mid-swipe")
+            updateObservableState()
+            return
+        }
+
+        let dx = frame.cx - updated.continuousRefX
+        let dy = frame.cy - updated.continuousRefY
+        let stepDistance = (dx * dx + dy * dy).squareRoot()
+        guard stepDistance >= tuning.continuousStepThreshold else {
+            phase = .continuousSwipe(updated)
+            return
+        }
+
+        let angleDeg = atan2(dy, dx) * (180.0 / .pi)
+        let angle360 = angleDeg < 0 ? angleDeg + 360 : angleDeg
+        guard let direction = directionFromAngle(angle360) else {
+            updated.continuousRefX = frame.cx
+            updated.continuousRefY = frame.cy
+            phase = .continuousSwipe(updated)
+            return
+        }
+
+        guard now - updated.lastContinuousActionTime >= tuning.continuousDebounce else {
+            phase = .continuousSwipe(updated)
+            return
+        }
+
+        let elapsed = max(now - updated.startTime, 0.001)
+        let speed = classifySpeed(
+            velocitySamples: updated.velocitySamples,
+            totalDisplacement: swipeCentroidMovement,
+            elapsedSeconds: elapsed
+        )
+
+        if let rule = updated.continuousRule,
+           continuousDirection(direction, matchesAxisOf: rule.direction) {
+            let action = continuousUpdateAction(for: direction, in: rule)
+            let keyboardSteps = continuousUpdateKeyboard(for: direction, in: rule)
+            let shortcut = continuousUpdateShortcut(for: direction, in: rule)
+            if action != .doNothing {
+                AppLogger.debug("[Engine] Continuous \(direction.rawValue) — \(data.fingers)F \(speed.rawValue) → \(action.rawValue)")
+                executeContinuousAction(action, shortcut: shortcut, keyboard: keyboardSteps)
+            }
+            updated.lastContinuousActionTime = now
+        }
+
+        updated.continuousRefX = frame.cx
+        updated.continuousRefY = frame.cy
+        phase = .continuousSwipe(updated)
         updateObservableState()
     }
 
@@ -796,6 +891,7 @@ final class GestureEngine {
 
     private func finishIfNeeded() {
         if case .switchingApps(let data) = phase { commitAppSwitcher(data: data) }
+        if case .continuousSwipe(let data) = phase { executeContinuousEndAction(for: data) }
         phase = .idle
         lastStepTime = 0
     }
@@ -967,7 +1063,7 @@ final class GestureEngine {
         let matching = Settings.shared.rules.filter { rule in
             rule.isActive
                 && rule.fingers == fingers
-                && rule.direction == direction
+                && ruleDirection(rule.direction, matchesActual: direction)
                 && matchesWindowState(rule, isFullscreen: isFullscreen, isMaximized: isMaximized)
                 && matchesAppFilter(rule, bundleID: bid)
                 && modifiers.matches(rule.modifierFilter)
@@ -992,9 +1088,20 @@ final class GestureEngine {
     }
 
     private func hasAnySwipeRule(fingers: Int) -> Bool {
-        let swipeDirs: [GestureDirection] = [.swipeLeft, .swipeRight, .swipeUp, .swipeDown]
+        let swipeDirs: [GestureDirection] = [.swipeLeftRight, .swipeUpDown, .swipeLeft, .swipeRight, .swipeUp, .swipeDown]
         return Settings.shared.rules.contains {
             $0.isActive && $0.fingers == fingers && swipeDirs.contains($0.direction)
+        }
+    }
+
+    private func ruleDirection(_ ruleDirection: GestureDirection, matchesActual actual: GestureDirection) -> Bool {
+        switch ruleDirection {
+        case .swipeLeftRight:
+            return actual == .swipeLeft || actual == .swipeRight
+        case .swipeUpDown:
+            return actual == .swipeUp || actual == .swipeDown
+        default:
+            return ruleDirection == actual
         }
     }
 
@@ -1068,11 +1175,72 @@ final class GestureEngine {
 
     // MARK: - Reciprocal token
 
-    private func executeSwipeRule(_ rule: GestureRule, fingers: Int, direction: GestureDirection) {
+    private func executeGestureRuleAction(_ rule: GestureRule) {
         Haptic.forAction(rule.action)
         ActionExecutor.shared.execute(rule.action, appPath: rule.appPath,
                                       menuItemPath: rule.menuItemPath, menuTargetBundleID: rule.appFilter,
-                                      customShortcut: rule.customShortcut)
+                                      customShortcut: rule.customShortcut,
+                                      advancedKeyboard: rule.advancedKeyboard)
+    }
+
+    private func continuousUpdateAction(for direction: GestureDirection, in rule: GestureRule) -> GestureAction {
+        switch direction {
+        case .swipeLeft, .swipeDown:
+            return rule.continuousNegativeAction
+        case .swipeRight, .swipeUp:
+            return rule.continuousPositiveAction
+        case .swipeLeftRight, .swipeUpDown, .click:
+            return .doNothing
+        }
+    }
+
+    private func continuousUpdateKeyboard(for direction: GestureDirection, in rule: GestureRule) -> [KeyboardInputStep] {
+        switch direction {
+        case .swipeLeft, .swipeDown:
+            return rule.continuousNegativeKeyboard
+        case .swipeRight, .swipeUp:
+            return rule.continuousPositiveKeyboard
+        case .swipeLeftRight, .swipeUpDown, .click:
+            return []
+        }
+    }
+
+    private func continuousUpdateShortcut(for direction: GestureDirection, in rule: GestureRule) -> KeyboardShortcut? {
+        switch direction {
+        case .swipeLeft, .swipeDown:
+            return rule.continuousNegativeShortcut
+        case .swipeRight, .swipeUp:
+            return rule.continuousPositiveShortcut
+        case .swipeLeftRight, .swipeUpDown, .click:
+            return nil
+        }
+    }
+
+    private func continuousDirection(_ direction: GestureDirection, matchesAxisOf startDirection: GestureDirection) -> Bool {
+        switch startDirection {
+        case .swipeLeft, .swipeRight, .swipeLeftRight:
+            return direction == .swipeLeft || direction == .swipeRight
+        case .swipeUp, .swipeDown, .swipeUpDown:
+            return direction == .swipeUp || direction == .swipeDown
+        case .click:
+            return false
+        }
+    }
+
+    private func executeContinuousEndAction(for data: SwipeTrackData) {
+        guard let rule = data.continuousRule else { return }
+        executeContinuousAction(rule.continuousEndAction, shortcut: rule.continuousEndShortcut, keyboard: rule.continuousEndKeyboard)
+    }
+
+    private func executeContinuousAction(_ action: GestureAction, shortcut: KeyboardShortcut? = nil, keyboard: [KeyboardInputStep] = []) {
+        guard action != .doNothing else { return }
+        guard action != .openApp, action != .customMenuItem else { return }
+        Haptic.forAction(action)
+        ActionExecutor.shared.execute(action, customShortcut: shortcut, advancedKeyboard: keyboard)
+    }
+
+    private func executeSwipeRule(_ rule: GestureRule, fingers: Int, direction: GestureDirection) {
+        executeGestureRuleAction(rule)
         if rule.reciprocalEnabled {
             reciprocalToken = makeReciprocalToken(inverseAction: rule.reciprocalAction ?? rule.action.inverseAction, fingers: fingers, direction: direction)
         } else {
@@ -1112,7 +1280,8 @@ final class GestureEngine {
         case .swipeRight: return .swipeLeft
         case .swipeUp:    return .swipeDown
         case .swipeDown:  return .swipeUp
-        case .click:      return nil
+        case .swipeLeftRight, .swipeUpDown, .click:
+            return nil
         }
     }
 
@@ -1125,6 +1294,7 @@ final class GestureEngine {
         case .lockedSwipe:   currentPhaseName = "Locked (Swipe)"
         case .ignored:       currentPhaseName = "Ignored"
         case .fired:         currentPhaseName = "Fired"
+        case .continuousSwipe: currentPhaseName = "Continuous"
         case .switchingApps: currentPhaseName = "App Switcher"
         }
         isReciprocalActive = reciprocalToken != nil

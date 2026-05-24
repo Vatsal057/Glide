@@ -11,6 +11,8 @@ enum GestureFingers: Int, Codable, CaseIterable {
 
 enum GestureDirection: String, Codable, CaseIterable {
     case click           = "Click"
+    case swipeLeftRight  = "Left / Right"
+    case swipeUpDown     = "Up / Down"
     case swipeLeft       = "Swipe Left"
     case swipeRight      = "Swipe Right"
     case swipeUp         = "Swipe Up"
@@ -208,6 +210,7 @@ enum GestureAction: String, Codable, CaseIterable {
     case screenshotToolbar         = "Screenshot Toolbar"
     case customMenuItem            = "Menu Item…"
     case customShortcut            = "Keyboard Shortcut…"
+    case advancedKeyboard          = "Advanced Keyboard…"
     case emptyTrash                = "Empty Trash"
     case openFinder                = "Open Finder"
     case openDownloads             = "Open Downloads"
@@ -223,7 +226,7 @@ enum GestureAction: String, Codable, CaseIterable {
                      .snapBottomLeft, .snapBottomRight, .centerWindow, .moveNextDisplay]),
         ("Screenshots", [.screenshotArea, .screenshotFull, .screenshotAreaClipboard,
                          .screenshotFullClipboard, .screenshotToolbar]),
-        ("Custom", [.customMenuItem, .customShortcut]),
+        ("Custom", [.customMenuItem, .customShortcut, .advancedKeyboard]),
         ("System", [.missionControl, .appExpose, .showDesktop, .launchpad, .spotlight, .notifCenter,
                     .lockScreen, .sleep, .emptyTrash, .openFinder, .openDownloads]),
         ("Other", [.doNothing]),
@@ -284,6 +287,19 @@ struct GestureRule: Codable, Identifiable, Equatable {
     var modifierFilter: ModifierFilter = .any
     var reciprocalEnabled: Bool     = true
     var reciprocalAction: GestureAction?
+    /// Runs a begin/update/end lifecycle while fingers remain down and keep moving.
+    var continuous: Bool            = false
+    var continuousNegativeAction: GestureAction = .doNothing
+    var continuousPositiveAction: GestureAction = .doNothing
+    var continuousEndAction:      GestureAction = .doNothing
+    var advancedKeyboard:          [KeyboardInputStep] = []
+    var continuousNegativeShortcut: KeyboardShortcut?
+    var continuousPositiveShortcut: KeyboardShortcut?
+    var continuousEndShortcut:      KeyboardShortcut?
+    var continuousBeginKeyboard:    [KeyboardInputStep] = []
+    var continuousNegativeKeyboard: [KeyboardInputStep] = []
+    var continuousPositiveKeyboard: [KeyboardInputStep] = []
+    var continuousEndKeyboard:      [KeyboardInputStep] = []
     /// Menu path for `.customMenuItem`, e.g. `["File", "New Tab"]`.
     var menuItemPath: [String]?
     /// Key combo for `.customShortcut`.
@@ -298,6 +314,12 @@ struct GestureRule: Codable, Identifiable, Equatable {
 
     var isActive: Bool {
         if isDraft { return false }
+        if continuous {
+            return Self.actionIsConfigured(action, shortcut: customShortcut, keyboard: advancedKeyboard)
+                || Self.actionIsConfigured(continuousNegativeAction, shortcut: continuousNegativeShortcut, keyboard: continuousNegativeKeyboard)
+                || Self.actionIsConfigured(continuousPositiveAction, shortcut: continuousPositiveShortcut, keyboard: continuousPositiveKeyboard)
+                || Self.actionIsConfigured(continuousEndAction, shortcut: continuousEndShortcut, keyboard: continuousEndKeyboard)
+        }
         if action == .doNothing { return false }
         if action == .customMenuItem {
             return menuItemPath != nil && (menuItemPath?.count ?? 0) >= 2
@@ -305,8 +327,28 @@ struct GestureRule: Codable, Identifiable, Equatable {
         if action == .customShortcut {
             return customShortcut?.isValid == true
         }
+        if action == .advancedKeyboard {
+            return !advancedKeyboard.isEmpty
+        }
         if action == .openApp { return appPath != nil && !(appPath?.isEmpty ?? true) }
         return true
+    }
+
+    var supportsContinuousGestures: Bool {
+        direction == .swipeLeftRight || direction == .swipeUpDown
+    }
+
+    private static func actionIsConfigured(_ action: GestureAction, shortcut: KeyboardShortcut?, keyboard: [KeyboardInputStep]) -> Bool {
+        switch action {
+        case .doNothing:
+            return false
+        case .customShortcut:
+            return shortcut?.isValid == true
+        case .advancedKeyboard:
+            return !keyboard.isEmpty
+        default:
+            return true
+        }
     }
 
     var matchSignature: GestureMatchSignature {
@@ -331,6 +373,18 @@ struct GestureRule: Codable, Identifiable, Equatable {
          windowStateFilter: WindowStateFilter = .any,
          modifierFilter: ModifierFilter = .any,
          reciprocalEnabled: Bool = true, reciprocalAction: GestureAction? = nil,
+         continuous: Bool = false,
+         continuousNegativeAction: GestureAction = .doNothing,
+         continuousPositiveAction: GestureAction = .doNothing,
+         continuousEndAction: GestureAction = .doNothing,
+         advancedKeyboard: [KeyboardInputStep] = [],
+         continuousNegativeShortcut: KeyboardShortcut? = nil,
+         continuousPositiveShortcut: KeyboardShortcut? = nil,
+         continuousEndShortcut: KeyboardShortcut? = nil,
+         continuousBeginKeyboard: [KeyboardInputStep] = [],
+         continuousNegativeKeyboard: [KeyboardInputStep] = [],
+         continuousPositiveKeyboard: [KeyboardInputStep] = [],
+         continuousEndKeyboard: [KeyboardInputStep] = [],
          menuItemPath: [String]? = nil, customShortcut: KeyboardShortcut? = nil,
          isDraft: Bool = false) {
         self.fingers             = fingers
@@ -343,6 +397,18 @@ struct GestureRule: Codable, Identifiable, Equatable {
         self.modifierFilter      = modifierFilter
         self.reciprocalEnabled   = reciprocalEnabled
         self.reciprocalAction    = reciprocalAction
+        self.continuous          = continuous
+        self.continuousNegativeAction = continuousNegativeAction
+        self.continuousPositiveAction = continuousPositiveAction
+        self.continuousEndAction      = continuousEndAction
+        self.advancedKeyboard = advancedKeyboard
+        self.continuousNegativeShortcut = continuousNegativeShortcut
+        self.continuousPositiveShortcut = continuousPositiveShortcut
+        self.continuousEndShortcut = continuousEndShortcut
+        self.continuousBeginKeyboard = continuousBeginKeyboard
+        self.continuousNegativeKeyboard = continuousNegativeKeyboard
+        self.continuousPositiveKeyboard = continuousPositiveKeyboard
+        self.continuousEndKeyboard = continuousEndKeyboard
         self.menuItemPath        = menuItemPath
         self.customShortcut      = customShortcut
         self.isDraft             = isDraft
@@ -362,6 +428,18 @@ struct GestureRule: Codable, Identifiable, Equatable {
         modifierFilter    = (try? c.decodeIfPresent(ModifierFilter.self,    forKey: .modifierFilter))    ?? .any
         reciprocalEnabled = (try? c.decodeIfPresent(Bool.self,  forKey: .reciprocalEnabled)) ?? true
         reciprocalAction  = try? c.decodeIfPresent(GestureAction.self, forKey: .reciprocalAction)
+        continuous        = (try? c.decodeIfPresent(Bool.self, forKey: .continuous)) ?? false
+        continuousNegativeAction = (try? c.decodeIfPresent(GestureAction.self, forKey: .continuousNegativeAction)) ?? .doNothing
+        continuousPositiveAction = (try? c.decodeIfPresent(GestureAction.self, forKey: .continuousPositiveAction)) ?? .doNothing
+        continuousEndAction      = (try? c.decodeIfPresent(GestureAction.self, forKey: .continuousEndAction)) ?? .doNothing
+        advancedKeyboard         = (try? c.decodeIfPresent([KeyboardInputStep].self, forKey: .advancedKeyboard)) ?? []
+        continuousNegativeShortcut = try? c.decodeIfPresent(KeyboardShortcut.self, forKey: .continuousNegativeShortcut)
+        continuousPositiveShortcut = try? c.decodeIfPresent(KeyboardShortcut.self, forKey: .continuousPositiveShortcut)
+        continuousEndShortcut      = try? c.decodeIfPresent(KeyboardShortcut.self, forKey: .continuousEndShortcut)
+        continuousBeginKeyboard    = (try? c.decodeIfPresent([KeyboardInputStep].self, forKey: .continuousBeginKeyboard)) ?? []
+        continuousNegativeKeyboard = (try? c.decodeIfPresent([KeyboardInputStep].self, forKey: .continuousNegativeKeyboard)) ?? []
+        continuousPositiveKeyboard = (try? c.decodeIfPresent([KeyboardInputStep].self, forKey: .continuousPositiveKeyboard)) ?? []
+        continuousEndKeyboard      = (try? c.decodeIfPresent([KeyboardInputStep].self, forKey: .continuousEndKeyboard)) ?? []
         menuItemPath      = try? c.decodeIfPresent([String].self, forKey: .menuItemPath)
         customShortcut    = try? c.decodeIfPresent(KeyboardShortcut.self, forKey: .customShortcut)
         isDraft           = (try? c.decodeIfPresent(Bool.self,  forKey: .isDraft)) ?? false
@@ -416,6 +494,8 @@ struct GestureTuning: Codable, Equatable {
     var initialThreshold:           Float        = 0.018
     var appSwitcherStepThreshold:   Float        = 0.003
     var appSwitcherDebounce:        TimeInterval = 0.10
+    var continuousStepThreshold:    Float        = 0.025
+    var continuousDebounce:         TimeInterval = 0.08
     var fastVelocityThreshold:      Float        = 0.008
     var slowVelocityThreshold:      Float        = 0.004
     var speedSampleCount:           Int          = 5
@@ -434,6 +514,8 @@ struct GestureTuning: Codable, Equatable {
         initialThreshold          = try c.decodeIfPresent(Float.self,        forKey: .initialThreshold)          ?? 0.018
         appSwitcherStepThreshold  = try c.decodeIfPresent(Float.self,        forKey: .appSwitcherStepThreshold)  ?? 0.003
         appSwitcherDebounce       = try c.decodeIfPresent(TimeInterval.self, forKey: .appSwitcherDebounce)       ?? 0.10
+        continuousStepThreshold   = try c.decodeIfPresent(Float.self,        forKey: .continuousStepThreshold)   ?? 0.025
+        continuousDebounce        = try c.decodeIfPresent(TimeInterval.self, forKey: .continuousDebounce)        ?? 0.08
         fastVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .fastVelocityThreshold)     ?? 0.008
         slowVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .slowVelocityThreshold)     ?? 0.004
         speedSampleCount          = try c.decodeIfPresent(Int.self,          forKey: .speedSampleCount)          ?? 5
@@ -546,7 +628,7 @@ final class Settings {
     static func stripReservedHorizontalSwipes(from rules: inout [GestureRule], fingerCount: Int) {
         rules.removeAll {
             $0.fingers == fingerCount &&
-            ($0.direction == .swipeLeft || $0.direction == .swipeRight) &&
+            ($0.direction == .swipeLeft || $0.direction == .swipeRight || $0.direction == .swipeLeftRight) &&
             !$0.modifierFilter.requiresModifierHeld
         }
     }
@@ -563,7 +645,43 @@ final class Settings {
         var r = GestureRule.migratingLegacyAppFilter(rule)
         r.fingers = min(max(r.fingers, 2), 5)
         r.speed   = (r.speed == .any || r.direction == .click) ? .normal : r.speed
-        if r.direction == .click { r.reciprocalEnabled = false }
+        if r.direction == .click {
+            r.reciprocalEnabled = false
+            r.continuous = false
+            r.continuousNegativeAction = .doNothing
+            r.continuousPositiveAction = .doNothing
+            r.continuousEndAction = .doNothing
+            r.advancedKeyboard = []
+            r.continuousNegativeShortcut = nil
+            r.continuousPositiveShortcut = nil
+            r.continuousEndShortcut = nil
+            r.continuousBeginKeyboard = []
+            r.continuousNegativeKeyboard = []
+            r.continuousPositiveKeyboard = []
+            r.continuousEndKeyboard = []
+        }
+        if !r.supportsContinuousGestures {
+            r.continuous = false
+            r.continuousNegativeAction = .doNothing
+            r.continuousPositiveAction = .doNothing
+            r.continuousEndAction = .doNothing
+            r.continuousNegativeShortcut = nil
+            r.continuousPositiveShortcut = nil
+            r.continuousEndShortcut = nil
+            r.continuousBeginKeyboard = []
+            r.continuousNegativeKeyboard = []
+            r.continuousPositiveKeyboard = []
+            r.continuousEndKeyboard = []
+        }
+        if r.continuous {
+            r.reciprocalEnabled = false
+            r.reciprocalAction = nil
+            if r.action == .doNothing, !r.continuousBeginKeyboard.isEmpty {
+                r.action = .advancedKeyboard
+                r.advancedKeyboard = r.continuousBeginKeyboard
+                r.continuousBeginKeyboard = []
+            }
+        }
         return r
     }
 
@@ -573,6 +691,8 @@ final class Settings {
         n.initialThreshold         = max(0.005, n.initialThreshold)
         n.appSwitcherStepThreshold = max(0.001, n.appSwitcherStepThreshold)
         n.appSwitcherDebounce      = max(0.0,   n.appSwitcherDebounce)
+        n.continuousStepThreshold  = max(0.005, min(n.continuousStepThreshold, 0.12))
+        n.continuousDebounce       = max(0.0, min(n.continuousDebounce, 0.5))
         n.slowVelocityThreshold    = max(0.001, min(n.slowVelocityThreshold, 0.020))
         n.fastVelocityThreshold    = max(n.slowVelocityThreshold + 0.001,
                                          max(0.003, min(n.fastVelocityThreshold, 0.030)))

@@ -15,6 +15,20 @@ struct TuningTab: View {
                         format: "%.3f",
                         hint: "How far fingers must travel before registering as a swipe."
                     )
+                    SliderRow(
+                        label: "Continuous Step Distance",
+                        value: binding(\.continuousStepThreshold),
+                        range: 0.005...0.08,
+                        format: "%.3f",
+                        hint: "How far a continuous swipe must travel before repeating another action."
+                    )
+                    SliderRow(
+                        label: "Continuous Debounce",
+                        value: binding(\.continuousDebounce),
+                        range: 0.0...0.25,
+                        format: "%.2fs",
+                        hint: "Minimum time between repeated continuous actions."
+                    )
                 }
 
                 TuningSection(title: "Speed Classification", icon: "speedometer") {
