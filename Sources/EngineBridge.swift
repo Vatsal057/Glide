@@ -1,6 +1,7 @@
 import SwiftUI
 import Cocoa
 import Combine
+import ApplicationServices
 
 /// Connects the SwiftUI App lifecycle to the background engine and handles sleep/wake logic.
 @MainActor
@@ -20,6 +21,8 @@ final class EngineBridge: ObservableObject {
 
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver:  NSObjectProtocol?
+    private var accessibilityActiveObserver: NSObjectProtocol?
+    private var accessibilityPollTimer: Timer?
     private var started = false
 
     func startEngine() {
@@ -30,8 +33,8 @@ final class EngineBridge: ObservableObject {
         if isEnabled {
             engine.start()
         }
-        
 
+        startAccessibilityMonitoring()
 
         // Stop/restart around sleep-wake cycle (trackpad hardware reinits after wake)
         let ws = NSWorkspace.shared.notificationCenter
@@ -54,7 +57,56 @@ final class EngineBridge: ObservableObject {
         }
     }
 
+    private func startAccessibilityMonitoring() {
+        guard !AXIsProcessTrusted() else {
+            PreferencesStore.shared.refreshAccessibilityStatus()
+            return
+        }
+
+        accessibilityActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.resumeEngineIfAccessibilityGranted()
+            }
+        }
+
+        accessibilityPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.resumeEngineIfAccessibilityGranted()
+            }
+        }
+        if let timer = accessibilityPollTimer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+
+    private func stopAccessibilityMonitoring() {
+        accessibilityPollTimer?.invalidate()
+        accessibilityPollTimer = nil
+        if let observer = accessibilityActiveObserver {
+            NotificationCenter.default.removeObserver(observer)
+            accessibilityActiveObserver = nil
+        }
+    }
+
+    private func resumeEngineIfAccessibilityGranted() {
+        guard AXIsProcessTrusted() else { return }
+
+        stopAccessibilityMonitoring()
+        PreferencesStore.shared.refreshAccessibilityStatus()
+
+        guard isEnabled else { return }
+        GestureEngine.shared.start()
+    }
+
     deinit {
+        accessibilityPollTimer?.invalidate()
+        if let observer = accessibilityActiveObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         if let o = sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(o) }
         if let o = wakeObserver  { NSWorkspace.shared.notificationCenter.removeObserver(o) }
     }

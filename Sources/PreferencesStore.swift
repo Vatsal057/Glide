@@ -49,8 +49,12 @@ final class PreferencesStore: ObservableObject {
         hapticFeedbackEnabled = s.hapticFeedbackEnabled
         debugLoggingEnabled = s.debugLoggingEnabled
         launchAtLoginEnabled = s.launchAtLoginEnabled
-        accessibilityGranted = AXIsProcessTrusted()
+        refreshAccessibilityStatus()
         diagnostics = buildDiagnostics(for: rules)
+    }
+
+    func refreshAccessibilityStatus() {
+        accessibilityGranted = AXIsProcessTrusted()
     }
 
     @discardableResult

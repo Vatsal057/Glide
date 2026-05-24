@@ -21,7 +21,6 @@ struct AppSwitcherTab: View {
                                     .foregroundStyle(.secondary)
                                 Picker("", selection: fingersBinding) {
                                     Text("3 Fingers").tag(3)
-                                    Text("4 Fingers").tag(4)
                                 }
                                 .pickerStyle(.segmented)
                                 .frame(maxWidth: 280)
