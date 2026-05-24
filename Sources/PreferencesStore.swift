@@ -110,7 +110,7 @@ final class PreferencesStore: ObservableObject {
     func isDirectionReservedByAppSwitcher(fingers: Int, direction: GestureDirection,
                                           modifierFilter: ModifierFilter = .any) -> Bool {
         guard appSwitcher.enabled, fingers == appSwitcher.fingers else { return false }
-        guard direction == .swipeLeft || direction == .swipeRight else { return false }
+        guard direction == .swipeLeft || direction == .swipeRight || direction == .swipeLeftRight else { return false }
         return !modifierFilter.requiresModifierHeld
     }
 
@@ -291,6 +291,23 @@ final class PreferencesStore: ObservableObject {
         if copy.direction == .click {
             copy.speed = .normal
             copy.reciprocalEnabled = false
+        }
+        if !copy.supportsContinuousGestures {
+            copy.continuous = false
+            copy.continuousNegativeAction = .doNothing
+            copy.continuousPositiveAction = .doNothing
+            copy.continuousEndAction = .doNothing
+            copy.continuousNegativeShortcut = nil
+            copy.continuousPositiveShortcut = nil
+            copy.continuousEndShortcut = nil
+            copy.continuousBeginKeyboard = []
+            copy.continuousNegativeKeyboard = []
+            copy.continuousPositiveKeyboard = []
+            copy.continuousEndKeyboard = []
+        }
+        if copy.continuous {
+            copy.reciprocalEnabled = false
+            copy.reciprocalAction = nil
         }
         if copy.action != .doNothing { copy.isDraft = false }
         return copy

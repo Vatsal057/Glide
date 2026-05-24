@@ -13,6 +13,7 @@ final class ActionExecutor {
     private init() {}
 
     private lazy var keyEventSource = CGEventSource(stateID: .hidSystemState)
+    private var syntheticHeldFlags: CGEventFlags = []
 
     // MARK: - Maximize / Restore frame memory
 
@@ -48,7 +49,8 @@ final class ActionExecutor {
     // MARK: - Action dispatch
 
     func execute(_ action: GestureAction, appPath: String? = nil, menuItemPath: [String]? = nil,
-                 menuTargetBundleID: String? = nil, customShortcut: KeyboardShortcut? = nil) {
+                 menuTargetBundleID: String? = nil, customShortcut: KeyboardShortcut? = nil,
+                 advancedKeyboard: [KeyboardInputStep] = []) {
         AppLogger.debug("[Action] \(action.rawValue)")
         switch action {
 
@@ -115,6 +117,9 @@ final class ActionExecutor {
             if let shortcut = customShortcut, shortcut.isValid {
                 sendKey(CGKeyCode(shortcut.keyCode), shortcut.cgEventFlags)
             }
+
+        case .advancedKeyboard:
+            executeKeyboardSteps(advancedKeyboard)
 
         case .emptyTrash:    emptyTrash()
         case .openFinder:    openFinder()
@@ -619,12 +624,57 @@ final class ActionExecutor {
 
     // MARK: - Key event helper
 
+    func executeKeyboardSteps(_ steps: [KeyboardInputStep]) {
+        guard !steps.isEmpty else { return }
+        for step in steps {
+            switch step.event {
+            case .hold:
+                syntheticHeldFlags.insert(modifierFlag(for: step.keyCode))
+                sendKeyDown(CGKeyCode(step.keyCode), syntheticHeldFlags)
+            case .release:
+                let releasedFlag = modifierFlag(for: step.keyCode)
+                if releasedFlag.isEmpty {
+                    sendKeyUp(CGKeyCode(step.keyCode), syntheticHeldFlags)
+                } else {
+                    syntheticHeldFlags.remove(releasedFlag)
+                    sendKeyUp(CGKeyCode(step.keyCode), syntheticHeldFlags)
+                }
+            case .tap:
+                sendKey(CGKeyCode(step.keyCode), syntheticHeldFlags.union(step.modifierFlags))
+            }
+        }
+    }
+
     private func sendKey(_ key: CGKeyCode, _ flags: CGEventFlags) {
         guard let src = keyEventSource ?? CGEventSource(stateID: .hidSystemState),
               let kd = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: true),
               let ku = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: false) else { return }
         kd.flags = flags; kd.post(tap: .cghidEventTap)
         ku.flags = flags; ku.post(tap: .cghidEventTap)
+    }
+
+    private func sendKeyDown(_ key: CGKeyCode, _ flags: CGEventFlags) {
+        guard let src = keyEventSource ?? CGEventSource(stateID: .hidSystemState),
+              let event = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: true) else { return }
+        event.flags = flags
+        event.post(tap: .cghidEventTap)
+    }
+
+    private func sendKeyUp(_ key: CGKeyCode, _ flags: CGEventFlags) {
+        guard let src = keyEventSource ?? CGEventSource(stateID: .hidSystemState),
+              let event = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: false) else { return }
+        event.flags = flags
+        event.post(tap: .cghidEventTap)
+    }
+
+    private func modifierFlag(for keyCode: UInt16) -> CGEventFlags {
+        switch keyCode {
+        case 0x36, 0x37: return .maskCommand
+        case 0x38: return .maskShift
+        case 0x3A: return .maskAlternate
+        case 0x3B: return .maskControl
+        default: return []
+        }
     }
 
 }
