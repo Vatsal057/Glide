@@ -340,25 +340,30 @@ enum GlideConfigParser {
         guard scanToKey("touchpad", in: lines, from: &i) else { return nil }
 
         while i < lines.count {
-            let (indent, key, _) = tokenize(lines[i])
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (indent, key, _) = tokenize(line)
             if indent == 0 && key != nil && key != "touchpad" { break }
             switch key {
-            case "speed":       i += 1; parseSpeed(lines, from: &i, into: &cfg.speed)
-            case "preferences":  i += 1; parsePreferences(lines, from: &i, into: &cfg.preferences)
-            case "app_switcher": i += 1; parseAppSwitcher(lines, from: &i, into: &cfg.appSwitcher)
-            case "tuning":       i += 1; parseTuning(lines, from: &i, into: &cfg.tuning)
-            case "gestures":    i += 1; parseGestures(lines, from: &i, into: &cfg.gestures); return cfg
+            case "speed":       i += 1; parseSpeed(lines, from: &i, parentIndent: indent, into: &cfg.speed)
+            case "preferences":  i += 1; parsePreferences(lines, from: &i, parentIndent: indent, into: &cfg.preferences)
+            case "app_switcher": i += 1; parseAppSwitcher(lines, from: &i, parentIndent: indent, into: &cfg.appSwitcher)
+            case "tuning":       i += 1; parseTuning(lines, from: &i, parentIndent: indent, into: &cfg.tuning)
+            case "gestures":    i += 1; parseGestures(lines, from: &i, parentIndent: indent, into: &cfg.gestures); return cfg
             default:            i += 1
             }
         }
         return cfg
     }
 
-    private static func parseSpeed(_ lines: [String], from i: inout Int, into speed: inout GlideConfig.Speed) {
-        let base = indentOf(lines, at: i)
+    private static func parseSpeed(_ lines: [String], from i: inout Int, parentIndent: Int, into speed: inout GlideConfig.Speed) {
         while i < lines.count {
-            let (ind, key, val) = tokenize(lines[i])
-            if ind < base { return }
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
             switch key {
             case "swipe_threshold":          speed.swipeThreshold         = floatVal(val) ?? speed.swipeThreshold
             case "fast_velocity_threshold":  speed.fastVelocityThreshold  = floatVal(val) ?? speed.fastVelocityThreshold
@@ -370,11 +375,13 @@ enum GlideConfigParser {
         }
     }
 
-    private static func parsePreferences(_ lines: [String], from i: inout Int, into prefs: inout GlideConfig.Preferences) {
-        let base = indentOf(lines, at: i)
+    private static func parsePreferences(_ lines: [String], from i: inout Int, parentIndent: Int, into prefs: inout GlideConfig.Preferences) {
         while i < lines.count {
-            let (ind, key, val) = tokenize(lines[i])
-            if ind < base { return }
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
             switch key {
             case "window_targeting": prefs.windowTargeting = stringVal(val) ?? prefs.windowTargeting
             case "haptic_feedback":  prefs.hapticFeedback  = boolVal(val)   ?? prefs.hapticFeedback
@@ -386,11 +393,13 @@ enum GlideConfigParser {
         }
     }
 
-    private static func parseAppSwitcher(_ lines: [String], from i: inout Int, into switcher: inout GlideConfig.AppSwitcher) {
-        let base = indentOf(lines, at: i)
+    private static func parseAppSwitcher(_ lines: [String], from i: inout Int, parentIndent: Int, into switcher: inout GlideConfig.AppSwitcher) {
         while i < lines.count {
-            let (ind, key, val) = tokenize(lines[i])
-            if ind < base { return }
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
             switch key {
             case "enabled": switcher.enabled = boolVal(val) ?? switcher.enabled
             case "fingers": switcher.fingers = intVal(val) ?? switcher.fingers
@@ -400,11 +409,13 @@ enum GlideConfigParser {
         }
     }
 
-    private static func parseTuning(_ lines: [String], from i: inout Int, into tuning: inout GlideConfig.Tuning) {
-        let base = indentOf(lines, at: i)
+    private static func parseTuning(_ lines: [String], from i: inout Int, parentIndent: Int, into tuning: inout GlideConfig.Tuning) {
         while i < lines.count {
-            let (ind, key, val) = tokenize(lines[i])
-            if ind < base { return }
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
             switch key {
             case "app_switcher_step_threshold":  tuning.appSwitcherStepThreshold  = floatVal(val)  ?? tuning.appSwitcherStepThreshold
             case "app_switcher_debounce":        tuning.appSwitcherDebounce       = doubleVal(val) ?? tuning.appSwitcherDebounce
@@ -414,8 +425,9 @@ enum GlideConfigParser {
             case "swipe_coherence_threshold":    tuning.swipeCoherenceThreshold   = floatVal(val)  ?? tuning.swipeCoherenceThreshold
             case "swipe_angle_tolerance":        tuning.swipeAngleTolerance       = floatVal(val)  ?? tuning.swipeAngleTolerance
             case "edge_margin":
+                let marginIndent = ind
                 i += 1
-                parseEdgeMargin(lines, from: &i, into: &tuning)
+                parseEdgeMargin(lines, from: &i, parentIndent: marginIndent, into: &tuning)
                 continue
             default: break
             }
@@ -423,11 +435,13 @@ enum GlideConfigParser {
         }
     }
 
-    private static func parseEdgeMargin(_ lines: [String], from i: inout Int, into tuning: inout GlideConfig.Tuning) {
-        let base = indentOf(lines, at: i)
+    private static func parseEdgeMargin(_ lines: [String], from i: inout Int, parentIndent: Int, into tuning: inout GlideConfig.Tuning) {
         while i < lines.count {
-            let (ind, key, val) = tokenize(lines[i])
-            if ind < base { return }
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
             switch key {
             case "enabled": tuning.edgeMarginEnabled = boolVal(val)  ?? tuning.edgeMarginEnabled
             case "left":    tuning.edgeMarginLeft    = floatVal(val) ?? tuning.edgeMarginLeft
@@ -440,14 +454,17 @@ enum GlideConfigParser {
         }
     }
 
-    private static func parseGestures(_ lines: [String], from i: inout Int, into gestures: inout [GlideConfig.Gesture]) {
-        let base = indentOf(lines, at: i)
+    private static func parseGestures(_ lines: [String], from i: inout Int, parentIndent: Int, into gestures: inout [GlideConfig.Gesture]) {
         while i < lines.count {
             let line = lines[i]
-            let (ind, key, _) = tokenize(line)
-            if ind < base && !line.trimmingCharacters(in: .whitespaces).hasPrefix("-") && key != nil { return }
-            if line.trimmingCharacters(in: .whitespaces).hasPrefix("-") {
-                let g = parseGestureBlock(lines, from: &i)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            
+            let ind = leadingSpaces(line)
+            if ind <= parentIndent { return }
+            
+            if trimmed.hasPrefix("-") {
+                let g = parseGestureBlock(lines, from: &i, blockIndent: ind)
                 if !g.type.isEmpty && !g.action.isEmpty { gestures.append(g) }
                 continue
             }
@@ -455,14 +472,13 @@ enum GlideConfigParser {
         }
     }
 
-    private static func parseMenuPathList(_ lines: [String], from i: inout Int) -> [String]? {
+    private static func parseMenuPathList(_ lines: [String], from i: inout Int, parentIndent: Int) -> [String]? {
         var path: [String] = []
-        let base = indentOf(lines, at: i)
         while i < lines.count {
             let line = lines[i].trimmingCharacters(in: .whitespaces)
             if line.isEmpty || line.hasPrefix("#") { i += 1; continue }
             let ind = leadingSpaces(lines[i])
-            if ind < base && !line.hasPrefix("-") { break }
+            if ind <= parentIndent { break }
             if line.hasPrefix("-") {
                 let item = line.dropFirst().trimmingCharacters(in: .whitespaces)
                 if let s = stringVal(String(item)) { path.append(s) }
@@ -474,7 +490,7 @@ enum GlideConfigParser {
         return path.isEmpty ? nil : path
     }
 
-    private static func parseGestureBlock(_ lines: [String], from i: inout Int) -> GlideConfig.Gesture {
+    private static func parseGestureBlock(_ lines: [String], from i: inout Int, blockIndent: Int) -> GlideConfig.Gesture {
         var g = GlideConfig.Gesture(type: "", direction: nil, fingers: 3,
                                     speed: nil, action: "", appFilter: nil, windowState: nil,
                                     modifierFilter: nil, appPath: nil, menuPath: nil,
@@ -485,15 +501,15 @@ enum GlideConfigParser {
             let v = String(firstLine[firstLine.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
             if k == "type" { g.type = v }
         }
-        let blockIndent = leadingSpaces(lines[i])
         i += 1
         while i < lines.count {
             let line = lines[i]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            
             let ind = leadingSpaces(line)
-            if trimmed.hasPrefix("-") && ind <= blockIndent { return g }
             if ind <= blockIndent { return g }
+            
             let (_, key, val) = tokenize(line)
             switch key {
             case "type":       g.type      = val ?? g.type
@@ -506,8 +522,9 @@ enum GlideConfigParser {
             case "modifier_filter": g.modifierFilter = nullableStringVal(val)
             case "app_path":        g.appPath        = nullableStringVal(val)
             case "menu_path":
+                let menuIndent = ind
                 i += 1
-                g.menuPath = parseMenuPathList(lines, from: &i)
+                g.menuPath = parseMenuPathList(lines, from: &i, parentIndent: menuIndent)
                 continue
             case "reciprocal": g.reciprocal = boolVal(val) ?? g.reciprocal
             case "draft":      g.draft      = boolVal(val) ?? g.draft
