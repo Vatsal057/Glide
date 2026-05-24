@@ -107,9 +107,11 @@ final class PreferencesStore: ObservableObject {
     }
 
     /// Horizontal swipes reserved for app switcher on this finger count (when enabled).
-    func isDirectionReservedByAppSwitcher(fingers: Int, direction: GestureDirection) -> Bool {
+    func isDirectionReservedByAppSwitcher(fingers: Int, direction: GestureDirection,
+                                          modifierFilter: ModifierFilter = .any) -> Bool {
         guard appSwitcher.enabled, fingers == appSwitcher.fingers else { return false }
-        return direction == .swipeLeft || direction == .swipeRight
+        guard direction == .swipeLeft || direction == .swipeRight else { return false }
+        return !modifierFilter.requiresModifierHeld
     }
 
     func updateRule(_ r: GestureRule) {
@@ -286,7 +288,10 @@ final class PreferencesStore: ObservableObject {
 
     private func sanitizedRule(_ r: GestureRule) -> GestureRule {
         var copy = r
-        if copy.direction == .click { copy.speed = .normal }
+        if copy.direction == .click {
+            copy.speed = .normal
+            copy.reciprocalEnabled = false
+        }
         if copy.action != .doNothing { copy.isDraft = false }
         return copy
     }

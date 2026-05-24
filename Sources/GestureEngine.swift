@@ -495,9 +495,11 @@ final class GestureEngine {
             let appPath = rule.appPath
             let menuPath = rule.menuItemPath
             let menuBundle = rule.appFilter
+            let shortcut = rule.customShortcut
             DispatchQueue.main.async {
                 ActionExecutor.shared.execute(action, appPath: appPath,
-                                              menuItemPath: menuPath, menuTargetBundleID: menuBundle)
+                                              menuItemPath: menuPath, menuTargetBundleID: menuBundle,
+                                              customShortcut: shortcut)
             }
         }
         updateObservableState()
@@ -760,16 +762,18 @@ final class GestureEngine {
             updateObservableState(); return
         }
 
-        if let switcherAction = appSwitcherAction(fingers: data.fingers, direction: direction) {
+        if let rule = bestRule(fingers: data.fingers, direction: direction, speed: speed,
+                               modifiers: updated.modifiersAtStart) {
+            AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue) \(modifierDebugLabel(updated.modifiersAtStart)) (Δ=\(String(format: "%.3f", swipeCentroidMovement)) t=\(String(format: "%.2f", elapsed))s) → \(rule.action.rawValue)")
+            executeSwipeRule(rule, fingers: data.fingers, direction: direction)
+            phase = .fired
+        } else if let switcherAction = appSwitcherAction(
+            fingers: data.fingers, direction: direction, modifiers: updated.modifiersAtStart
+        ) {
             AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F → App Switcher")
             if !beginAppSwitcher(for: switcherAction, refX: frame.cx, fingerCount: data.fingers) {
                 phase = .fired
             }
-        } else if let rule = bestRule(fingers: data.fingers, direction: direction, speed: speed,
-                                      modifiers: updated.modifiersAtStart) {
-            AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue) \(modifierDebugLabel(updated.modifiersAtStart)) (Δ=\(String(format: "%.3f", swipeCentroidMovement)) t=\(String(format: "%.2f", elapsed))s) → \(rule.action.rawValue)")
-            executeSwipeRule(rule, fingers: data.fingers, direction: direction)
-            phase = .fired
         } else {
             AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue): no matching rule")
             phase = .fired
@@ -803,8 +807,10 @@ final class GestureEngine {
         AppLogger.debug("[Engine] App-switcher committed")
 
         // After the app activates, restore any minimized windows
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            GestureEngine.restoreMinimizedWindows()
+        if Settings.shared.appSwitcher.restoreMinimizedOnCommit {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                GestureEngine.restoreMinimizedWindows()
+            }
         }
     }
 
@@ -839,9 +845,11 @@ final class GestureEngine {
         sendKeyEvent(kOpt, down: false, flags: [])
     }
 
-    private func appSwitcherAction(fingers: Int, direction: GestureDirection) -> GestureAction? {
+    private func appSwitcherAction(fingers: Int, direction: GestureDirection,
+                                   modifiers: CapturedModifiers) -> GestureAction? {
         let cfg = Settings.shared.appSwitcher
         guard cfg.enabled, fingers == cfg.fingers else { return nil }
+        guard modifiers.matches(.noModifiers) else { return nil }
         switch direction {
         case .swipeRight: return .appSwitcherNext
         case .swipeLeft:  return .appSwitcherPrev
@@ -853,18 +861,18 @@ final class GestureEngine {
         var apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
         guard apps.count > 1 else { return false }
 
-        // Sort by MRU order to match the actual Cmd+Tab ordering.
-        // Apps not yet seen in mruAppOrder go to the end.
-        let mru = self.mruAppOrder
-        apps.sort { a, b in
-            let ai = mru.firstIndex(of: a.processIdentifier) ?? Int.max
-            let bi = mru.firstIndex(of: b.processIdentifier) ?? Int.max
-            return ai < bi
+        let cfg = Settings.shared.appSwitcher
+        if cfg.useMRUOrdering {
+            let mru = self.mruAppOrder
+            apps.sort { a, b in
+                let ai = mru.firstIndex(of: a.processIdentifier) ?? Int.max
+                let bi = mru.firstIndex(of: b.processIdentifier) ?? Int.max
+                return ai < bi
+            }
         }
 
-        // Locate windowless Finder in the list (if present)
         let finderIdx: Int? = {
-            guard !GestureEngine.finderHasVisibleWindows() else { return nil }
+            guard cfg.skipWindowlessFinder, !GestureEngine.finderHasVisibleWindows() else { return nil }
             return apps.firstIndex { $0.bundleIdentifier == "com.apple.finder" }
         }()
 
@@ -1063,7 +1071,8 @@ final class GestureEngine {
     private func executeSwipeRule(_ rule: GestureRule, fingers: Int, direction: GestureDirection) {
         Haptic.forAction(rule.action)
         ActionExecutor.shared.execute(rule.action, appPath: rule.appPath,
-                                      menuItemPath: rule.menuItemPath, menuTargetBundleID: rule.appFilter)
+                                      menuItemPath: rule.menuItemPath, menuTargetBundleID: rule.appFilter,
+                                      customShortcut: rule.customShortcut)
         if rule.reciprocalEnabled {
             reciprocalToken = makeReciprocalToken(inverseAction: rule.reciprocalAction ?? rule.action.inverseAction, fingers: fingers, direction: direction)
         } else {
