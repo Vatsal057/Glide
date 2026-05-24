@@ -16,28 +16,34 @@ struct AppSwitcherTab: View {
                             .padding(.top, 8)
 
                         if store.appSwitcher.enabled {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Finger Count")
-                                    .foregroundStyle(.secondary)
-                                Picker("", selection: fingersBinding) {
-                                    Text("3 Fingers").tag(3)
-                                }
-                                .pickerStyle(.segmented)
-                                .frame(maxWidth: 280)
+                            Text("3-finger swipe left → previous app · 3-finger swipe right → next app. Hold Shift (or another modifier) while swiping to run a different gesture instead — configure those under Gestures.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                                 .padding(.horizontal, 12)
-
-                                Text(reservedGestureSummary)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 12)
-                                    .padding(.bottom, 4)
-                            }
+                                .padding(.bottom, 4)
                         }
                     }
                     .padding(.vertical, 4)
                 }
 
                 if store.appSwitcher.enabled {
+                    TuningSection(title: "Behavior", icon: "gearshape") {
+                        Toggle("Order apps by recent use", isOn: switcherBinding(\.useMRUOrdering))
+                        Text("Matches the order you see in the macOS ⌘Tab switcher.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Toggle("Skip Finder when it has no windows", isOn: switcherBinding(\.skipWindowlessFinder))
+                        Text("Avoids landing on an empty Finder desktop while browsing.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Toggle("Restore minimized windows after switching", isOn: switcherBinding(\.restoreMinimizedOnCommit))
+                        Text("When you release the gesture, unminimizes windows of the app you selected.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     TuningSection(title: "Sensitivity", icon: "slider.horizontal.3") {
                         SliderRow(
                             label: "Step Threshold",
@@ -73,7 +79,7 @@ struct AppSwitcherTab: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("App Switcher")
                     .font(.title2.bold())
-                Text("Hold the gesture, swipe left or right to browse open apps in the macOS switcher, then release to confirm. This is separate from other gestures — swipe left and right with your chosen finger count are reserved here.")
+                Text("Hold a three-finger horizontal swipe to browse open apps in the macOS switcher, then release to confirm. Swipe up and down with three fingers can still be assigned under Gestures.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -96,11 +102,6 @@ struct AppSwitcherTab: View {
         }
     }
 
-    private var reservedGestureSummary: String {
-        let n = store.appSwitcher.fingers
-        return "\(n)-finger swipe left → previous app · \(n)-finger swipe right → next app. Other directions for \(n) fingers can still be assigned under Gestures."
-    }
-
     private var enabledBinding: Binding<Bool> {
         Binding(
             get: { store.appSwitcher.enabled },
@@ -108,10 +109,10 @@ struct AppSwitcherTab: View {
         )
     }
 
-    private var fingersBinding: Binding<Int> {
+    private func switcherBinding<T>(_ keyPath: WritableKeyPath<AppSwitcherSettings, T>) -> Binding<T> {
         Binding(
-            get: { store.appSwitcher.fingers },
-            set: { newValue in store.updateAppSwitcher { $0.fingers = newValue } }
+            get: { store.appSwitcher[keyPath: keyPath] },
+            set: { newValue in store.updateAppSwitcher { $0[keyPath: keyPath] = newValue } }
         )
     }
 

@@ -79,6 +79,14 @@ enum ModifierFilter: String, Codable, CaseIterable {
         case .noModifiers:    return "no_modifiers"
         }
     }
+
+    /// True when the rule only fires if a specific modifier is held (not .any / .noModifiers / *NotHeld).
+    var requiresModifierHeld: Bool {
+        switch self {
+        case .shiftHeld, .controlHeld, .optionHeld, .commandHeld: return true
+        default: return false
+        }
+    }
 }
 
 /// Snapshot of modifier keys at gesture start.
@@ -199,6 +207,7 @@ enum GestureAction: String, Codable, CaseIterable {
     case screenshotFullClipboard   = "Screenshot (Full → Clipboard)"
     case screenshotToolbar         = "Screenshot Toolbar"
     case customMenuItem            = "Menu Item…"
+    case customShortcut            = "Keyboard Shortcut…"
     case emptyTrash                = "Empty Trash"
     case openFinder                = "Open Finder"
     case openDownloads             = "Open Downloads"
@@ -214,7 +223,7 @@ enum GestureAction: String, Codable, CaseIterable {
                      .snapBottomLeft, .snapBottomRight, .centerWindow, .moveNextDisplay]),
         ("Screenshots", [.screenshotArea, .screenshotFull, .screenshotAreaClipboard,
                          .screenshotFullClipboard, .screenshotToolbar]),
-        ("Custom", [.customMenuItem]),
+        ("Custom", [.customMenuItem, .customShortcut]),
         ("System", [.missionControl, .appExpose, .showDesktop, .launchpad, .spotlight, .notifCenter,
                     .lockScreen, .sleep, .emptyTrash, .openFinder, .openDownloads]),
         ("Other", [.doNothing]),
@@ -277,6 +286,8 @@ struct GestureRule: Codable, Identifiable, Equatable {
     var reciprocalAction: GestureAction?
     /// Menu path for `.customMenuItem`, e.g. `["File", "New Tab"]`.
     var menuItemPath: [String]?
+    /// Key combo for `.customShortcut`.
+    var customShortcut: KeyboardShortcut?
     /// New rules start as drafts until configured in the editor.
     var isDraft: Bool               = false
 
@@ -290,6 +301,9 @@ struct GestureRule: Codable, Identifiable, Equatable {
         if action == .doNothing { return false }
         if action == .customMenuItem {
             return menuItemPath != nil && (menuItemPath?.count ?? 0) >= 2
+        }
+        if action == .customShortcut {
+            return customShortcut?.isValid == true
         }
         if action == .openApp { return appPath != nil && !(appPath?.isEmpty ?? true) }
         return true
@@ -317,7 +331,8 @@ struct GestureRule: Codable, Identifiable, Equatable {
          windowStateFilter: WindowStateFilter = .any,
          modifierFilter: ModifierFilter = .any,
          reciprocalEnabled: Bool = true, reciprocalAction: GestureAction? = nil,
-         menuItemPath: [String]? = nil, isDraft: Bool = false) {
+         menuItemPath: [String]? = nil, customShortcut: KeyboardShortcut? = nil,
+         isDraft: Bool = false) {
         self.fingers             = fingers
         self.direction           = direction
         self.speed               = speed
@@ -329,6 +344,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
         self.reciprocalEnabled   = reciprocalEnabled
         self.reciprocalAction    = reciprocalAction
         self.menuItemPath        = menuItemPath
+        self.customShortcut      = customShortcut
         self.isDraft             = isDraft
     }
 
@@ -347,6 +363,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
         reciprocalEnabled = (try? c.decodeIfPresent(Bool.self,  forKey: .reciprocalEnabled)) ?? true
         reciprocalAction  = try? c.decodeIfPresent(GestureAction.self, forKey: .reciprocalAction)
         menuItemPath      = try? c.decodeIfPresent([String].self, forKey: .menuItemPath)
+        customShortcut    = try? c.decodeIfPresent(KeyboardShortcut.self, forKey: .customShortcut)
         isDraft           = (try? c.decodeIfPresent(Bool.self,  forKey: .isDraft)) ?? false
         self = Self.migratingLegacyAppFilter(self)
     }
@@ -379,14 +396,18 @@ struct EdgeMargin: Codable, Equatable {
 /// Hold-to-browse app switcher (Cmd+Tab overlay). Separate from the gesture rule list.
 struct AppSwitcherSettings: Codable, Equatable {
     var enabled: Bool = true
-    /// 3 or 4 — horizontal swipes with this finger count are reserved for the switcher.
+    /// Always 3 — horizontal swipes with three fingers are reserved for the switcher.
     var fingers: Int = 3
-
-    static let allowedFingerCounts = [3, 4]
+    /// Order apps by most-recently-used (matches Cmd+Tab ordering).
+    var useMRUOrdering: Bool = true
+    /// Skip Finder in the switcher when it has no open windows.
+    var skipWindowlessFinder: Bool = true
+    /// Unminimize windows of the selected app when you release the gesture.
+    var restoreMinimizedOnCommit: Bool = true
 
     static func normalized(_ s: AppSwitcherSettings) -> AppSwitcherSettings {
         var n = s
-        n.fingers = allowedFingerCounts.contains(n.fingers) ? n.fingers : 3
+        n.fingers = 3
         return n
     }
 }
@@ -516,17 +537,17 @@ final class Settings {
         let legacy = rules.filter { isAppSwitcherAction($0.action) }
         guard !legacy.isEmpty else { return }
         if !switcher.enabled { switcher.enabled = true }
-        if let f = legacy.first?.fingers, AppSwitcherSettings.allowedFingerCounts.contains(f) {
-            switcher.fingers = f
-        }
+        _ = legacy.first?.fingers
         rules.removeAll { isAppSwitcherAction($0.action) }
     }
 
     /// Removes horizontal swipe rules that would conflict with the reserved app-switcher slot.
+    /// Removes horizontal swipe rules that would conflict with app switcher (plain swipes only).
     static func stripReservedHorizontalSwipes(from rules: inout [GestureRule], fingerCount: Int) {
         rules.removeAll {
             $0.fingers == fingerCount &&
-            ($0.direction == .swipeLeft || $0.direction == .swipeRight)
+            ($0.direction == .swipeLeft || $0.direction == .swipeRight) &&
+            !$0.modifierFilter.requiresModifierHeld
         }
     }
 
@@ -542,6 +563,7 @@ final class Settings {
         var r = GestureRule.migratingLegacyAppFilter(rule)
         r.fingers = min(max(r.fingers, 2), 5)
         r.speed   = (r.speed == .any || r.direction == .click) ? .normal : r.speed
+        if r.direction == .click { r.reciprocalEnabled = false }
         return r
     }
 

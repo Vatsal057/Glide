@@ -33,6 +33,9 @@ struct GlideConfig {
     struct AppSwitcher {
         var enabled: Bool = true
         var fingers: Int = 3
+        var useMRUOrdering: Bool = true
+        var skipWindowlessFinder: Bool = true
+        var restoreMinimizedOnCommit: Bool = true
     }
 
     struct Tuning {
@@ -61,6 +64,8 @@ struct GlideConfig {
         var modifierFilter: String?
         var appPath: String?
         var menuPath: [String]?
+        var shortcutKeyCode: Int?
+        var shortcutModifiers: [String]?
         var reciprocal: Bool
         var draft: Bool = false
     }
@@ -97,6 +102,9 @@ extension GlideConfig {
 
         cfg.appSwitcher.enabled = s.appSwitcher.enabled
         cfg.appSwitcher.fingers = s.appSwitcher.fingers
+        cfg.appSwitcher.useMRUOrdering = s.appSwitcher.useMRUOrdering
+        cfg.appSwitcher.skipWindowlessFinder = s.appSwitcher.skipWindowlessFinder
+        cfg.appSwitcher.restoreMinimizedOnCommit = s.appSwitcher.restoreMinimizedOnCommit
 
         cfg.tuning.appSwitcherStepThreshold  = t.appSwitcherStepThreshold
         cfg.tuning.appSwitcherDebounce       = t.appSwitcherDebounce
@@ -125,6 +133,8 @@ extension GlideConfig {
                 modifierFilter: normalized.modifierFilter.yamlValue,
                 appPath:        rule.appPath,
                 menuPath:       rule.menuItemPath,
+                shortcutKeyCode: rule.customShortcut.map { Int($0.keyCode) },
+                shortcutModifiers: rule.customShortcut?.yamlModifiers,
                 reciprocal:  rule.reciprocalEnabled,
                 draft:       rule.isDraft
             )
@@ -138,6 +148,9 @@ extension GlideConfig {
         var s = AppSwitcherSettings()
         s.enabled = appSwitcher.enabled
         s.fingers = appSwitcher.fingers
+        s.useMRUOrdering = appSwitcher.useMRUOrdering
+        s.skipWindowlessFinder = appSwitcher.skipWindowlessFinder
+        s.restoreMinimizedOnCommit = appSwitcher.restoreMinimizedOnCommit
         return AppSwitcherSettings.normalized(s)
     }
 
@@ -193,6 +206,8 @@ extension GlideConfig {
                 modifierFilter:    ModifierFilter(yamlValue: g.modifierFilter) ?? .any,
                 reciprocalEnabled: g.reciprocal,
                 menuItemPath:      g.menuPath,
+                customShortcut:    KeyboardShortcut(yamlKeyCode: g.shortcutKeyCode,
+                                                     modifiers: g.shortcutModifiers),
                 isDraft:           g.draft
             ))
             return migrated
@@ -253,6 +268,9 @@ enum GlideConfigSerializer {
             "  app_switcher:",
             "    enabled: \(config.appSwitcher.enabled ? "true" : "false")",
             "    fingers: \(config.appSwitcher.fingers)",
+            "    use_mru_ordering: \(config.appSwitcher.useMRUOrdering ? "true" : "false")",
+            "    skip_windowless_finder: \(config.appSwitcher.skipWindowlessFinder ? "true" : "false")",
+            "    restore_minimized_on_commit: \(config.appSwitcher.restoreMinimizedOnCommit ? "true" : "false")",
             "",
             "  # ── Tuning ─────────────────────────────────────────",
             "  tuning:",
@@ -313,6 +331,15 @@ enum GlideConfigSerializer {
             lines.append("      menu_path:")
             for segment in path {
                 lines.append("        - \"\(escape(segment))\"")
+            }
+        }
+        if g.action == GestureAction.customShortcut.rawValue, let code = g.shortcutKeyCode {
+            lines.append("      shortcut_key_code: \(code)")
+            if let mods = g.shortcutModifiers, !mods.isEmpty {
+                lines.append("      shortcut_modifiers:")
+                for mod in mods {
+                    lines.append("        - \(mod)")
+                }
             }
         }
         return lines
@@ -403,6 +430,9 @@ enum GlideConfigParser {
             switch key {
             case "enabled": switcher.enabled = boolVal(val) ?? switcher.enabled
             case "fingers": switcher.fingers = intVal(val) ?? switcher.fingers
+            case "use_mru_ordering": switcher.useMRUOrdering = boolVal(val) ?? switcher.useMRUOrdering
+            case "skip_windowless_finder": switcher.skipWindowlessFinder = boolVal(val) ?? switcher.skipWindowlessFinder
+            case "restore_minimized_on_commit": switcher.restoreMinimizedOnCommit = boolVal(val) ?? switcher.restoreMinimizedOnCommit
             default: break
             }
             i += 1
@@ -472,6 +502,24 @@ enum GlideConfigParser {
         }
     }
 
+    private static func parseStringList(_ lines: [String], from i: inout Int, parentIndent: Int) -> [String]? {
+        var items: [String] = []
+        while i < lines.count {
+            let line = lines[i].trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { i += 1; continue }
+            let ind = leadingSpaces(lines[i])
+            if ind <= parentIndent { break }
+            if line.hasPrefix("-") {
+                let item = line.dropFirst().trimmingCharacters(in: .whitespaces)
+                if let s = stringVal(String(item)) { items.append(s) }
+                i += 1
+                continue
+            }
+            break
+        }
+        return items.isEmpty ? nil : items
+    }
+
     private static func parseMenuPathList(_ lines: [String], from i: inout Int, parentIndent: Int) -> [String]? {
         var path: [String] = []
         while i < lines.count {
@@ -494,6 +542,7 @@ enum GlideConfigParser {
         var g = GlideConfig.Gesture(type: "", direction: nil, fingers: 3,
                                     speed: nil, action: "", appFilter: nil, windowState: nil,
                                     modifierFilter: nil, appPath: nil, menuPath: nil,
+                                    shortcutKeyCode: nil, shortcutModifiers: nil,
                                     reciprocal: true, draft: false)
         let firstLine = lines[i].trimmingCharacters(in: .whitespaces).dropFirst()
         if let colon = firstLine.firstIndex(of: ":") {
@@ -525,6 +574,12 @@ enum GlideConfigParser {
                 let menuIndent = ind
                 i += 1
                 g.menuPath = parseMenuPathList(lines, from: &i, parentIndent: menuIndent)
+                continue
+            case "shortcut_key_code": g.shortcutKeyCode = intVal(val)
+            case "shortcut_modifiers":
+                let modIndent = ind
+                i += 1
+                g.shortcutModifiers = parseStringList(lines, from: &i, parentIndent: modIndent)
                 continue
             case "reciprocal": g.reciprocal = boolVal(val) ?? g.reciprocal
             case "draft":      g.draft      = boolVal(val) ?? g.draft

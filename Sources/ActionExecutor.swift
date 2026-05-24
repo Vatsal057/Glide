@@ -47,7 +47,8 @@ final class ActionExecutor {
 
     // MARK: - Action dispatch
 
-    func execute(_ action: GestureAction, appPath: String? = nil, menuItemPath: [String]? = nil, menuTargetBundleID: String? = nil) {
+    func execute(_ action: GestureAction, appPath: String? = nil, menuItemPath: [String]? = nil,
+                 menuTargetBundleID: String? = nil, customShortcut: KeyboardShortcut? = nil) {
         AppLogger.debug("[Action] \(action.rawValue)")
         switch action {
 
@@ -108,6 +109,11 @@ final class ActionExecutor {
         case .customMenuItem:
             if let path = menuItemPath {
                 MenuItemExecutor.perform(path: path, bundleID: menuTargetBundleID)
+            }
+
+        case .customShortcut:
+            if let shortcut = customShortcut, shortcut.isValid {
+                sendKey(CGKeyCode(shortcut.keyCode), shortcut.cgEventFlags)
             }
 
         case .emptyTrash:    emptyTrash()

@@ -87,7 +87,7 @@ struct RuleRow: View {
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(rule.menuItemLabel ?? rule.action.rawValue)
+                Text(ruleDisplayLabel(rule))
                     .font(.body)
                     .lineLimit(1)
 
@@ -97,7 +97,8 @@ struct RuleRow: View {
                         Text("·")
                         Text(rule.speed.rawValue)
                     }
-                    if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction) {
+                    if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction,
+                                                              modifierFilter: rule.modifierFilter) {
                         Text("·")
                         Image(systemName: "rectangle.2.swap")
                     }
@@ -127,7 +128,10 @@ struct RuleEditor: View {
     @State private var showMenuPicker = false
 
     private var displayTitle: String {
-        rule.menuItemLabel ?? rule.action.rawValue
+        if rule.action == .customShortcut, let s = rule.customShortcut, s.isValid {
+            return "Shortcut: \(s.displayString)"
+        }
+        return rule.menuItemLabel ?? rule.action.rawValue
     }
 
     private var categorizedActions: [(String, [GestureAction])] {
@@ -138,8 +142,7 @@ struct RuleEditor: View {
 
     private var reservedBanner: String? {
         guard store.appSwitcher.enabled else { return nil }
-        let n = store.appSwitcher.fingers
-        return "Swipe left and right with \(n) fingers are reserved for App Switcher. Configure that under the App Switcher tab."
+        return "Plain 3-finger swipes left/right are reserved for App Switcher. Use a modifier key (e.g. Shift) here to assign a different action on the same swipe."
     }
 
     var body: some View {
@@ -169,7 +172,8 @@ struct RuleEditor: View {
                 Divider()
 
                 if let banner = reservedBanner,
-                   store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction) {
+                   store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction,
+                                                          modifierFilter: rule.modifierFilter) {
                     HStack(spacing: 8) {
                         Image(systemName: "rectangle.2.swap")
                             .foregroundStyle(.orange)
@@ -197,7 +201,8 @@ struct RuleEditor: View {
 
                         EditorRow(label: "Gesture") {
                             let availableDirections = GestureDirection.allCases.filter {
-                                !store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: $0)
+                                !store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: $0,
+                                                                      modifierFilter: rule.modifierFilter)
                             }
                             Picker("", selection: $rule.direction) {
                                 ForEach(availableDirections, id: \.self) { t in
@@ -206,7 +211,15 @@ struct RuleEditor: View {
                             }
                             .frame(maxWidth: 200)
                             .onChange(of: rule.fingers) { _ in
-                                if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction),
+                                if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction,
+                                                                          modifierFilter: rule.modifierFilter),
+                                   let fallback = availableDirections.first {
+                                    rule.direction = fallback
+                                }
+                            }
+                            .onChange(of: rule.modifierFilter) { _ in
+                                if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction,
+                                                                          modifierFilter: rule.modifierFilter),
                                    let fallback = availableDirections.first {
                                     rule.direction = fallback
                                 }
@@ -244,7 +257,11 @@ struct RuleEditor: View {
                                 if newValue == .customMenuItem {
                                     rule.menuItemPath = nil
                                 }
-                                if rule.isDraft && newValue != .doNothing && newValue != .customMenuItem {
+                                if newValue == .customShortcut {
+                                    rule.customShortcut = nil
+                                }
+                                if rule.isDraft && newValue != .doNothing
+                                    && newValue != .customMenuItem && newValue != .customShortcut {
                                     store.markRuleConfigured(rule.id)
                                 }
                             }
@@ -302,17 +319,40 @@ struct RuleEditor: View {
                                 }
                             }
                         }
+
+                        if rule.action == .customShortcut {
+                            EditorRow(label: "Shortcut") {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ShortcutRecorderView(shortcut: $rule.customShortcut)
+                                    Text("Records the key combination Glide will send when this gesture fires.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .onChange(of: rule.customShortcut) { _ in
+                                if rule.customShortcut?.isValid == true {
+                                    store.markRuleConfigured(rule.id)
+                                }
+                            }
+                        }
                     }
 
                     // Conditions section
                     EditorSection(title: "Conditions") {
                         EditorRow(label: "Modifier Key") {
-                            Picker("", selection: $rule.modifierFilter) {
-                                ForEach(ModifierFilter.allCases, id: \.self) { m in
-                                    Text(m.rawValue).tag(m)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Picker("", selection: $rule.modifierFilter) {
+                                    ForEach(ModifierFilter.allCases, id: \.self) { m in
+                                        Text(m.rawValue).tag(m)
+                                    }
+                                }
+                                .frame(maxWidth: 200)
+                                if rule.direction != .click {
+                                    Text("Hold this modifier when starting the gesture. Example: Shift + 3-finger swipe right → Cycle Windows (⌘`).")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
-                            .frame(maxWidth: 200)
                         }
 
                         EditorRow(label: "Window State") {
@@ -335,26 +375,28 @@ struct RuleEditor: View {
                             .frame(maxWidth: 200)
                         }
 
-                        EditorRow(label: "Reciprocal") {
-                            Toggle("Reverse gesture undoes this action", isOn: $rule.reciprocalEnabled)
-                        }
-                        
-                        if rule.reciprocalEnabled {
-                            EditorRow(label: "Reverse Action") {
-                                Picker("", selection: Binding<GestureAction>(
-                                    get: { rule.reciprocalAction ?? rule.action.inverseAction ?? .doNothing },
-                                    set: { rule.reciprocalAction = $0 }
-                                )) {
-                                    ForEach(categorizedActions, id: \.0) { cat, actions in
-                                        Section(cat) {
-                                            ForEach(actions, id: \.self) { action in
-                                                Label(action.rawValue, systemImage: action.iconName)
-                                                    .tag(action)
+                        if rule.direction != .click {
+                            EditorRow(label: "Reciprocal") {
+                                Toggle("Reverse gesture undoes this action", isOn: $rule.reciprocalEnabled)
+                            }
+
+                            if rule.reciprocalEnabled {
+                                EditorRow(label: "Reverse Action") {
+                                    Picker("", selection: Binding<GestureAction>(
+                                        get: { rule.reciprocalAction ?? rule.action.inverseAction ?? .doNothing },
+                                        set: { rule.reciprocalAction = $0 }
+                                    )) {
+                                        ForEach(categorizedActions, id: \.0) { cat, actions in
+                                            Section(cat) {
+                                                ForEach(actions, id: \.self) { action in
+                                                    Label(action.rawValue, systemImage: action.iconName)
+                                                        .tag(action)
+                                                }
                                             }
                                         }
                                     }
+                                    .frame(maxWidth: 260)
                                 }
-                                .frame(maxWidth: 260)
                             }
                         }
                     }
@@ -454,6 +496,13 @@ struct MenuItemPickerSheet: View {
 
 // MARK: - Helpers
 
+private func ruleDisplayLabel(_ rule: GestureRule) -> String {
+    if rule.action == .customShortcut, let s = rule.customShortcut, s.isValid {
+        return "Shortcut: \(s.displayString)"
+    }
+    return rule.menuItemLabel ?? rule.action.rawValue
+}
+
 struct EditorSection<Content: View>: View {
     let title: String
     @ViewBuilder let content: () -> Content
@@ -505,6 +554,7 @@ extension GestureAction {
         case .switchAppNext:      return "chevron.right.circle"
         case .switchAppPrev:      return "chevron.left.circle"
         case .customMenuItem:     return "list.bullet.rectangle"
+        case .customShortcut:     return "keyboard"
         // Window management
         case .minimizeWindow:     return "minus.square"
         case .minimizeAllApps:    return "minus.square.fill"
