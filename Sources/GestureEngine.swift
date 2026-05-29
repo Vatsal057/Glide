@@ -98,6 +98,7 @@ final class GestureEngine {
         var continuousRefY: Float
         var lastContinuousActionTime: TimeInterval
         var continuousRule: GestureRule?
+        var lockedSpeed: GestureSpeed?
     }
 
     private struct SwitcherData {
@@ -648,7 +649,8 @@ final class GestureEngine {
                     continuousRefX: frame.cx,
                     continuousRefY: frame.cy,
                     lastContinuousActionTime: 0,
-                    continuousRule: nil
+                    continuousRule: nil,
+                    lockedSpeed: nil
                 )
                 phase = .lockedSwipe(swipeData)
                 AppLogger.debug("[Engine] Locked as swipe — \(n) fingers")
@@ -760,11 +762,18 @@ final class GestureEngine {
         }
 
         let elapsed = max(now - updated.startTime, 0.001)
-        let speed = classifySpeed(
-            velocitySamples: updated.velocitySamples,
-            totalDisplacement: swipeCentroidMovement,
-            elapsedSeconds: elapsed
-        )
+        if updated.lockedSpeed == nil {
+            guard let intent = classifySpeedIntent(
+                velocitySamples: updated.velocitySamples,
+                totalDisplacement: swipeCentroidMovement,
+                elapsedSeconds: elapsed
+            ) else {
+                phase = .lockedSwipe(updated)
+                return
+            }
+            updated.lockedSpeed = intent
+        }
+        let speed = updated.lockedSpeed ?? .normal
 
         // Pre-fire safety gate
         let gateSpreadOK = abs(frame.spread - updated.initialSpread) < tuning.pinchSpreadThreshold * 0.8
@@ -852,11 +861,11 @@ final class GestureEngine {
         }
 
         let elapsed = max(now - updated.startTime, 0.001)
-        let speed = classifySpeed(
+        let speed = updated.lockedSpeed ?? classifySpeedIntent(
             velocitySamples: updated.velocitySamples,
             totalDisplacement: swipeCentroidMovement,
             elapsedSeconds: elapsed
-        )
+        ) ?? .normal
 
         if let rule = updated.continuousRule,
            continuousDirection(direction, matchesAxisOf: rule.direction) {
@@ -1131,45 +1140,84 @@ final class GestureEngine {
         }
     }
 
-    /// Classifies swipe speed using median frame displacement and overall displacement / duration.
-    private func classifySpeed(
+    /// Classifies and locks swipe intent from distance, smoothed velocity, acceleration, and hold time.
+    private func classifySpeedIntent(
         velocitySamples: [Float],
         totalDisplacement: Float,
         elapsedSeconds: TimeInterval
-    ) -> GestureSpeed {
+    ) -> GestureSpeed? {
         let slowFrame = tuning.slowVelocityThreshold
         let fastFrame = tuning.fastVelocityThreshold
-        // Approximate MT callback rate for mapping frame thresholds to units/sec.
+        let initialDistance = tuning.initialThreshold
         let fps: Float = 60
         let slowPerSecond = slowFrame * fps
         let fastPerSecond = fastFrame * fps
 
+        guard !velocitySamples.isEmpty else { return nil }
+        let sorted = velocitySamples.sorted()
         let medianFrame: Float = {
-            guard !velocitySamples.isEmpty else { return 0 }
-            let sorted = velocitySamples.sorted()
             return sorted[sorted.count / 2]
         }()
+        let peakFrame = velocitySamples.max() ?? 0
+        let meanFrame = velocitySamples.reduce(0, +) / Float(velocitySamples.count)
+        let peakAcceleration = zip(velocitySamples.dropFirst(), velocitySamples).map { current, previous in
+            max(0, current - previous)
+        }.max() ?? 0
 
         let perSecond: Float = totalDisplacement / Float(max(elapsedSeconds, 0.05))
+        let consistency = meanFrame > 0 ? (peakFrame - (sorted.first ?? 0)) / meanFrame : 0
 
-        let frameSaysSlow = medianFrame > 0 && medianFrame <= slowFrame
-        let frameSaysFast = medianFrame >= fastFrame
-        let timeSaysSlow = perSecond <= slowPerSecond * 1.2
-        let timeSaysFast = perSecond >= fastPerSecond * 0.85
+        let classificationHold: TimeInterval = 0.055
+        let slowHold: TimeInterval = 0.080
+        let fastReleaseWindow: TimeInterval = 0.140
+        let slowDistance = initialDistance * 1.20
+        let clearFastAcceleration = max((fastFrame - slowFrame) * 0.55, fastFrame * 0.35)
 
-        // Short flicks: trust recent frame peaks; long deliberate swipes: trust average speed.
-        let isShortGesture = elapsedSeconds < 0.22
+        let hasExplosiveStart =
+            peakAcceleration >= clearFastAcceleration ||
+            peakFrame >= fastFrame * 1.35
+        let isFastFlick =
+            elapsedSeconds <= fastReleaseWindow &&
+            hasExplosiveStart &&
+            (peakFrame >= fastFrame || perSecond >= fastPerSecond * 0.90)
 
-        if isShortGesture {
-            if frameSaysFast { return .fast }
-            if frameSaysSlow && timeSaysSlow { return .slow }
-        } else {
-            if timeSaysSlow && !frameSaysFast { return .slow }
-            if timeSaysFast || frameSaysFast { return .fast }
+        if elapsedSeconds < classificationHold && !isFastFlick {
+            return nil
         }
 
-        if frameSaysSlow && timeSaysSlow { return .slow }
-        if frameSaysFast || timeSaysFast { return .fast }
+        if isFastFlick {
+            return .fast
+        }
+
+        let looksControlledSlow =
+            medianFrame <= slowFrame * 1.15 &&
+            perSecond <= slowPerSecond * 1.35 &&
+            peakFrame < fastFrame * 0.80 &&
+            peakAcceleration < clearFastAcceleration &&
+            consistency < 2.20
+
+        if looksControlledSlow && (elapsedSeconds < slowHold || totalDisplacement < slowDistance) {
+            return nil
+        }
+
+        let isControlledSlow =
+            looksControlledSlow &&
+            elapsedSeconds >= slowHold &&
+            totalDisplacement >= slowDistance
+
+        if isControlledSlow {
+            return .slow
+        }
+
+        let isClearFast =
+            elapsedSeconds <= 0.220 &&
+            hasExplosiveStart &&
+            (peakFrame >= fastFrame * 1.10 || perSecond >= fastPerSecond)
+
+        if isClearFast {
+            return .fast
+        }
+
         return .normal
     }
 
