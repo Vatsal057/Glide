@@ -37,20 +37,20 @@ struct TuningTab: View {
                         value: binding(\.fastVelocityThreshold),
                         range: 0.004...0.02,
                         format: "%.3f",
-                        hint: "Speed above which a swipe is classified as Fast."
+                        hint: "Base threshold for flick intent. Fast also requires a short duration and sharp acceleration."
                     )
                     SliderRow(
                         label: "Slow Velocity Threshold",
                         value: binding(\.slowVelocityThreshold),
                         range: 0.001...0.008,
                         format: "%.3f",
-                        hint: "Speed below which a swipe is classified as Slow."
+                        hint: "Base threshold for controlled slow intent. Slow also requires hold time and enough distance."
                     )
                     StepperRow(
                         label: "Speed Sample Frames",
                         value: binding(\.speedSampleCount),
                         range: 2...20,
-                        hint: "Number of frames averaged to compute swipe speed. Higher = smoother."
+                        hint: "Number of movement frames used for smoothed velocity and acceleration intent."
                     )
                 }
 

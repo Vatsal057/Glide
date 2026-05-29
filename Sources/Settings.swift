@@ -696,7 +696,7 @@ final class Settings {
         n.slowVelocityThreshold    = max(0.001, min(n.slowVelocityThreshold, 0.020))
         n.fastVelocityThreshold    = max(n.slowVelocityThreshold + 0.001,
                                          max(0.003, min(n.fastVelocityThreshold, 0.030)))
-        n.speedSampleCount         = max(2, min(n.speedSampleCount, 8))
+        n.speedSampleCount         = max(2, min(n.speedSampleCount, 20))
         n.candidateFrames          = max(1, min(n.candidateFrames, 8))
         n.pinchSpreadThreshold     = max(0.002, n.pinchSpreadThreshold)
         n.pinchFrameSpreadThreshold = max(0.001, n.pinchFrameSpreadThreshold)

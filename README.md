@@ -120,10 +120,10 @@ Glide includes custom calibration options so you can fine-tune how sensitive you
 *   **Switcher Step Distance:** Sets how far you need to slide your fingers horizontally to move from one app to the next when using the App Switcher gesture.
 *   **Switcher Debounce:** A small delay timer that prevents you from accidentally sliding through multiple apps too quickly in the App Switcher.
 
-### Speed Classification (Fast vs. Slow)
-*   **Fast Velocity Threshold:** The speed limit above which a swipe is classified as a "Fast" flick.
-*   **Slow Velocity Threshold:** The speed limit below which a swipe is classified as a "Slow" glide.
-*   **Speed Sample Frames:** The number of tiny frame segments Glide averages together to calculate the speed of your movement. Increasing this smooths out shaky finger movements.
+### Speed Classification (Intent)
+*   **Fast Velocity Threshold:** The base movement threshold for flick intent. Glide also checks for a short gesture duration and sharp acceleration before calling a swipe Fast.
+*   **Slow Velocity Threshold:** The base movement threshold for controlled slow intent. Glide also checks hold time and travel distance before calling a swipe Slow.
+*   **Speed Sample Frames:** The number of movement frames Glide uses for smoothed velocity and acceleration. Increasing this can reduce noisy speed changes.
 
 ### Direction Detection
 *   **Angle Tolerance:** Adjusts the quadrant size for directions. At 45°, the trackpad is split into four equal diagonal quarters (Up, Down, Left, Right). Lowering this number narrows the detection angle, creating "dead zones" along the diagonals so that diagonal movements are ignored unless they are clearly straight.
