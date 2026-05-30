@@ -126,6 +126,8 @@ final class GestureEngine {
         let inverseAction: GestureAction
         let fingers: Int
         let direction: GestureDirection
+        let sourceRuleID: UUID
+        let expiresAt: TimeInterval
     }
 
     // MARK: - State
@@ -757,16 +759,23 @@ final class GestureEngine {
             phase = .lockedSwipe(updated); return
         }
 
-        if consumeReciprocalToken(fingers: data.fingers, direction: direction) {
+        if consumeReciprocalToken(fingers: data.fingers, direction: direction, now: now) {
             phase = .fired; updateObservableState(); return
         }
 
         let elapsed = max(now - updated.startTime, 0.001)
+        let candidateRules = matchingRules(
+            fingers: data.fingers,
+            direction: direction,
+            modifiers: updated.modifiersAtStart
+        )
         if updated.lockedSpeed == nil {
+            let configuredSpeeds = Set(candidateRules.map { normalizedSpeed($0.speed) })
             guard let intent = classifySpeedIntent(
                 velocitySamples: updated.velocitySamples,
                 totalDisplacement: swipeCentroidMovement,
-                elapsedSeconds: elapsed
+                elapsedSeconds: elapsed,
+                configuredSpeeds: configuredSpeeds
             ) else {
                 phase = .lockedSwipe(updated)
                 return
@@ -777,15 +786,14 @@ final class GestureEngine {
 
         // Pre-fire safety gate
         let gateSpreadOK = abs(frame.spread - updated.initialSpread) < tuning.pinchSpreadThreshold * 0.8
-        let gateCoherenceOK = frame.coherence > 0.8
+        let gateCoherenceOK = frame.coherence >= max(tuning.swipeCoherenceThreshold, 0.55)
         guard gateSpreadOK && gateCoherenceOK else {
             phase = .ignored
             AppLogger.debug("[Engine] Swipe blocked by safety gate")
             updateObservableState(); return
         }
 
-        if let rule = bestRule(fingers: data.fingers, direction: direction, speed: speed,
-                               modifiers: updated.modifiersAtStart) {
+        if let rule = bestRuleMatch(in: candidateRules, speed: speed) {
             AppLogger.debug("[Engine] Swipe \(direction.rawValue) — \(data.fingers)F \(speed.rawValue) \(modifierDebugLabel(updated.modifiersAtStart)) (Δ=\(String(format: "%.3f", swipeCentroidMovement)) t=\(String(format: "%.2f", elapsed))s) → \(rule.action.rawValue)")
             if rule.continuous {
                 executeGestureRuleAction(rule)
@@ -864,7 +872,8 @@ final class GestureEngine {
         let speed = updated.lockedSpeed ?? classifySpeedIntent(
             velocitySamples: updated.velocitySamples,
             totalDisplacement: swipeCentroidMovement,
-            elapsedSeconds: elapsed
+            elapsedSeconds: elapsed,
+            configuredSpeeds: updated.continuousRule.map { Set([normalizedSpeed($0.speed)]) } ?? Set([.normal])
         ) ?? .normal
 
         if let rule = updated.continuousRule,
@@ -1065,11 +1074,19 @@ final class GestureEngine {
         speed: GestureSpeed = .normal,
         modifiers: CapturedModifiers
     ) -> GestureRule? {
+        bestRuleMatch(in: matchingRules(fingers: fingers, direction: direction, modifiers: modifiers), speed: speed)
+    }
+
+    private func matchingRules(
+        fingers: Int,
+        direction: GestureDirection,
+        modifiers: CapturedModifiers
+    ) -> [GestureRule] {
         let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let isFullscreen = ActionExecutor.shared.isFrontmostWindowFullscreen()
         let isMaximized  = ActionExecutor.shared.isFrontmostWindowMaximized()
 
-        let matching = Settings.shared.rules.filter { rule in
+        return Settings.shared.rules.filter { rule in
             rule.isActive
                 && rule.fingers == fingers
                 && ruleDirection(rule.direction, matchesActual: direction)
@@ -1077,8 +1094,6 @@ final class GestureEngine {
                 && matchesAppFilter(rule, bundleID: bid)
                 && modifiers.matches(rule.modifierFilter)
         }
-
-        return bestRuleMatch(in: matching, speed: speed)
     }
 
     private func matchesWindowState(_ rule: GestureRule, isFullscreen: Bool, isMaximized: Bool) -> Bool {
@@ -1115,17 +1130,21 @@ final class GestureEngine {
     }
 
     private func bestRuleMatch(in rules: [GestureRule], speed: GestureSpeed) -> GestureRule? {
-        let normalized = speed == .any ? GestureSpeed.normal : speed
+        let normalized = normalizedSpeed(speed)
         // Latest rule in the list wins when several share the same gesture signature.
-        if let exact = rules.last(where: { ($0.speed == .any ? .normal : $0.speed) == normalized }) {
+        if let exact = rules.last(where: { normalizedSpeed($0.speed) == normalized }) {
             return exact
         }
         // When slow/normal/fast are all configured for the same gesture, never fall back
         // to a different speed — that caused slow swipes to trigger normal-speed actions.
-        let configuredSpeeds = Set(rules.map { $0.speed == .any ? GestureSpeed.normal : $0.speed })
+        let configuredSpeeds = Set(rules.map { normalizedSpeed($0.speed) })
         if configuredSpeeds.count > 1 { return nil }
         guard speed != .normal else { return nil }
-        return rules.last(where: { ($0.speed == .any ? .normal : $0.speed) == .normal })
+        return rules.last(where: { normalizedSpeed($0.speed) == .normal })
+    }
+
+    private func normalizedSpeed(_ speed: GestureSpeed) -> GestureSpeed {
+        speed == .any ? .normal : speed
     }
 
     // MARK: - Speed classification
@@ -1144,8 +1163,14 @@ final class GestureEngine {
     private func classifySpeedIntent(
         velocitySamples: [Float],
         totalDisplacement: Float,
-        elapsedSeconds: TimeInterval
+        elapsedSeconds: TimeInterval,
+        configuredSpeeds: Set<GestureSpeed>
     ) -> GestureSpeed? {
+        let activeSpeeds = configuredSpeeds.isEmpty ? Set([GestureSpeed.normal]) : configuredSpeeds
+        if activeSpeeds.count == 1 {
+            return activeSpeeds.first ?? .normal
+        }
+
         let slowFrame = tuning.slowVelocityThreshold
         let fastFrame = tuning.fastVelocityThreshold
         let initialDistance = tuning.initialThreshold
@@ -1167,16 +1192,17 @@ final class GestureEngine {
         let perSecond: Float = totalDisplacement / Float(max(elapsedSeconds, 0.05))
         let consistency = meanFrame > 0 ? (peakFrame - (sorted.first ?? 0)) / meanFrame : 0
 
-        let classificationHold: TimeInterval = 0.055
-        let slowHold: TimeInterval = 0.080
-        let fastReleaseWindow: TimeInterval = 0.140
-        let slowDistance = initialDistance * 1.20
-        let clearFastAcceleration = max((fastFrame - slowFrame) * 0.55, fastFrame * 0.35)
+        let classificationHold: TimeInterval = 0.060
+        let slowHold: TimeInterval = 0.090
+        let fastReleaseWindow: TimeInterval = 0.145
+        let slowDistance = initialDistance * 1.25
+        let clearFastAcceleration = max((fastFrame - slowFrame) * 0.60, fastFrame * 0.35)
 
         let hasExplosiveStart =
             peakAcceleration >= clearFastAcceleration ||
             peakFrame >= fastFrame * 1.35
         let isFastFlick =
+            activeSpeeds.contains(.fast) &&
             elapsedSeconds <= fastReleaseWindow &&
             hasExplosiveStart &&
             (peakFrame >= fastFrame || perSecond >= fastPerSecond * 0.90)
@@ -1190,8 +1216,9 @@ final class GestureEngine {
         }
 
         let looksControlledSlow =
-            medianFrame <= slowFrame * 1.15 &&
-            perSecond <= slowPerSecond * 1.35 &&
+            activeSpeeds.contains(.slow) &&
+            medianFrame <= slowFrame * 1.12 &&
+            perSecond <= slowPerSecond * 1.30 &&
             peakFrame < fastFrame * 0.80 &&
             peakAcceleration < clearFastAcceleration &&
             consistency < 2.20
@@ -1210,12 +1237,32 @@ final class GestureEngine {
         }
 
         let isClearFast =
+            activeSpeeds.contains(.fast) &&
             elapsedSeconds <= 0.220 &&
             hasExplosiveStart &&
             (peakFrame >= fastFrame * 1.10 || perSecond >= fastPerSecond)
 
         if isClearFast {
             return .fast
+        }
+
+        let nearSlowBoundary =
+            activeSpeeds.contains(.slow) &&
+            medianFrame <= slowFrame * 1.30 &&
+            perSecond <= slowPerSecond * 1.55 &&
+            peakFrame < fastFrame * 0.85
+
+        if nearSlowBoundary && (elapsedSeconds < slowHold || totalDisplacement < slowDistance) {
+            return nil
+        }
+
+        let nearFastBoundary =
+            activeSpeeds.contains(.fast) &&
+            elapsedSeconds <= 0.180 &&
+            (peakFrame >= fastFrame * 0.85 || perSecond >= fastPerSecond * 0.80)
+
+        if nearFastBoundary && activeSpeeds.contains(.normal) {
+            return nil
         }
 
         return .normal
@@ -1290,21 +1337,33 @@ final class GestureEngine {
     private func executeSwipeRule(_ rule: GestureRule, fingers: Int, direction: GestureDirection) {
         executeGestureRuleAction(rule)
         if rule.reciprocalEnabled {
-            reciprocalToken = makeReciprocalToken(inverseAction: rule.reciprocalAction ?? rule.action.inverseAction, fingers: fingers, direction: direction)
+            reciprocalToken = makeReciprocalToken(
+                sourceRuleID: rule.id,
+                inverseAction: rule.reciprocalAction ?? rule.action.inverseAction,
+                fingers: fingers,
+                direction: direction
+            )
         } else {
             clearReciprocalToken()
         }
         updateObservableState()
     }
 
-    private func consumeReciprocalToken(fingers: Int, direction: GestureDirection) -> Bool {
-        guard let token = reciprocalToken,
-              token.fingers == fingers, token.direction == direction else { return false }
+    private func consumeReciprocalToken(fingers: Int, direction: GestureDirection, now: TimeInterval) -> Bool {
+        guard let token = reciprocalToken else { return false }
+        guard now <= token.expiresAt else {
+            clearReciprocalToken()
+            return false
+        }
+        guard token.fingers == fingers, token.direction == direction else {
+            clearReciprocalToken()
+            return false
+        }
         if token.inverseAction == .restoreMinimizedApps,
            !ActionExecutor.shared.hasRestorableMinimizedApps {
             clearReciprocalToken(); return false
         }
-        AppLogger.debug("[Engine] Reciprocal \(direction.rawValue) → \(token.inverseAction.rawValue)")
+        AppLogger.debug("[Engine] Reciprocal \(direction.rawValue) — source \(token.sourceRuleID) → \(token.inverseAction.rawValue)")
         let action = token.inverseAction
         clearReciprocalToken()
         Haptic.reciprocal()
@@ -1312,9 +1371,16 @@ final class GestureEngine {
         return true
     }
 
-    private func makeReciprocalToken(inverseAction: GestureAction?, fingers: Int, direction: GestureDirection) -> ReciprocalToken? {
+    private func makeReciprocalToken(sourceRuleID: UUID, inverseAction: GestureAction?, fingers: Int, direction: GestureDirection) -> ReciprocalToken? {
         guard let rev = opposite(direction), let inverse = inverseAction else { return nil }
-        return ReciprocalToken(inverseAction: inverse, fingers: fingers, direction: rev)
+        let now = ProcessInfo.processInfo.systemUptime
+        return ReciprocalToken(
+            inverseAction: inverse,
+            fingers: fingers,
+            direction: rev,
+            sourceRuleID: sourceRuleID,
+            expiresAt: now + 1.5
+        )
     }
 
     private func clearReciprocalToken() {
@@ -1529,14 +1595,14 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
         }
     }
 
-    let active = validTouches.filter { $0.state >= 3 && $0.state <= 4 }
+    let activeTouches = validTouches.filter { $0.state >= 3 && $0.state <= 4 }
     if let dev = device {
-        updateDeviceFingerCount(device: dev, count: active.count)
+        updateDeviceFingerCount(device: dev, count: activeTouches.count)
     }
 
-    let validCount = Int32(validTouches.count)
+    let activeCount = Int32(activeTouches.count)
 
-    guard validCount > 0 else {
+    guard activeCount > 0 else {
         if glideActiveTouches > 0 {
             glideActiveTouches = 0
             glideLastDispatchedCount = 0
@@ -1556,7 +1622,7 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
         return 0
     }
 
-    let n = Int(validCount)
+    let n = Int(activeCount)
 
     // ── Per-finger age tracking ───────────────────────────────────────────────
     // Track when each finger ID first appeared on the pad.  This lets click
@@ -1569,14 +1635,14 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
     let nowTs = glideLastMTTimestamp
 
     // Register newly-arrived fingers
-    for touch in validTouches {
+    for touch in activeTouches {
         if glideFingerFirstSeen[touch.identifier] == nil {
             glideFingerFirstSeen[touch.identifier] = nowTs
         }
     }
     // Remove departed finger records (cheap: dict count rarely mismatches)
-    if glideFingerFirstSeen.count != validTouches.count {
-        let activeIDs = Set(validTouches.map { $0.identifier })
+    if glideFingerFirstSeen.count != activeTouches.count {
+        let activeIDs = Set(activeTouches.map { $0.identifier })
         glideFingerFirstSeen = glideFingerFirstSeen.filter { activeIDs.contains($0.key) }
     }
     // Publish oldest/newest ages for the main-thread click handler
@@ -1589,10 +1655,10 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
 
     // Save previous count before updating so we can detect threshold crossing
     let prevActiveTouches = glideActiveTouches
-    glideActiveTouches = validCount
+    glideActiveTouches = activeCount
 
-    if validCount >= 3 {
-        glidePeakFingerCount = validCount
+    if activeCount >= 3 {
+        glidePeakFingerCount = activeCount
         // Cancel the peak-reset work item only when first crossing the 3-finger
         // threshold — not on every frame (which was dispatching 120×/s and
         // causing measurable CPU overhead at idle).
@@ -1602,12 +1668,12 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
     }
 
     // Skip redundant dispatches for < 3 fingers (prevents drag/scroll lag)
-    if validCount < 3 && validCount == glideLastDispatchedCount { return 0 }
-    glideLastDispatchedCount = validCount
+    if activeCount < 3 && activeCount == glideLastDispatchedCount { return 0 }
+    glideLastDispatchedCount = activeCount
 
     // Centroid
     var sumX: Float = 0, sumY: Float = 0
-    for i in 0..<n { sumX += validTouches[i].normalizedPosition.x; sumY += validTouches[i].normalizedPosition.y }
+    for i in 0..<n { sumX += activeTouches[i].normalizedPosition.x; sumY += activeTouches[i].normalizedPosition.y }
     let cx = sumX / Float(n)
     let cy = sumY / Float(n)
 
@@ -1616,8 +1682,8 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
     if n >= 3 {
         var s: Float = 0
         for i in 0..<n {
-            let dx = validTouches[i].normalizedPosition.x - cx
-            let dy = validTouches[i].normalizedPosition.y - cy
+            let dx = activeTouches[i].normalizedPosition.x - cx
+            let dy = activeTouches[i].normalizedPosition.y - cy
             s += (dx * dx + dy * dy).squareRoot()
         }
         spread = s / Float(n)
@@ -1628,7 +1694,7 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
     if n >= 3 {
         var avgDirX: Float = 0, avgDirY: Float = 0, movingFingers = 0
         for i in 0..<n {
-            let vx = validTouches[i].velocity.x; let vy = validTouches[i].velocity.y
+            let vx = activeTouches[i].velocity.x; let vy = activeTouches[i].velocity.y
             let mag = (vx * vx + vy * vy).squareRoot()
             if mag > 0.01 { avgDirX += vx / mag; avgDirY += vy / mag; movingFingers += 1 }
         }
@@ -1638,7 +1704,7 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
         }
     }
 
-    let frameData = TouchFrameData(count: validCount, cx: cx, cy: cy, spread: spread, coherence: coherence)
+    let frameData = TouchFrameData(count: activeCount, cx: cx, cy: cy, spread: spread, coherence: coherence)
     DispatchQueue.main.async { GestureEngine.shared.onTouches(frameData) }
     return 0
 }

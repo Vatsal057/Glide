@@ -491,14 +491,14 @@ struct AppSwitcherSettings: Codable, Equatable {
 }
 
 struct GestureTuning: Codable, Equatable {
-    var initialThreshold:           Float        = 0.018
+    var initialThreshold:           Float        = 0.014
     var appSwitcherStepThreshold:   Float        = 0.003
     var appSwitcherDebounce:        TimeInterval = 0.10
     var continuousStepThreshold:    Float        = 0.025
     var continuousDebounce:         TimeInterval = 0.08
-    var fastVelocityThreshold:      Float        = 0.008
-    var slowVelocityThreshold:      Float        = 0.004
-    var speedSampleCount:           Int          = 5
+    var fastVelocityThreshold:      Float        = 0.009
+    var slowVelocityThreshold:      Float        = 0.005
+    var speedSampleCount:           Int          = 4
     var candidateFrames:            Int          = 3
     var pinchSpreadThreshold:       Float        = 0.015
     var pinchFrameSpreadThreshold:  Float        = 0.008
@@ -511,14 +511,14 @@ struct GestureTuning: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        initialThreshold          = try c.decodeIfPresent(Float.self,        forKey: .initialThreshold)          ?? 0.018
+        initialThreshold          = try c.decodeIfPresent(Float.self,        forKey: .initialThreshold)          ?? 0.014
         appSwitcherStepThreshold  = try c.decodeIfPresent(Float.self,        forKey: .appSwitcherStepThreshold)  ?? 0.003
         appSwitcherDebounce       = try c.decodeIfPresent(TimeInterval.self, forKey: .appSwitcherDebounce)       ?? 0.10
         continuousStepThreshold   = try c.decodeIfPresent(Float.self,        forKey: .continuousStepThreshold)   ?? 0.025
         continuousDebounce        = try c.decodeIfPresent(TimeInterval.self, forKey: .continuousDebounce)        ?? 0.08
-        fastVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .fastVelocityThreshold)     ?? 0.008
-        slowVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .slowVelocityThreshold)     ?? 0.004
-        speedSampleCount          = try c.decodeIfPresent(Int.self,          forKey: .speedSampleCount)          ?? 5
+        fastVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .fastVelocityThreshold)     ?? 0.009
+        slowVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .slowVelocityThreshold)     ?? 0.005
+        speedSampleCount          = try c.decodeIfPresent(Int.self,          forKey: .speedSampleCount)          ?? 4
         candidateFrames           = try c.decodeIfPresent(Int.self,          forKey: .candidateFrames)           ?? 3
         pinchSpreadThreshold      = try c.decodeIfPresent(Float.self,        forKey: .pinchSpreadThreshold)      ?? 0.015
         pinchFrameSpreadThreshold = try c.decodeIfPresent(Float.self,        forKey: .pinchFrameSpreadThreshold) ?? 0.008

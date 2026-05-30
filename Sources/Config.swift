@@ -17,10 +17,10 @@ import Foundation
 struct GlideConfig {
 
     struct Speed {
-        var swipeThreshold: Float = 0.018
-        var fastVelocityThreshold: Float = 0.008
-        var slowVelocityThreshold: Float = 0.004
-        var speedSampleCount: Int = 5
+        var swipeThreshold: Float = 0.014
+        var fastVelocityThreshold: Float = 0.009
+        var slowVelocityThreshold: Float = 0.005
+        var speedSampleCount: Int = 4
     }
 
     struct Preferences {

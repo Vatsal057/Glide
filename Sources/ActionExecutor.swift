@@ -40,11 +40,20 @@ final class ActionExecutor {
 
     var hasRestorableMinimizedApps: Bool {
         pruneStaleMinimizedWindows()
-        return !lastMinimizedWindows.isEmpty
+        return !(minimizeAllSession?.windows.isEmpty ?? true)
     }
 
-    private var lastMinimizedWindows: [AXUIElement] = []
-    private var frontmostBeforeMinimize: NSRunningApplication?
+    private struct MinimizedWindowRecord {
+        let window: AXUIElement
+        let pid: pid_t
+    }
+
+    private struct MinimizeAllSession {
+        var windows: [MinimizedWindowRecord]
+        let frontmostPID: pid_t?
+    }
+
+    private var minimizeAllSession: MinimizeAllSession?
 
     // MARK: - Action dispatch
 
@@ -321,32 +330,34 @@ final class ActionExecutor {
 
     private func minimizeAllApps() {
         let myPID = ProcessInfo.processInfo.processIdentifier
-        frontmostBeforeMinimize = NSWorkspace.shared.frontmostApplication
-        let frontPID = frontmostBeforeMinimize?.processIdentifier ?? 0
+        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
-        var backWindows:  [AXUIElement] = []
-        var frontWindows: [AXUIElement] = []
+        var backWindows:  [MinimizedWindowRecord] = []
+        var frontWindows: [MinimizedWindowRecord] = []
 
         for app in NSWorkspace.shared.runningApplications
             where app.activationPolicy == .regular && app.processIdentifier != myPID {
             for w in windows(for: app.processIdentifier) {
-                guard axBool(w, attribute: kAXMinimizedAttribute as CFString) == false else { continue }
-                if let f = axFrame(w), f.width < 1 || f.height < 1 { continue }
+                guard shouldMinimizeWindow(w) else { continue }
+                let record = MinimizedWindowRecord(window: w, pid: app.processIdentifier)
                 if app.processIdentifier == frontPID {
-                    frontWindows.append(w)
+                    frontWindows.append(record)
                 } else {
-                    backWindows.append(w)
+                    backWindows.append(record)
                 }
             }
         }
 
-        var minimizedNow: [AXUIElement] = []
-        for w in backWindows + frontWindows {
-            if setAXBool(w, attribute: kAXMinimizedAttribute as CFString, value: true) {
-                minimizedNow.append(w)
+        var minimizedNow: [MinimizedWindowRecord] = []
+        for record in backWindows + frontWindows {
+            if setAXBool(record.window, attribute: kAXMinimizedAttribute as CFString, value: true) {
+                minimizedNow.append(record)
             }
         }
-        lastMinimizedWindows = minimizedNow
+
+        if !minimizedNow.isEmpty {
+            minimizeAllSession = MinimizeAllSession(windows: minimizedNow, frontmostPID: frontPID)
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             NSWorkspace.shared.runningApplications
@@ -357,26 +368,27 @@ final class ActionExecutor {
 
     private func restoreMinimizedApps() {
         pruneStaleMinimizedWindows()
-        guard !lastMinimizedWindows.isEmpty else { return }
+        guard let session = minimizeAllSession, !session.windows.isEmpty else { return }
 
-        let toRestore   = lastMinimizedWindows.reversed()
-        let savedFront  = frontmostBeforeMinimize
+        let toRestore  = session.windows.reversed()
+        let frontmostPID = session.frontmostPID
 
-        for (idx, w) in toRestore.enumerated() {
+        for (idx, record) in toRestore.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(idx) * 0.03) {
-                _ = self.setAXBool(w, attribute: kAXMinimizedAttribute as CFString, value: false)
+                _ = self.setAXBool(record.window, attribute: kAXMinimizedAttribute as CFString, value: false)
             }
         }
 
-        let totalDelay = Double(lastMinimizedWindows.count) * 0.03 + 0.1
+        let totalDelay = Double(session.windows.count) * 0.03 + 0.1
         DispatchQueue.main.asyncAfter(deadline: .now() + totalDelay) {
-            if let app = savedFront, !app.isTerminated {
+            if let frontmostPID,
+               let app = NSRunningApplication(processIdentifier: frontmostPID),
+               !app.isTerminated {
                 app.activate(options: .activateIgnoringOtherApps)
             }
         }
 
-        lastMinimizedWindows.removeAll()
-        frontmostBeforeMinimize = nil
+        minimizeAllSession = nil
     }
 
     private func maximize() {
@@ -566,6 +578,13 @@ final class ActionExecutor {
         return wins
     }
 
+    private func shouldMinimizeWindow(_ window: AXUIElement) -> Bool {
+        guard axBool(window, attribute: kAXMinimizedAttribute as CFString) == false else { return false }
+        guard axBool(window, attribute: "AXFullScreen" as CFString) != true else { return false }
+        guard let frame = axFrame(window), frame.width >= 1, frame.height >= 1 else { return false }
+        return true
+    }
+
     private func pid(for element: AXUIElement) -> pid_t? {
         var p: pid_t = 0
         guard AXUIElementGetPid(element, &p) == .success else { return nil }
@@ -590,9 +609,15 @@ final class ActionExecutor {
     }
 
     private func pruneStaleMinimizedWindows(for pid: pid_t? = nil) {
-        lastMinimizedWindows.removeAll { w in
-            if let pid, self.pid(for: w) == pid { return true }
-            return axBool(w, attribute: kAXMinimizedAttribute as CFString) != true
+        guard var session = minimizeAllSession else { return }
+        session.windows.removeAll { record in
+            if let pid, record.pid == pid { return true }
+            return axBool(record.window, attribute: kAXMinimizedAttribute as CFString) != true
+        }
+        if session.windows.isEmpty {
+            minimizeAllSession = nil
+        } else {
+            minimizeAllSession = session
         }
     }
 
