@@ -43,7 +43,10 @@ if [[ -f "$SCRIPT_DIR/assets/AppIcon.icns" ]]; then
 fi
 
 # ── Collect Swift sources ────────────────────
-SOURCES=("$SCRIPT_DIR/Sources"/*.swift)
+SOURCES=()
+while IFS=  read -r -d $'\0'; do
+    SOURCES+=("$REPLY")
+done < <(find "$SCRIPT_DIR/Sources" -name "*.swift" -print0)
 
 # Verify all sources exist
 for src in "${SOURCES[@]}"; do
