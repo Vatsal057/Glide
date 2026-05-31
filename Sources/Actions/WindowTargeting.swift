@@ -7,13 +7,10 @@ import IOKit.pwr_mgt
 // MARK: - ActionExecutor
 // ─────────────────────────────────────────────
 
-final class ActionExecutor {
+final class WindowTargeting {
 
-    static let shared = ActionExecutor()
+    static let shared = WindowTargeting()
     private init() {}
-
-    private lazy var keyEventSource = CGEventSource(stateID: .hidSystemState)
-    private var syntheticHeldFlags: CGEventFlags = []
 
     // MARK: - Maximize / Restore frame memory
 
@@ -55,119 +52,6 @@ final class ActionExecutor {
 
     private var minimizeAllSession: MinimizeAllSession?
 
-    // MARK: - Action dispatch
-
-    func execute(_ action: GestureAction, appPath: String? = nil, menuItemPath: [String]? = nil,
-                 menuTargetBundleID: String? = nil, customShortcut: KeyboardShortcut? = nil,
-                 advancedKeyboard: [KeyboardInputStep] = []) {
-        AppLogger.debug("[Action] \(action.rawValue)")
-        switch action {
-
-        // App lifecycle
-        case .quitApp:           quitAppAtCursor(NSEvent.mouseLocation)
-        case .forceQuitApp:      forceQuitAtCursor()
-        case .quitFrontmost:     NSWorkspace.shared.frontmostApplication?.terminate()
-        case .hideApp:           hideAppAtCursor()
-        case .hideOthers:        hideAppAtCursor(othersOnly: true)
-        case .openApp:           if let path = appPath { openApp(path: path) }
-
-        // App switching
-        case .appSwitcherNext:   sendKey(0x30, .maskCommand)
-        case .appSwitcherPrev:   sendKey(0x30, [.maskCommand, .maskShift])
-        case .switchAppNext:     activateAdjacentApp(forward: true)
-        case .switchAppPrev:     activateAdjacentApp(forward: false)
-
-        // Window state
-        case .minimizeWindow:        minimizeFocused()
-        case .minimizeAllApps:       minimizeAllApps()
-        case .restoreMinimizedApps:  restoreMinimizedApps()
-        case .maximizeWindow:        maximize()
-        case .restoreWindow:         restore()
-        case .closeWindow:           closeWindow()
-        case .enterFullscreen:       setFullscreen(true)
-        case .exitFullscreen:        setFullscreen(false)
-        case .toggleFullscreen:      setFullscreen(nil)
-        case .cycleWindows:          sendKey(0x32, .maskCommand)
-
-        // Window snapping
-        case .snapLeft:         snap(CGRect(x: 0,   y: 0,   width: 0.5, height: 1))
-        case .snapRight:        snap(CGRect(x: 0.5, y: 0,   width: 0.5, height: 1))
-        case .snapTopLeft:      snap(CGRect(x: 0,   y: 0.5, width: 0.5, height: 0.5))
-        case .snapTopRight:     snap(CGRect(x: 0.5, y: 0.5, width: 0.5, height: 0.5))
-        case .snapBottomLeft:   snap(CGRect(x: 0,   y: 0,   width: 0.5, height: 0.5))
-        case .snapBottomRight:  snap(CGRect(x: 0.5, y: 0,   width: 0.5, height: 0.5))
-        case .centerWindow:     centerWindow()
-        case .moveNextDisplay:  moveToNextDisplay()
-
-        // System
-        case .missionControl:   performMissionControl()
-        case .appExpose:        sendKey(125, .maskControl)
-        case .showDesktop:      sendKey(103, [])
-        case .launchpad:        sendKey(131, [])
-        case .spotlight:        sendKey(0x31, .maskCommand)
-        case .notifCenter:
-            DistributedNotificationCenter.default().postNotificationName(
-                NSNotification.Name("com.apple.notificationcenterui.dockControllerActivated"),
-                object: nil, deliverImmediately: true)
-        case .lockScreen:       lockScreen()
-        case .sleep:            sleepSystem()
-        case .screenshotArea:          sendKey(0x15, [.maskCommand, .maskShift])
-        case .screenshotFull:          sendKey(0x14, [.maskCommand, .maskShift])
-        case .screenshotAreaClipboard: sendKey(0x15, [.maskCommand, .maskShift, .maskControl])
-        case .screenshotFullClipboard: sendKey(0x14, [.maskCommand, .maskShift, .maskControl])
-        case .screenshotToolbar:       sendKey(0x16, [.maskCommand, .maskShift])
-
-        case .customMenuItem:
-            if let path = menuItemPath {
-                MenuItemExecutor.perform(path: path, bundleID: menuTargetBundleID)
-            }
-
-        case .customShortcut:
-            if let shortcut = customShortcut, shortcut.isValid {
-                sendKey(CGKeyCode(shortcut.keyCode), shortcut.cgEventFlags)
-            }
-
-        case .advancedKeyboard:
-            executeKeyboardSteps(advancedKeyboard)
-
-        case .emptyTrash:    emptyTrash()
-        case .openFinder:    openFinder()
-        case .openDownloads: openDownloads()
-
-        case .doNothing: break
-        }
-    }
-
-    private func emptyTrash() {
-        let script = """
-        tell application "Finder"
-            empty trash
-        end tell
-        """
-        var error: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&error)
-        if let error {
-            AppLogger.debug("[Action] Empty trash failed: \(error)")
-        }
-    }
-
-    private func openFinder() {
-        let url = URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-    }
-
-    private func openDownloads() {
-        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
-        NSWorkspace.shared.open(url)
-    }
-
-    private func performMissionControl() {
-        guard let src = keyEventSource ?? CGEventSource(stateID: .hidSystemState) else { return }
-        let f3: CGKeyCode = 160
-        CGEvent(keyboardEventSource: src, virtualKey: f3, keyDown: true)?.post(tap: .cghidEventTap)
-        CGEvent(keyboardEventSource: src, virtualKey: f3, keyDown: false)?.post(tap: .cghidEventTap)
-    }
-
     // MARK: - App under cursor
 
     func quitAppAtCursor(_ location: NSPoint) {
@@ -175,18 +59,18 @@ final class ActionExecutor {
         NSRunningApplication(processIdentifier: pid)?.terminate()
     }
 
-    private func forceQuitAtCursor() {
+    func forceQuitAtCursor() {
         guard let pid = pidAtLocation(NSEvent.mouseLocation) else { return }
         NSRunningApplication(processIdentifier: pid)?.forceTerminate()
         activateAnotherApp(excluding: pid)
     }
 
-    private func hideAppAtCursor(othersOnly: Bool = false) {
+    func hideAppAtCursor(othersOnly: Bool = false) {
         guard let pid = pidAtLocation(NSEvent.mouseLocation) else { return }
         if othersOnly {
             NSRunningApplication(processIdentifier: pid)?.activate(options: .activateIgnoringOtherApps)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                self.sendKey(0x04, [.maskCommand, .maskAlternate])
+                KeyboardEmulator.shared.sendKey(0x04, [.maskCommand, .maskAlternate])
             }
         } else {
             NSRunningApplication(processIdentifier: pid)?.hide()
@@ -203,7 +87,7 @@ final class ActionExecutor {
         }
     }
 
-    private func openApp(path: String) {
+    func openApp(path: String) {
         NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path),
                                            configuration: .init()) { _, _ in }
     }
@@ -295,7 +179,7 @@ final class ActionExecutor {
 
     // MARK: - Window operations
 
-    private func minimizeFocused() {
+    func minimizeFocused() {
         guard let w = targetWindow() else { return }
         minimize(window: w)
     }
@@ -328,7 +212,7 @@ final class ActionExecutor {
         }
     }
 
-    private func minimizeAllApps() {
+    func minimizeAllApps() {
         let myPID = ProcessInfo.processInfo.processIdentifier
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
@@ -366,7 +250,7 @@ final class ActionExecutor {
         }
     }
 
-    private func restoreMinimizedApps() {
+    func restoreMinimizedApps() {
         pruneStaleMinimizedWindows()
         guard let session = minimizeAllSession, !session.windows.isEmpty else { return }
 
@@ -391,7 +275,7 @@ final class ActionExecutor {
         minimizeAllSession = nil
     }
 
-    private func maximize() {
+    func maximize() {
         guard let w = targetWindow() else { return }
         pruneOrphanedFrames()
         if axBool(w, attribute: kAXMinimizedAttribute as CFString) == true {
@@ -404,7 +288,7 @@ final class ActionExecutor {
         setFrame(w, axFrame(fromVisibleFrame: screen.visibleFrame))
     }
 
-    private func restore() {
+    func restore() {
         guard let w = targetWindow() else { return }
         if axBool(w, attribute: kAXMinimizedAttribute as CFString) == true {
             _ = setAXBool(w, attribute: kAXMinimizedAttribute as CFString, value: false)
@@ -422,7 +306,7 @@ final class ActionExecutor {
         }
     }
 
-    private func closeWindow() {
+    func closeWindow() {
         guard let w = targetWindow() else { return }
         var ref: CFTypeRef?
         if AXUIElementCopyAttributeValue(w, kAXCloseButtonAttribute as CFString, &ref) == .success,
@@ -431,7 +315,7 @@ final class ActionExecutor {
         }
     }
 
-    private func setFullscreen(_ targetState: Bool?) {
+    func setFullscreen(_ targetState: Bool?) {
         guard let w = targetWindow() else { return }
         if axBool(w, attribute: kAXMinimizedAttribute as CFString) == true {
             _ = setAXBool(w, attribute: kAXMinimizedAttribute as CFString, value: false)
@@ -444,7 +328,7 @@ final class ActionExecutor {
 
     // MARK: - Snapping
 
-    private func snap(_ fraction: CGRect) {
+    func snap(_ fraction: CGRect) {
         guard let w = targetWindow() else { return }
         let mouse = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else { return }
@@ -457,7 +341,7 @@ final class ActionExecutor {
         setFrame(w, CGRect(x: x, y: mainH - (y + sh), width: sw, height: sh))
     }
 
-    private func centerWindow() {
+    func centerWindow() {
         guard let w = targetWindow(), let f = axFrame(w) else { return }
         let mouse = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else { return }
@@ -471,7 +355,7 @@ final class ActionExecutor {
         }
     }
 
-    private func moveToNextDisplay() {
+    func moveToNextDisplay() {
         guard let w = targetWindow(), NSScreen.screens.count > 1, let f = axFrame(w) else { return }
         let mainH     = globalScreenMaxY()
         let cocoaY    = mainH - f.minY - f.height
@@ -492,7 +376,7 @@ final class ActionExecutor {
 
     // MARK: - App switching
 
-    private func activateAdjacentApp(forward: Bool) {
+    func activateAdjacentApp(forward: Bool) {
         let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
         guard let cur = NSWorkspace.shared.frontmostApplication,
               let idx = apps.firstIndex(where: { $0.processIdentifier == cur.processIdentifier }) else { return }
@@ -500,29 +384,6 @@ final class ActionExecutor {
             ? apps[(idx + 1) % apps.count]
             : apps[(idx + apps.count - 1) % apps.count]
         next.activate(options: .activateIgnoringOtherApps)
-    }
-
-    // MARK: - System actions
-
-    private func lockScreen() {
-        // Try private Login framework
-        if let h = dlopen("/System/Library/PrivateFrameworks/Login.framework/Versions/Current/Login", RTLD_LAZY) {
-            defer { dlclose(h) }
-            if let sym = dlsym(h, "SACLockScreenImmediate") {
-                typealias Fn = @convention(c) () -> Void
-                unsafeBitCast(sym, to: Fn.self)()
-                return
-            }
-        }
-        sendKey(0x0C, [.maskCommand, .maskControl])   // Ctrl+Cmd+Q fallback
-    }
-
-    private func sleepSystem() {
-        // FIX: IOPMFindPowerManagement returns a send right — must release with IOServiceClose.
-        let port = IOPMFindPowerManagement(mach_port_t(0))
-        guard port != 0 else { return }
-        IOPMSleepSystem(port)
-        IOServiceClose(port)   // release the Mach send right to prevent port leak
     }
 
     // MARK: - AX helpers
@@ -570,7 +431,7 @@ final class ActionExecutor {
         return WindowKey(pid: pid, identity: Int(CFHash(w)))
     }
 
-    private func windows(for pid: pid_t) -> [AXUIElement] {
+    func windows(for pid: pid_t) -> [AXUIElement] {
         let app = AXUIElementCreateApplication(pid)
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) == .success,
@@ -645,61 +506,6 @@ final class ActionExecutor {
     private func axFrame(fromVisibleFrame frame: CGRect) -> CGRect {
         CGRect(x: frame.minX, y: globalScreenMaxY() - frame.maxY,
                width: frame.width, height: frame.height)
-    }
-
-    // MARK: - Key event helper
-
-    func executeKeyboardSteps(_ steps: [KeyboardInputStep]) {
-        guard !steps.isEmpty else { return }
-        for step in steps {
-            switch step.event {
-            case .hold:
-                syntheticHeldFlags.insert(modifierFlag(for: step.keyCode))
-                sendKeyDown(CGKeyCode(step.keyCode), syntheticHeldFlags)
-            case .release:
-                let releasedFlag = modifierFlag(for: step.keyCode)
-                if releasedFlag.isEmpty {
-                    sendKeyUp(CGKeyCode(step.keyCode), syntheticHeldFlags)
-                } else {
-                    syntheticHeldFlags.remove(releasedFlag)
-                    sendKeyUp(CGKeyCode(step.keyCode), syntheticHeldFlags)
-                }
-            case .tap:
-                sendKey(CGKeyCode(step.keyCode), syntheticHeldFlags.union(step.modifierFlags))
-            }
-        }
-    }
-
-    private func sendKey(_ key: CGKeyCode, _ flags: CGEventFlags) {
-        guard let src = keyEventSource ?? CGEventSource(stateID: .hidSystemState),
-              let kd = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: true),
-              let ku = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: false) else { return }
-        kd.flags = flags; kd.post(tap: .cghidEventTap)
-        ku.flags = flags; ku.post(tap: .cghidEventTap)
-    }
-
-    private func sendKeyDown(_ key: CGKeyCode, _ flags: CGEventFlags) {
-        guard let src = keyEventSource ?? CGEventSource(stateID: .hidSystemState),
-              let event = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: true) else { return }
-        event.flags = flags
-        event.post(tap: .cghidEventTap)
-    }
-
-    private func sendKeyUp(_ key: CGKeyCode, _ flags: CGEventFlags) {
-        guard let src = keyEventSource ?? CGEventSource(stateID: .hidSystemState),
-              let event = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: false) else { return }
-        event.flags = flags
-        event.post(tap: .cghidEventTap)
-    }
-
-    private func modifierFlag(for keyCode: UInt16) -> CGEventFlags {
-        switch keyCode {
-        case 0x36, 0x37: return .maskCommand
-        case 0x38: return .maskShift
-        case 0x3A: return .maskAlternate
-        case 0x3B: return .maskControl
-        default: return []
-        }
     }
 
 }
