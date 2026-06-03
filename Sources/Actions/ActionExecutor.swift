@@ -36,7 +36,7 @@ final class ActionExecutor {
     func execute(_ action: GestureAction, appPath: String? = nil, menuItemPath: [String]? = nil,
                  menuTargetBundleID: String? = nil, customShortcut: KeyboardShortcut? = nil,
                  advancedKeyboard: [KeyboardInputStep] = []) {
-        AppLogger.debug("[Action] \\(action.rawValue)")
+        AppLogger.debug("[Action] \(action.rawValue)")
         switch action {
 
         // App lifecycle

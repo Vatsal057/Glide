@@ -93,18 +93,22 @@ final class EngineBridge: ObservableObject {
             forName: NSWorkspace.willSleepNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            NSLog("[App] Sleep — stopping engine")
-            GestureEngine.shared.stop()
-            self?.isEnabled = false
+            Task { @MainActor in
+                NSLog("[App] Sleep — stopping engine")
+                GestureEngine.shared.stop()
+                self?.isEnabled = false
+            }
         }
         wakeObserver = ws.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            NSLog("[App] Wake — restarting engine")
-            self?.isEnabled = true
-            GestureEngine.shared.stop()
-            GestureEngine.shared.start()
+            Task { @MainActor in
+                NSLog("[App] Wake — restarting engine")
+                self?.isEnabled = true
+                GestureEngine.shared.stop()
+                GestureEngine.shared.start()
+            }
         }
     }
 

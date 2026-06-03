@@ -119,6 +119,6 @@ enum SpeedClassifier {
             return nil
         }
 
-        return .normal
+        return activeSpeeds.contains(.normal) ? .normal : nil
     }
 }

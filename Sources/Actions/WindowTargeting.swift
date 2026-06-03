@@ -410,6 +410,18 @@ final class WindowTargeting {
         return ref as? Bool
     }
 
+    private func axRole(_ e: AXUIElement) -> String? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(e, kAXRoleAttribute as CFString, &ref) == .success else { return nil }
+        return ref as? String
+    }
+
+    private func axSubrole(_ e: AXUIElement) -> String? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(e, kAXSubroleAttribute as CFString, &ref) == .success else { return nil }
+        return ref as? String
+    }
+
     @discardableResult
     private func setAXBool(_ e: AXUIElement, attribute: CFString, value: Bool) -> Bool {
         AXUIElementSetAttributeValue(e, attribute, value as CFTypeRef) == .success
@@ -437,6 +449,42 @@ final class WindowTargeting {
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) == .success,
               let wins = ref as? [AXUIElement] else { return [] }
         return wins
+    }
+
+    func hasRealWindow(for pid: pid_t) -> Bool {
+        windows(for: pid).contains { window in
+            guard axRole(window) == (kAXWindowRole as String) else { return false }
+            if let subrole = axSubrole(window) {
+                return subrole == (kAXStandardWindowSubrole as String)
+                    || subrole == (kAXDialogSubrole as String)
+                    || subrole == (kAXSystemDialogSubrole as String)
+            }
+            guard let frame = axFrame(window), frame.width >= 40, frame.height >= 40 else { return false }
+            return true
+        }
+    }
+
+    func finderHasAnyWindow() -> Bool {
+        let script = """
+        tell application "Finder"
+            return count of windows
+        end tell
+        """
+        var error: NSDictionary?
+        guard let descriptor = NSAppleScript(source: script)?.executeAndReturnError(&error) else {
+            if let error {
+                AppLogger.debug("[Finder] Window count failed: \(error)")
+            }
+            return hasRealWindowForFinderFallback()
+        }
+        return descriptor.int32Value > 0
+    }
+
+    private func hasRealWindowForFinderFallback() -> Bool {
+        guard let finder = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) else {
+            return false
+        }
+        return hasRealWindow(for: finder.processIdentifier)
     }
 
     private func shouldMinimizeWindow(_ window: AXUIElement) -> Bool {
