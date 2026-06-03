@@ -47,6 +47,9 @@ final class GestureRuleResolver {
     }
 
     static func hasAnySwipeRule(fingers: Int) -> Bool {
+        if Settings.shared.appSwitcher.enabled, fingers == Settings.shared.appSwitcher.fingers {
+            return true
+        }
         let swipeDirs: [GestureDirection] = [.swipeLeftRight, .swipeUpDown, .swipeLeft, .swipeRight, .swipeUp, .swipeDown]
         return Settings.shared.rules.contains {
             $0.isActive && $0.fingers == fingers && swipeDirs.contains($0.direction)

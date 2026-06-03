@@ -541,7 +541,7 @@ final class Settings {
     static let shared = Settings()
 
     private init() {
-        _rules = Self.normalizeRules(Self.defaultRules)
+        _rules = Self.normalizeRules(Self.defaultRules, appSwitcher: _appSwitcher)
     }
 
     // MARK: Backing stores
@@ -558,7 +558,7 @@ final class Settings {
 
     var rules: [GestureRule] {
         get { _rules }
-        set { _rules = Self.normalizeRules(newValue); GlideConfigStore.shared.scheduleSave() }
+        set { _rules = Self.normalizeRules(newValue, appSwitcher: _appSwitcher); GlideConfigStore.shared.scheduleSave() }
     }
 
     var appSwitcher: AppSwitcherSettings {
@@ -600,7 +600,7 @@ final class Settings {
         var loadedRules = config.toRules()
         Self.migrateLegacyAppSwitcherRules(into: &switcher, rules: &loadedRules)
         _appSwitcher     = AppSwitcherSettings.normalized(switcher)
-        _rules           = Self.normalizeRules(loadedRules)
+        _rules           = Self.normalizeRules(loadedRules, appSwitcher: _appSwitcher)
         _tuning          = Self.normalizedTuning(config.toTuning())
         _windowTargeting = WindowTargetingMode(rawValue: config.preferences.windowTargeting) ?? .focusedThenCursor
         _hapticFeedback  = config.preferences.hapticFeedback
@@ -635,9 +635,12 @@ final class Settings {
 
     // MARK: Rule normalization (duplicates are allowed — latest match wins at runtime)
 
-    private static func normalizeRules(_ rules: [GestureRule]) -> [GestureRule] {
+    private static func normalizeRules(_ rules: [GestureRule], appSwitcher: AppSwitcherSettings) -> [GestureRule] {
         var copy = rules
         copy.removeAll { isAppSwitcherAction($0.action) }
+        if appSwitcher.enabled {
+            stripReservedHorizontalSwipes(from: &copy, fingerCount: appSwitcher.fingers)
+        }
         return copy.map { normalizedRule($0) }
     }
 

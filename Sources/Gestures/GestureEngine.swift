@@ -62,12 +62,12 @@ final class GestureEngine {
     func stop() {
         guard isRunning else { return }
 
+        finishIfNeeded()
         MultitouchBridge.shared.stop()
         inputManager.teardownTaps()
         inputManager.removeMonitors()
 
         TouchTracker.resetGlobalMTState()
-        phase = .idle
         reciprocalToken = nil
         lastStepTime = 0
         isRunning = false
@@ -160,7 +160,7 @@ final class GestureEngine {
         var finderIndex: Int? = nil
         if Settings.shared.appSwitcher.skipWindowlessFinder {
             if let idx = apps.firstIndex(where: { $0.bundleIdentifier == "com.apple.finder" }) {
-                if WindowTargeting.shared.windows(for: apps[idx].processIdentifier).isEmpty {
+                if !WindowTargeting.shared.finderHasAnyWindow() {
                     finderIndex = idx
                 }
             }

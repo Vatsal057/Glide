@@ -30,7 +30,7 @@ final class KeyboardEmulator {
     }
 
     func sendKey(_ key: CGKeyCode, _ flags: CGEventFlags) {
-        AppLogger.debug("[KeyboardEmulator] Sending key \\(key)")
+        AppLogger.debug("[KeyboardEmulator] Sending key \(key)")
         guard let src = keyEventSource ?? CGEventSource(stateID: .hidSystemState),
               let kd = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: true),
               let ku = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: false) else { return }
@@ -103,7 +103,7 @@ enum SystemActions {
         var error: NSDictionary?
         NSAppleScript(source: script)?.executeAndReturnError(&error)
         if let error {
-            AppLogger.debug("[Action] Empty trash failed: \\(error)")
+            AppLogger.debug("[Action] Empty trash failed: \(error)")
         }
     }
 

@@ -148,6 +148,7 @@ final class GestureInputManager {
     func removeMonitors() {
         interactionMonitors.forEach { NSEvent.removeMonitor($0) }
         interactionMonitors.removeAll()
+        pressureMonitor = nil
     }
 
     func checkHealth() {

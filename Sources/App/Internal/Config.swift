@@ -808,9 +808,26 @@ enum GlideConfigParser {
     private static func stringVal(_ s: String?) -> String? {
         guard let s else { return nil }
         if (s.hasPrefix("\"") && s.hasSuffix("\"")) || (s.hasPrefix("'") && s.hasSuffix("'")) {
-            return String(s.dropFirst().dropLast())
+            return unescapeQuotedString(String(s.dropFirst().dropLast()))
         }
         return s
+    }
+
+    private static func unescapeQuotedString(_ s: String) -> String {
+        var result = ""
+        var escaping = false
+        for ch in s {
+            if escaping {
+                result.append(ch)
+                escaping = false
+            } else if ch == "\\" {
+                escaping = true
+            } else {
+                result.append(ch)
+            }
+        }
+        if escaping { result.append("\\") }
+        return result
     }
 
     private static func nullableStringVal(_ s: String?) -> String? {
