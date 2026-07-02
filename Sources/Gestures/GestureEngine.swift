@@ -15,11 +15,37 @@ final class GestureEngine {
     // MARK: - State
     private(set) var phase: GesturePhase = .idle
     private var reciprocalToken: ReciprocalToken?
+    /// Direction + finger count of the most recently fired swipe rule.
+    /// Used to detect back-to-back same-direction gestures (toggles) so we don't
+    /// leave a stale reciprocal token pointing the other way.
+    private var lastFiredSwipe: (fingers: Int, direction: GestureDirection)?
     private(set) var isRunning = false
     
     var lastStepTime: TimeInterval = 0
     private lazy var keyEventSource = CGEventSource(stateID: .hidSystemState)
     var peakResetWorkItem: DispatchWorkItem?
+
+    /// macOS accessibility zoom is "double-tap three fingers, then drag". A brief,
+    /// motionless 3-finger tap followed by an immediate 3-finger re-touch is that
+    /// zoom drag — the whole second touch session must not trigger any gesture.
+    private var touchSessionStart: (time: TimeInterval, cx: Float, cy: Float)?
+    private var touchSessionMovement: Float = 0
+    private var lastThreeFingerTapEnd: TimeInterval = 0
+    private var isSystemZoomSession = false
+    /// Longest contact still considered a "tap" (system double-tap taps are ~0.1s).
+    private let tapMaxDuration: TimeInterval = 0.25
+    /// Max centroid travel (normalized) for a contact to count as a tap.
+    private let tapMaxMovement: Float = 0.025
+    /// Max gap between tap release and the zoom drag's re-touch.
+    private let doubleTapWindow: TimeInterval = 0.4
+
+    /// A normal click deferred until we know whether it's actually a force click.
+    /// Resolved by either a mouse-up (→ normal click) or a deep press (→ force click).
+    private var pendingClick: (rule: GestureRule, fingers: Int)?
+    /// Safety net that flushes a pending click if a mouse-up event is ever missed.
+    private var pendingClickTimeout: DispatchWorkItem?
+    /// Upper bound before a deferred click is force-flushed as a normal click.
+    private let pendingClickSafetyTimeout: TimeInterval = 0.7
 
     // MARK: - Observable state
     private(set) var currentPhaseName: String = "Idle"
@@ -48,6 +74,10 @@ final class GestureEngine {
         TouchTracker.resetGlobalMTState()
         phase = .idle
         reciprocalToken = nil
+        lastFiredSwipe = nil
+        pendingClickTimeout?.cancel(); pendingClickTimeout = nil; pendingClick = nil
+        touchSessionStart = nil; touchSessionMovement = 0
+        lastThreeFingerTapEnd = 0; isSystemZoomSession = false
 
         inputManager.setupTaps()
         MultitouchBridge.shared.start(callback: glideMTCallback)
@@ -70,6 +100,7 @@ final class GestureEngine {
         TouchTracker.resetGlobalMTState()
         reciprocalToken = nil
         lastStepTime = 0
+        pendingClickTimeout?.cancel(); pendingClickTimeout = nil; pendingClick = nil
         isRunning = false
         AppSwitcherState.shared.stopMRUTracking()
         updateObservableState()
@@ -79,7 +110,35 @@ final class GestureEngine {
     // MARK: - Touch update
 
     func onTouches(_ frame: TouchFrameData) {
-        inputManager.setSuppressionActive(frame.count >= 3)
+        let now = ProcessInfo.processInfo.systemUptime
+
+        if frame.count >= 3 {
+            if touchSessionStart == nil {
+                touchSessionStart = (time: now, cx: frame.cx, cy: frame.cy)
+                touchSessionMovement = 0
+                // Re-touch right after a 3-finger tap → system zoom drag.
+                isSystemZoomSession = now - lastThreeFingerTapEnd < doubleTapWindow
+                if isSystemZoomSession { phase = .ignored }
+            } else if let start = touchSessionStart {
+                let dx = frame.cx - start.cx, dy = frame.cy - start.cy
+                touchSessionMovement = max(touchSessionMovement, (dx * dx + dy * dy).squareRoot())
+            }
+        } else if let start = touchSessionStart {
+            // Session ended — was it a tap (short + motionless)?
+            let wasTap = now - start.time < tapMaxDuration && touchSessionMovement < tapMaxMovement
+            lastThreeFingerTapEnd = wasTap ? now : 0
+            touchSessionStart = nil
+            isSystemZoomSession = false
+        }
+
+        // Leave events untouched while a contact could still be a zoom double-tap
+        // (short + motionless) and during the zoom drag itself — suppressing the
+        // taps starves the system recognizer and native zoom never triggers.
+        let couldBeTap: Bool = {
+            guard let start = touchSessionStart else { return false }
+            return now - start.time < tapMaxDuration && touchSessionMovement < tapMaxMovement
+        }()
+        inputManager.setSuppressionActive(frame.count >= 3 && !isSystemZoomSession && !couldBeTap)
         currentFingerCount = Int(frame.count)
 
         if frame.count < 3 {
@@ -109,7 +168,51 @@ final class GestureEngine {
         let modifiers = captureModifiers()
         guard let rule = GestureRuleResolver.bestRule(fingers: n, direction: .click, modifiers: modifiers) else { return }
 
-        AppLogger.debug("[Engine] Click — \(n) fingers → \(rule.action.rawValue)")
+        // A Force Touch trackpad emits this normal click (stage 1) *before* the deep
+        // press (stage 2). If a force-click rule is also configured for this finger
+        // count, we can't yet tell whether this is a normal or force click. Defer it
+        // and resolve on whichever happens first:
+        //   • mouse-up  → it was a normal click  (flushPendingClick)
+        //   • deep press → it was a force click  (processForceClick cancels this)
+        // With no force rule, fire instantly (no added latency).
+        let hasForceRule = GestureRuleResolver.bestRule(fingers: n, direction: .forceClick, modifiers: modifiers) != nil
+        if hasForceRule {
+            pendingClickTimeout?.cancel()
+            pendingClick = (rule: rule, fingers: n)
+            let timeout = DispatchWorkItem { [weak self] in self?.flushPendingClick() }
+            pendingClickTimeout = timeout
+            DispatchQueue.main.asyncAfter(deadline: .now() + pendingClickSafetyTimeout, execute: timeout)
+        } else {
+            fireClickRule(rule, label: "Click", fingerCount: n)
+        }
+    }
+
+    /// Called when a left mouse-up is observed. If a click is pending (no deep press
+    /// arrived before release), it was a normal click — fire it now.
+    func flushPendingClick() {
+        pendingClickTimeout?.cancel()
+        pendingClickTimeout = nil
+        guard let pc = pendingClick else { return }
+        pendingClick = nil
+        fireClickRule(pc.rule, label: "Click", fingerCount: pc.fingers)
+    }
+
+    func processForceClick(fingerCount n: Int) {
+        if case .switchingApps = phase { return }
+        guard TouchTracker.areClickTouchesSimultaneous() else { return }
+
+        // The deep press supersedes any pending normal click — discard it.
+        pendingClickTimeout?.cancel()
+        pendingClickTimeout = nil
+        pendingClick = nil
+
+        let modifiers = captureModifiers()
+        guard let rule = GestureRuleResolver.bestRule(fingers: n, direction: .forceClick, modifiers: modifiers) else { return }
+        fireClickRule(rule, label: "Force Click", fingerCount: n)
+    }
+
+    private func fireClickRule(_ rule: GestureRule, label: String, fingerCount n: Int) {
+        AppLogger.debug("[Engine] \(label) — \(n) fingers → \(rule.action.rawValue)")
         clearReciprocalToken()
         phase = .fired
 
@@ -128,6 +231,10 @@ final class GestureEngine {
         guard TouchTracker.glideActiveTouches < 3 else { return }
         if case .fired = phase { return }
         if case .switchingApps = phase { return }
+        // Don't clear the reciprocal token while idle — mouse movement between
+        // two gestures is normal and would otherwise kill a pending reciprocal.
+        // The token already has a TTL (1.5s) so it expires on its own.
+        if case .idle = phase { return }
         clearReciprocalToken()
     }
 
@@ -225,8 +332,25 @@ final class GestureEngine {
 
     func executeSwipeRule(_ rule: GestureRule, fingers: Int, direction: GestureDirection) {
         executeGestureRuleAction(rule)
+
+        // Track what just fired so we can detect back-to-back same-direction toggles.
+        let previousFired = lastFiredSwipe
+        lastFiredSwipe = (fingers: fingers, direction: direction)
+
         if rule.reciprocalEnabled {
-            reciprocalToken = makeReciprocalToken(rule: rule, direction: direction)
+            // If the user just fired the same direction twice in a row (e.g. swipe-up
+            // to open Mission Control, then swipe-up again to close it), that second
+            // gesture consumed the toggle — don't leave a token pointing the other way
+            // or the very next gesture in that direction gets hijacked.
+            let isToggle = previousFired?.fingers == fingers && previousFired?.direction == direction
+            if isToggle {
+                clearReciprocalToken()
+                // Toggle pair consumed (open → close). The next same-direction swipe
+                // re-opens, so it must arm a fresh token — reset tracking to alternate.
+                lastFiredSwipe = nil
+            } else {
+                reciprocalToken = makeReciprocalToken(rule: rule, direction: direction)
+            }
         } else {
             clearReciprocalToken()
         }
@@ -234,10 +358,16 @@ final class GestureEngine {
     }
 
     func consumeReciprocalToken(fingers: Int, direction: GestureDirection, now: TimeInterval) -> Bool {
-        guard let token = reciprocalToken, now <= token.expiresAt, token.fingers == fingers, token.direction == direction else {
-            clearReciprocalToken(); return false
+        guard let token = reciprocalToken,
+              now <= token.expiresAt,
+              token.fingers == fingers,
+              token.direction == direction else {
+            // Don't clear the token on a miss — it may still be valid for the next gesture.
+            // It will expire on its own via the TTL, or get replaced when a new rule fires.
+            return false
         }
         clearReciprocalToken()
+        lastFiredSwipe = nil   // reciprocal consumed — reset toggle tracking
         Haptic.reciprocal()
         ActionExecutor.shared.execute(token.inverseAction)
         return true

@@ -139,10 +139,12 @@ extension GlideConfig {
         cfg.tuning.edgeMarginBottom          = t.edgeMargin.bottom
 
         cfg.gestures = s.rules.map { rule in
-            let isClick = rule.direction == .click
+            let isClick = rule.direction.isClickLike
+            let typeStr = rule.direction == .forceClick ? "force_click"
+                        : (rule.direction == .click ? "click" : "swipe")
             let normalized = GestureRule.migratingLegacyAppFilter(rule)
             return GlideConfig.Gesture(
-                type:        isClick ? "click" : "swipe",
+                type:        typeStr,
                 direction:   isClick ? nil     : yamlDirection(rule.direction),
                 fingers:     rule.fingers,
                 speed:       isClick ? nil     : rule.speed.rawValue.lowercased(),
@@ -218,6 +220,8 @@ extension GlideConfig {
             let direction: GestureDirection
             if g.type == "click" {
                 direction = .click
+            } else if g.type == "force_click" {
+                direction = .forceClick
             } else {
                 guard let d = swiftDirection(g.direction) else { return nil }
                 direction = d
@@ -276,6 +280,7 @@ extension GlideConfig {
         case .swipeUp:    return "up"
         case .swipeDown:  return "down"
         case .click:      return "none"
+        case .forceClick: return "none"
         }
     }
 

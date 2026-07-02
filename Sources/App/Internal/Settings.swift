@@ -11,12 +11,17 @@ enum GestureFingers: Int, Codable, CaseIterable {
 
 enum GestureDirection: String, Codable, CaseIterable {
     case click           = "Click"
+    case forceClick      = "Force Click"
     case swipeLeftRight  = "Left / Right"
     case swipeUpDown     = "Up / Down"
     case swipeLeft       = "Swipe Left"
     case swipeRight      = "Swipe Right"
     case swipeUp         = "Swipe Up"
     case swipeDown       = "Swipe Down"
+
+    /// True for tap-style gestures (normal or force click) that have no axis,
+    /// speed, reciprocal or continuous behaviour.
+    var isClickLike: Bool { self == .click || self == .forceClick }
 }
 
 enum GestureSpeed: String, Codable, CaseIterable {
@@ -355,7 +360,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
         GestureMatchSignature(
             fingers: fingers,
             direction: direction,
-            speed: (speed == .any || direction == .click) ? .normal : speed,
+            speed: (speed == .any || direction.isClickLike) ? .normal : speed,
             appFilter: appFilter,
             windowStateFilter: windowStateFilter,
             modifierFilter: modifierFilter
@@ -647,8 +652,8 @@ final class Settings {
     private static func normalizedRule(_ rule: GestureRule) -> GestureRule {
         var r = GestureRule.migratingLegacyAppFilter(rule)
         r.fingers = min(max(r.fingers, 2), 5)
-        r.speed   = (r.speed == .any || r.direction == .click) ? .normal : r.speed
-        if r.direction == .click {
+        r.speed   = (r.speed == .any || r.direction.isClickLike) ? .normal : r.speed
+        if r.direction.isClickLike {
             r.reciprocalEnabled = false
             r.continuous = false
             r.continuousNegativeAction = .doNothing

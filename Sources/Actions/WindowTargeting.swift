@@ -46,11 +46,16 @@ final class WindowTargeting {
     }
 
     private struct MinimizeAllSession {
+        /// Only windows that were visible *before* the gesture (we minimized them).
         var windows: [MinimizedWindowRecord]
         let frontmostPID: pid_t?
+        /// PIDs that were already minimized before we ran — we leave those alone.
+        let preMinimizedPIDs: Set<pid_t>
     }
 
     private var minimizeAllSession: MinimizeAllSession?
+    /// Tracks in-flight async work so we can cancel a restore if minimize fires again.
+    private var pendingRestoreWorkItems: [DispatchWorkItem] = []
 
     // MARK: - App under cursor
 
@@ -213,14 +218,31 @@ final class WindowTargeting {
     }
 
     func minimizeAllApps() {
-        let myPID = ProcessInfo.processInfo.processIdentifier
+        // Cancel any in-flight restore work so minimize always wins.
+        pendingRestoreWorkItems.forEach { $0.cancel() }
+        pendingRestoreWorkItems = []
+
+        let myPID    = ProcessInfo.processInfo.processIdentifier
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+
+        // Snapshot which PIDs already had every window minimized — don't record those,
+        // so we don't accidentally un-minimize them on restore.
+        var preMinimizedPIDs = Set<pid_t>()
+        for app in NSWorkspace.shared.runningApplications
+            where app.activationPolicy == .regular && app.processIdentifier != myPID {
+            let wins = windows(for: app.processIdentifier)
+            if !wins.isEmpty && wins.allSatisfy({ axBool($0, attribute: kAXMinimizedAttribute as CFString) == true }) {
+                preMinimizedPIDs.insert(app.processIdentifier)
+            }
+        }
 
         var backWindows:  [MinimizedWindowRecord] = []
         var frontWindows: [MinimizedWindowRecord] = []
 
         for app in NSWorkspace.shared.runningApplications
-            where app.activationPolicy == .regular && app.processIdentifier != myPID {
+            where app.activationPolicy == .regular
+               && app.processIdentifier != myPID
+               && !preMinimizedPIDs.contains(app.processIdentifier) {
             for w in windows(for: app.processIdentifier) {
                 guard shouldMinimizeWindow(w) else { continue }
                 let record = MinimizedWindowRecord(window: w, pid: app.processIdentifier)
@@ -232,18 +254,23 @@ final class WindowTargeting {
             }
         }
 
-        var minimizedNow: [MinimizedWindowRecord] = []
-        for record in backWindows + frontWindows {
-            if setAXBool(record.window, attribute: kAXMinimizedAttribute as CFString, value: true) {
-                minimizedNow.append(record)
-            }
+        // Send all minimize commands at once — macOS handles concurrent AX writes
+        // fine and all windows animate simultaneously (like Show Desktop).
+        let ordered = backWindows + frontWindows
+        for record in ordered {
+            setAXBool(record.window, attribute: kAXMinimizedAttribute as CFString, value: true)
         }
 
-        if !minimizedNow.isEmpty {
-            minimizeAllSession = MinimizeAllSession(windows: minimizedNow, frontmostPID: frontPID)
+        if !ordered.isEmpty {
+            minimizeAllSession = MinimizeAllSession(
+                windows: ordered,
+                frontmostPID: frontPID,
+                preMinimizedPIDs: preMinimizedPIDs
+            )
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        // After animations finish, surface the Finder / Desktop.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             NSWorkspace.shared.runningApplications
                 .first { $0.bundleIdentifier == "com.apple.finder" }?
                 .activate(options: .activateIgnoringOtherApps)
@@ -254,25 +281,38 @@ final class WindowTargeting {
         pruneStaleMinimizedWindows()
         guard let session = minimizeAllSession, !session.windows.isEmpty else { return }
 
-        let toRestore  = session.windows.reversed()
+        // Clear immediately so a rapid second gesture can start fresh.
+        minimizeAllSession = nil
+
+        // Cancel any previous in-flight restore (shouldn't normally happen, but be safe).
+        pendingRestoreWorkItems.forEach { $0.cancel() }
+        pendingRestoreWorkItems = []
+
+        // Restore in reverse order (frontmost app's windows come back on top).
+        let toRestore    = session.windows.reversed()
         let frontmostPID = session.frontmostPID
 
         for (idx, record) in toRestore.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(idx) * 0.03) {
+            let item = DispatchWorkItem {
                 _ = self.setAXBool(record.window, attribute: kAXMinimizedAttribute as CFString, value: false)
             }
+            pendingRestoreWorkItems.append(item)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(idx) * 0.04, execute: item)
         }
 
-        let totalDelay = Double(session.windows.count) * 0.03 + 0.1
-        DispatchQueue.main.asyncAfter(deadline: .now() + totalDelay) {
-            if let frontmostPID,
-               let app = NSRunningApplication(processIdentifier: frontmostPID),
+        // Activate the previously-frontmost app once all animations have settled.
+        let totalDelay = Double(toRestore.count) * 0.04 + 0.12
+        let activateItem = DispatchWorkItem {
+            if let pid = frontmostPID,
+               let app = NSRunningApplication(processIdentifier: pid),
                !app.isTerminated {
                 app.activate(options: .activateIgnoringOtherApps)
             }
+            // Clear work-item list when fully done.
+            self.pendingRestoreWorkItems.removeAll()
         }
-
-        minimizeAllSession = nil
+        pendingRestoreWorkItems.append(activateItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + totalDelay, execute: activateItem)
     }
 
     func maximize() {
@@ -520,7 +560,11 @@ final class WindowTargeting {
     private func pruneStaleMinimizedWindows(for pid: pid_t? = nil) {
         guard var session = minimizeAllSession else { return }
         session.windows.removeAll { record in
+            // Always drop records for a terminated PID.
             if let pid, record.pid == pid { return true }
+            // Drop if the app has quit.
+            if NSRunningApplication(processIdentifier: record.pid)?.isTerminated == true { return true }
+            // Drop if the window is no longer minimized (e.g. user manually restored it).
             return axBool(record.window, attribute: kAXMinimizedAttribute as CFString) != true
         }
         if session.windows.isEmpty {

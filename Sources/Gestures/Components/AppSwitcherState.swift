@@ -47,7 +47,7 @@ final class AppSwitcherState {
                 let bi = mru.firstIndex(of: b.processIdentifier) ?? Int.max
                 return ai < bi
             }
-        }
+            }
         return apps
     }
 }

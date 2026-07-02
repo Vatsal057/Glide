@@ -34,6 +34,7 @@ final class GestureInputManager {
 
     func setupSuppressionTap() {
         let mask = UInt64(NSEvent.EventTypeMask.gesture.rawValue)
+                 | UInt64(NSEvent.EventTypeMask.pressure.rawValue)
                  | UInt64(1 << CGEventType.scrollWheel.rawValue)
                  | UInt64(1 << CGEventType.leftMouseDown.rawValue)
 
@@ -55,7 +56,16 @@ final class GestureInputManager {
                     if TouchTracker.glideActiveTouches >= 3 { TouchTracker.glideClickFingerCount = TouchTracker.glideActiveTouches }
                     return Unmanaged.passUnretained(cgEvent)
                 }
-                if TouchTracker.glideActiveTouches >= 3 { return nil }
+                if TouchTracker.glideActiveTouches >= 3 {
+                    // Deep-press events are gesture-class, so this tap swallows them
+                    // while 3+ fingers are down — exactly when a force click can happen.
+                    // The NSEvent pressure monitor would never see them; detect here first.
+                    if type.rawValue != CGEventType.scrollWheel.rawValue,
+                       let ns = NSEvent(cgEvent: cgEvent), ns.type == .pressure {
+                        GestureEngine.shared.inputManager.handleDeepPress(stage: ns.stage)
+                    }
+                    return nil
+                }
                 return Unmanaged.passUnretained(cgEvent)
             },
             userInfo: nil)
@@ -131,18 +141,33 @@ final class GestureInputManager {
             self?.engine?.handleExternalInteraction()
         }) { interactionMonitors.append(m) }
 
+        // Resolve a deferred click on release: if no deep press arrived before the
+        // fingers lifted, it was a normal click. Dispatched async so it always runs
+        // after the mouse-down's processClick has registered the pending click.
+        if let up = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp], handler: { [weak self] _ in
+            DispatchQueue.main.async { self?.engine?.flushPendingClick() }
+        }) { interactionMonitors.append(up) }
+
+        // Fallback path only — while 3+ fingers are down the suppression tap consumes
+        // pressure events before they reach this monitor, and calls handleDeepPress itself.
         let pressureMask = NSEvent.EventTypeMask(rawValue: 1 << NSEvent.EventType.pressure.rawValue)
         pressureMonitor = NSEvent.addGlobalMonitorForEvents(matching: pressureMask) { [weak self] event in
-            guard let self = self, let engine = self.engine, engine.isRunning else { return }
-            let count = TouchTracker.getThreeFingerCount()
-            let peak = TouchTracker.getSessionPeakActiveTouches()
-            guard TouchTracker.clickGestureMatchesFingerState(count: count, peak: peak), event.stage >= 2 else { return }
-            let now = Date().timeIntervalSinceReferenceDate
-            guard now - self.lastForceClickTime > self.forceCooldown else { return }
-            self.lastForceClickTime = now
-            DispatchQueue.main.async { engine.processClick(fingerCount: count) }
+            self?.handleDeepPress(stage: event.stage)
         }
         if let pm = pressureMonitor { interactionMonitors.append(pm) }
+    }
+
+    /// Deep-press (stage 2) → force click. Called from both the suppression tap and the
+    /// NSEvent pressure monitor; the cooldown dedupes if both ever see the same press.
+    func handleDeepPress(stage: Int) {
+        guard stage >= 2, let engine = engine, engine.isRunning else { return }
+        let count = TouchTracker.getThreeFingerCount()
+        let peak = TouchTracker.getSessionPeakActiveTouches()
+        guard TouchTracker.clickGestureMatchesFingerState(count: count, peak: peak) else { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        guard now - lastForceClickTime > forceCooldown else { return }
+        lastForceClickTime = now
+        DispatchQueue.main.async { engine.processForceClick(fingerCount: count) }
     }
 
     func removeMonitors() {

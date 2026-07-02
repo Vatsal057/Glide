@@ -288,7 +288,7 @@ final class PreferencesStore: ObservableObject {
 
     private func sanitizedRule(_ r: GestureRule) -> GestureRule {
         var copy = r
-        if copy.direction == .click {
+        if copy.direction.isClickLike {
             copy.speed = .normal
             copy.reciprocalEnabled = false
         }

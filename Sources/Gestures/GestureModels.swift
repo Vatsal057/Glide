@@ -106,7 +106,7 @@ extension GestureDirection {
             return self == .swipeLeft || self == .swipeRight
         case .swipeUp, .swipeDown, .swipeUpDown:
             return self == .swipeUp || self == .swipeDown
-        case .click:
+        case .click, .forceClick:
             return false
         }
     }

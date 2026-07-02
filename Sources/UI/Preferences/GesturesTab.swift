@@ -93,7 +93,7 @@ struct RuleRow: View {
 
                 HStack(spacing: 4) {
                     Text(rule.direction.rawValue)
-                    if rule.direction != .click {
+                    if !rule.direction.isClickLike {
                         Text("·")
                         Text(rule.speed.rawValue)
                     }
@@ -244,7 +244,7 @@ struct RuleEditor: View {
                             }
                         }
 
-                        if rule.direction != .click {
+                        if !rule.direction.isClickLike {
                             EditorRow(label: "Speed") {
                                 Picker("", selection: $rule.speed) {
                                     ForEach(GestureSpeed.allCases, id: \.self) { s in
@@ -318,7 +318,7 @@ struct RuleEditor: View {
                                     }
                                 }
                                 .frame(maxWidth: 200)
-                                if rule.direction != .click {
+                                if !rule.direction.isClickLike {
                                     Text("Hold this modifier when starting the gesture. Example: Shift + 3-finger swipe right → Cycle Windows (⌘`).")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -346,7 +346,7 @@ struct RuleEditor: View {
                             .frame(maxWidth: 200)
                         }
 
-                        if rule.direction != .click {
+                        if !rule.direction.isClickLike {
                             if !rule.continuous {
                                 EditorRow(label: "Reciprocal") {
                                     Toggle("Reverse gesture undoes this action", isOn: $rule.reciprocalEnabled)

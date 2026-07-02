@@ -111,7 +111,7 @@ struct GeneralTab: View {
                     color: .orange
                 )
                 StatCard(
-                    value: "\(store.rules.filter { $0.reciprocalEnabled && $0.direction != .click }.count)",
+                    value: "\(store.rules.filter { $0.reciprocalEnabled && !$0.direction.isClickLike }.count)",
                     label: "Reciprocal Pairs",
                     icon: "arrow.left.and.right",
                     color: .teal
