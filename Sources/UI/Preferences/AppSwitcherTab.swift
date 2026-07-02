@@ -28,11 +28,6 @@ struct AppSwitcherTab: View {
 
                 if store.appSwitcher.enabled {
                     TuningSection(title: "Behavior", icon: "gearshape") {
-                        Toggle("Order apps by recent use", isOn: switcherBinding(\.useMRUOrdering))
-                        Text("Matches the order you see in the macOS ⌘Tab switcher.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
                         Toggle("Skip Finder when it has no windows", isOn: switcherBinding(\.skipWindowlessFinder))
                         Text("Avoids landing on an empty Finder desktop while browsing.")
                             .font(.caption)

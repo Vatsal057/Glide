@@ -38,6 +38,16 @@ enum TouchTracker {
     /// Max age difference (seconds) between oldest and newest active finger for a valid click.
     static let maxClickFingerAgeSpread: TimeInterval = 0.15
 
+    /// How long after a finger lift clicks stay blocked. Tap-to-click on an extra
+    /// finger (e.g. 3 resting + 4th taps) emits the mouseDown right as that finger
+    /// lifts; a deliberate click keeps every finger planted through the press.
+    /// Finger *ages* can't be used for this — resting fingers intermittently drop
+    /// out of the MT touch state and re-register, resetting their first-seen time.
+    static let recentLiftClickBlock: TimeInterval = 0.25
+
+    /// Set by the MT callback whenever the active-touch count decreases.
+    static var glideLastFingerLiftTime: TimeInterval = 0
+
     static func areClickTouchesSimultaneous() -> Bool {
         let spread = glideOldestFingerAge - glideNewestFingerAge
         return spread <= maxClickFingerAgeSpread
@@ -45,6 +55,8 @@ enum TouchTracker {
 
     static func clickGestureMatchesFingerState(count: Int, peak: Int) -> Bool {
         guard count >= 3, peak >= count else { return false }
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - glideLastFingerLiftTime < recentLiftClickBlock { return false }
         if count == peak { return true }
         return areClickTouchesSimultaneous()
     }
@@ -75,6 +87,7 @@ enum TouchTracker {
         glideFingerFirstSeen.removeAll(keepingCapacity: true)
         glideOldestFingerAge = 0
         glideNewestFingerAge = 0
+        glideLastFingerLiftTime = 0
     }
 }
 let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
@@ -147,6 +160,9 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
 
     let prevActiveTouches = TouchTracker.glideActiveTouches
     TouchTracker.glideActiveTouches = activeCount
+    if activeCount < prevActiveTouches {
+        TouchTracker.glideLastFingerLiftTime = nowTs
+    }
 
     if activeCount >= 3 {
         TouchTracker.glidePeakFingerCount = activeCount

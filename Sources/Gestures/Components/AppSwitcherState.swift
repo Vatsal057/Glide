@@ -38,16 +38,16 @@ final class AppSwitcherState {
     }
 
     func getOrderedApps() -> [NSRunningApplication] {
-        var apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
-        let cfg = Settings.shared.appSwitcher
-        if cfg.useMRUOrdering {
-            let mru = self.mruAppOrder
-            apps.sort { a, b in
-                let ai = mru.firstIndex(of: a.processIdentifier) ?? Int.max
-                let bi = mru.firstIndex(of: b.processIdentifier) ?? Int.max
-                return ai < bi
-            }
-            }
-        return apps
+        // This list models the *system* ⌘Tab switcher, which is always MRU-ordered.
+        // The index math (Finder skip, step boundaries) breaks whenever the model
+        // diverges from it, so MRU is not optional here. Stable tie-break keeps
+        // never-activated apps in a deterministic order.
+        let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+        let mru = self.mruAppOrder
+        return apps.enumerated().sorted { a, b in
+            let ai = mru.firstIndex(of: a.element.processIdentifier) ?? Int.max
+            let bi = mru.firstIndex(of: b.element.processIdentifier) ?? Int.max
+            return ai == bi ? a.offset < b.offset : ai < bi
+        }.map(\.element)
     }
 }
