@@ -138,7 +138,13 @@ final class GestureEngine {
             guard let start = touchSessionStart else { return false }
             return now - start.time < tapMaxDuration && touchSessionMovement < tapMaxMovement
         }()
-        inputManager.setSuppressionActive(frame.count >= 3 && !isSystemZoomSession && !couldBeTap)
+        // Tap stays active whenever 3+ fingers are down EXCEPT during the native
+        // zoom drag, where every event must reach the system. In the initial
+        // tap-detection window we keep the tap on but pass gesture-class events
+        // (tapWindowActive) so the zoom double-tap is still recognized — while
+        // scroll stays suppressed, so a swipe can't scrub video at gesture onset.
+        inputManager.tapWindowActive = couldBeTap
+        inputManager.setSuppressionActive(frame.count >= 3 && !isSystemZoomSession)
         currentFingerCount = Int(frame.count)
 
         if frame.count < 3 {
@@ -179,12 +185,27 @@ final class GestureEngine {
         if hasForceRule {
             pendingClickTimeout?.cancel()
             pendingClick = (rule: rule, fingers: n)
-            let timeout = DispatchWorkItem { [weak self] in self?.flushPendingClick() }
-            pendingClickTimeout = timeout
-            DispatchQueue.main.asyncAfter(deadline: .now() + pendingClickSafetyTimeout, execute: timeout)
+            armPendingClickSafetyTimeout()
         } else {
             fireClickRule(rule, label: "Click", fingerCount: n)
         }
+    }
+
+    /// Safety net for a missed mouse-up. While the left button is still physically
+    /// held, resolving now would fire a click mid-hold (the user may still be heading
+    /// for a force click) — so keep re-arming until the button is actually released.
+    private func armPendingClickSafetyTimeout() {
+        pendingClickTimeout?.cancel()
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.pendingClick != nil else { return }
+            if NSEvent.pressedMouseButtons & 1 != 0 {
+                self.armPendingClickSafetyTimeout()
+            } else {
+                self.flushPendingClick()
+            }
+        }
+        pendingClickTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + pendingClickSafetyTimeout, execute: timeout)
     }
 
     /// Called when a left mouse-up is observed. If a click is pending (no deep press

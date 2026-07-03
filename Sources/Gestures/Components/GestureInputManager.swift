@@ -8,6 +8,11 @@ final class GestureInputManager {
     var suppressionSource: CFRunLoopSource?
     private(set) var suppressionEnabled = false
 
+    /// During the zoom double-tap window the tap stays active, but gesture-class
+    /// events are passed through so macOS can recognize the tap. Scroll is always
+    /// swallowed at 3+ fingers regardless, so a moving swipe can't scrub video.
+    var tapWindowActive = false
+
     var clickObservationTap: CFMachPort?
     var clickObservationSource: CFRunLoopSource?
     var clickTapInstalled = false
@@ -57,14 +62,19 @@ final class GestureInputManager {
                     return Unmanaged.passUnretained(cgEvent)
                 }
                 if TouchTracker.glideActiveTouches >= 3 {
+                    let im = GestureEngine.shared.inputManager!
+                    let isScroll = type.rawValue == CGEventType.scrollWheel.rawValue
                     // Deep-press events are gesture-class, so this tap swallows them
                     // while 3+ fingers are down — exactly when a force click can happen.
                     // The NSEvent pressure monitor would never see them; detect here first.
-                    if type.rawValue != CGEventType.scrollWheel.rawValue,
-                       let ns = NSEvent(cgEvent: cgEvent), ns.type == .pressure {
-                        GestureEngine.shared.inputManager.handleDeepPress(stage: ns.stage)
+                    if !isScroll, let ns = NSEvent(cgEvent: cgEvent), ns.type == .pressure {
+                        im.handleDeepPress(stage: ns.stage)
                     }
-                    return nil
+                    // Always swallow scroll at 3+ fingers so a 3-finger swipe can't
+                    // reach apps (e.g. scrub a video). In the zoom tap window, still
+                    // pass gesture-class events so the double-tap is recognized.
+                    if isScroll { return nil }
+                    return im.tapWindowActive ? Unmanaged.passUnretained(cgEvent) : nil
                 }
                 return Unmanaged.passUnretained(cgEvent)
             },
