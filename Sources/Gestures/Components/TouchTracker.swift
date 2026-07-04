@@ -3,36 +3,52 @@ import ApplicationServices
 
 enum TouchTracker {
     // ─────────────────────────────────────────────
-    // MARK: - Global MT state (written on MT/HID thread, read on main)
+    // MARK: - Global MT state
+    //
+    // Written on the MT/HID callback thread, read (and sometimes written) on
+    // the main thread. Every mutable field below is guarded by `stateLock`;
+    // the public accessors take the lock, the MT callback takes it once per
+    // frame and works on the backing fields directly. NSLock is not
+    // re-entrant — never call a public accessor while holding the lock.
     // ─────────────────────────────────────────────
 
-    static var deviceFingerCounts: [UnsafeMutableRawPointer: Int] = [:]
-    static var sessionPeakActiveTouches: Int = 0
-    static let countsLock = NSLock()
+    static let stateLock = NSLock()
+
+    fileprivate static var _deviceFingerCounts: [UnsafeMutableRawPointer: Int] = [:]
+    fileprivate static var _sessionPeakActiveTouches: Int = 0
+    fileprivate static var _fingerFirstSeen: [Int32: TimeInterval] = [:]
+    fileprivate static var _activeTouches: Int32 = 0
+    fileprivate static var _clickFingerCount: Int32 = 0
+    fileprivate static var _peakFingerCount: Int32 = 0
+    fileprivate static var _lastMTTimestamp: TimeInterval = 0
+    fileprivate static var _lastDispatchedCount: Int32 = 0
+    fileprivate static var _oldestFingerAge: Double = 0
+    fileprivate static var _newestFingerAge: Double = 0
+    fileprivate static var _lastFingerLiftTime: TimeInterval = 0
 
     static func updateDeviceFingerCount(device: UnsafeMutableRawPointer, count: Int) {
-        countsLock.lock()
-        defer { countsLock.unlock() }
-        deviceFingerCounts[device] = count
-        
-        let currentMax = deviceFingerCounts.values.max() ?? 0
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        _deviceFingerCounts[device] = count
+
+        let currentMax = _deviceFingerCounts.values.max() ?? 0
         if currentMax == 0 {
-            sessionPeakActiveTouches = 0
+            _sessionPeakActiveTouches = 0
         } else {
-            sessionPeakActiveTouches = max(sessionPeakActiveTouches, currentMax)
+            _sessionPeakActiveTouches = max(_sessionPeakActiveTouches, currentMax)
         }
     }
 
     static func getThreeFingerCount() -> Int {
-        countsLock.lock()
-        defer { countsLock.unlock() }
-        return deviceFingerCounts.values.max() ?? 0
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _deviceFingerCounts.values.max() ?? 0
     }
 
     static func getSessionPeakActiveTouches() -> Int {
-        countsLock.lock()
-        defer { countsLock.unlock() }
-        return sessionPeakActiveTouches
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _sessionPeakActiveTouches
     }
 
     /// Max age difference (seconds) between oldest and newest active finger for a valid click.
@@ -45,54 +61,59 @@ enum TouchTracker {
     /// out of the MT touch state and re-register, resetting their first-seen time.
     static let recentLiftClickBlock: TimeInterval = 0.25
 
-    /// Set by the MT callback whenever the active-touch count decreases.
-    static var glideLastFingerLiftTime: TimeInterval = 0
-
     static func areClickTouchesSimultaneous() -> Bool {
-        let spread = glideOldestFingerAge - glideNewestFingerAge
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return areClickTouchesSimultaneousLocked()
+    }
+
+    fileprivate static func areClickTouchesSimultaneousLocked() -> Bool {
+        let spread = _oldestFingerAge - _newestFingerAge
         return spread <= maxClickFingerAgeSpread
     }
 
     static func clickGestureMatchesFingerState(count: Int, peak: Int) -> Bool {
         guard count >= 3, peak >= count else { return false }
+        stateLock.lock()
+        defer { stateLock.unlock() }
         let now = ProcessInfo.processInfo.systemUptime
-        if now - glideLastFingerLiftTime < recentLiftClickBlock { return false }
+        if now - _lastFingerLiftTime < recentLiftClickBlock { return false }
         if count == peak { return true }
-        return areClickTouchesSimultaneous()
+        return areClickTouchesSimultaneousLocked()
     }
 
-    static var glideActiveTouches: Int32 = 0
-    static var glideClickFingerCount: Int32 = 0
-    static var glidePeakFingerCount: Int32 = 0
-    static var glideLastMTTimestamp: TimeInterval = 0
+    static var glideActiveTouches: Int32 {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _activeTouches }
+        set { stateLock.lock(); defer { stateLock.unlock() }; _activeTouches = newValue }
+    }
 
-    static var glideLastDispatchedCount: Int32 = 0
+    static var glideClickFingerCount: Int32 {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _clickFingerCount }
+        set { stateLock.lock(); defer { stateLock.unlock() }; _clickFingerCount = newValue }
+    }
 
-    static var glideFingerFirstSeen: [Int32: TimeInterval] = [:]
-
-    static var glideOldestFingerAge: Double = 0.0
-    static var glideNewestFingerAge: Double = 0.0
+    static var glidePeakFingerCount: Int32 {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _peakFingerCount }
+        set { stateLock.lock(); defer { stateLock.unlock() }; _peakFingerCount = newValue }
+    }
 
     static func resetGlobalMTState() {
-        countsLock.lock()
-        deviceFingerCounts.removeAll(keepingCapacity: true)
-        sessionPeakActiveTouches = 0
-        countsLock.unlock()
-
-        glideActiveTouches = 0
-        glideClickFingerCount = 0
-        glidePeakFingerCount = 0
-        glideLastMTTimestamp = 0
-        glideLastDispatchedCount = 0
-        glideFingerFirstSeen.removeAll(keepingCapacity: true)
-        glideOldestFingerAge = 0
-        glideNewestFingerAge = 0
-        glideLastFingerLiftTime = 0
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        _deviceFingerCounts.removeAll(keepingCapacity: true)
+        _sessionPeakActiveTouches = 0
+        _activeTouches = 0
+        _clickFingerCount = 0
+        _peakFingerCount = 0
+        _lastMTTimestamp = 0
+        _lastDispatchedCount = 0
+        _fingerFirstSeen.removeAll(keepingCapacity: true)
+        _oldestFingerAge = 0
+        _newestFingerAge = 0
+        _lastFingerLiftTime = 0
     }
 }
 let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
-    TouchTracker.glideLastMTTimestamp = ProcessInfo.processInfo.systemUptime
-
     var validTouches: [MTTouch] = []
     if let data, count > 0 {
         let n = Int(count)
@@ -119,14 +140,23 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
     }
 
     let activeCount = Int32(activeTouches.count)
+    let nowTs = ProcessInfo.processInfo.systemUptime
+
+    // One lock acquisition per frame — all shared bookkeeping happens inside.
+    TouchTracker.stateLock.lock()
+    TouchTracker._lastMTTimestamp = nowTs
 
     guard activeCount > 0 else {
-        if TouchTracker.glideActiveTouches > 0 {
-            TouchTracker.glideActiveTouches = 0
-            TouchTracker.glideLastDispatchedCount = 0
-            TouchTracker.glideFingerFirstSeen.removeAll(keepingCapacity: true)
-            TouchTracker.glideOldestFingerAge = 0
-            TouchTracker.glideNewestFingerAge = 0
+        let hadTouches = TouchTracker._activeTouches > 0
+        if hadTouches {
+            TouchTracker._activeTouches = 0
+            TouchTracker._lastDispatchedCount = 0
+            TouchTracker._fingerFirstSeen.removeAll(keepingCapacity: true)
+            TouchTracker._oldestFingerAge = 0
+            TouchTracker._newestFingerAge = 0
+        }
+        TouchTracker.stateLock.unlock()
+        if hadTouches {
             DispatchQueue.main.async {
                 TouchTracker.glideClickFingerCount = 0
                 GestureEngine.shared.peakResetWorkItem?.cancel()
@@ -141,38 +171,42 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
 
     let n = Int(activeCount)
 
-    let nowTs = TouchTracker.glideLastMTTimestamp
-
     for touch in activeTouches {
-        if TouchTracker.glideFingerFirstSeen[touch.identifier] == nil {
-            TouchTracker.glideFingerFirstSeen[touch.identifier] = nowTs
+        if TouchTracker._fingerFirstSeen[touch.identifier] == nil {
+            TouchTracker._fingerFirstSeen[touch.identifier] = nowTs
         }
     }
-    if TouchTracker.glideFingerFirstSeen.count != activeTouches.count {
+    if TouchTracker._fingerFirstSeen.count != activeTouches.count {
         let activeIDs = Set(activeTouches.map { $0.identifier })
-        TouchTracker.glideFingerFirstSeen = TouchTracker.glideFingerFirstSeen.filter { activeIDs.contains($0.key) }
+        TouchTracker._fingerFirstSeen = TouchTracker._fingerFirstSeen.filter { activeIDs.contains($0.key) }
     }
-    if let oldest = TouchTracker.glideFingerFirstSeen.values.min(),
-       let newest = TouchTracker.glideFingerFirstSeen.values.max() {
-        TouchTracker.glideOldestFingerAge = nowTs - oldest
-        TouchTracker.glideNewestFingerAge = nowTs - newest
+    if let oldest = TouchTracker._fingerFirstSeen.values.min(),
+       let newest = TouchTracker._fingerFirstSeen.values.max() {
+        TouchTracker._oldestFingerAge = nowTs - oldest
+        TouchTracker._newestFingerAge = nowTs - newest
     }
 
-    let prevActiveTouches = TouchTracker.glideActiveTouches
-    TouchTracker.glideActiveTouches = activeCount
+    let prevActiveTouches = TouchTracker._activeTouches
+    TouchTracker._activeTouches = activeCount
     if activeCount < prevActiveTouches {
-        TouchTracker.glideLastFingerLiftTime = nowTs
+        TouchTracker._lastFingerLiftTime = nowTs
     }
 
     if activeCount >= 3 {
-        TouchTracker.glidePeakFingerCount = activeCount
-        if prevActiveTouches < 3 {
-            DispatchQueue.main.async { GestureEngine.shared.peakResetWorkItem?.cancel() }
-        }
+        TouchTracker._peakFingerCount = activeCount
     }
 
-    if activeCount < 3 && activeCount == TouchTracker.glideLastDispatchedCount { return 0 }
-    TouchTracker.glideLastDispatchedCount = activeCount
+    let skipDispatch = activeCount < 3 && activeCount == TouchTracker._lastDispatchedCount
+    if !skipDispatch {
+        TouchTracker._lastDispatchedCount = activeCount
+    }
+    TouchTracker.stateLock.unlock()
+
+    if activeCount >= 3 && prevActiveTouches < 3 {
+        DispatchQueue.main.async { GestureEngine.shared.peakResetWorkItem?.cancel() }
+    }
+
+    if skipDispatch { return 0 }
 
     var sumX: Float = 0, sumY: Float = 0
     for i in 0..<n { sumX += activeTouches[i].normalizedPosition.x; sumY += activeTouches[i].normalizedPosition.y }

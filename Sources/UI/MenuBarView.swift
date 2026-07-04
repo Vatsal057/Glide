@@ -18,6 +18,13 @@ struct MenuBarView: View {
 
         Toggle("Enable Gestures", isOn: $engineBridge.isEnabled)
 
+        if !preferencesStore.accessibilityGranted {
+            Button("⚠️ Grant Accessibility Access…") {
+                let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                NSWorkspace.shared.open(url)
+            }
+        }
+
         Divider()
 
         Text("\(preferencesStore.rules.filter(\.isActive).count) active gestures")

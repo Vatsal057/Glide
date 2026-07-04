@@ -553,6 +553,9 @@ final class Settings {
 
     private var _rules:           [GestureRule]
     private var _appSwitcher:     AppSwitcherSettings = AppSwitcherSettings()
+    /// Guards `_tuning` — the only setting read off the main thread (the MT
+    /// callback reads edge margins every frame).
+    private let tuningLock = NSLock()
     private var _tuning:          GestureTuning       = GestureTuning()
     private var _windowTargeting: WindowTargetingMode = .focusedThenCursor
     private var _hapticFeedback:  Bool                = true
@@ -572,8 +575,12 @@ final class Settings {
     }
 
     var tuning: GestureTuning {
-        get { _tuning }
-        set { _tuning = Self.normalizedTuning(newValue); GlideConfigStore.shared.scheduleSave() }
+        get { tuningLock.lock(); defer { tuningLock.unlock() }; return _tuning }
+        set {
+            let normalized = Self.normalizedTuning(newValue)
+            tuningLock.lock(); _tuning = normalized; tuningLock.unlock()
+            GlideConfigStore.shared.scheduleSave()
+        }
     }
 
     var windowTargetingMode: WindowTargetingMode {
@@ -606,7 +613,8 @@ final class Settings {
         Self.migrateLegacyAppSwitcherRules(into: &switcher, rules: &loadedRules)
         _appSwitcher     = AppSwitcherSettings.normalized(switcher)
         _rules           = Self.normalizeRules(loadedRules, appSwitcher: _appSwitcher)
-        _tuning          = Self.normalizedTuning(config.toTuning())
+        let normalizedTuning = Self.normalizedTuning(config.toTuning())
+        tuningLock.lock(); _tuning = normalizedTuning; tuningLock.unlock()
         _windowTargeting = WindowTargetingMode(rawValue: config.preferences.windowTargeting) ?? .focusedThenCursor
         _hapticFeedback  = config.preferences.hapticFeedback
         _debugLogging    = config.preferences.debugLogging

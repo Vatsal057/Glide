@@ -48,7 +48,13 @@ final class PreferencesStore: ObservableObject {
         windowTargetingMode = s.windowTargetingMode
         hapticFeedbackEnabled = s.hapticFeedbackEnabled
         debugLoggingEnabled = s.debugLoggingEnabled
-        launchAtLoginEnabled = s.launchAtLoginEnabled
+        // The login item can be toggled behind our back in System Settings —
+        // SMAppService is the source of truth, the YAML value just mirrors it.
+        let actuallyRegistered = SMAppService.mainApp.status == .enabled
+        launchAtLoginEnabled = actuallyRegistered
+        if s.launchAtLoginEnabled != actuallyRegistered {
+            Settings.shared.launchAtLoginEnabled = actuallyRegistered
+        }
         refreshAccessibilityStatus()
         diagnostics = buildDiagnostics(for: rules)
     }

@@ -42,6 +42,9 @@ struct GeneralTab: View {
 
                 // Stats dashboard
                 statsDashboard
+
+                // About
+                aboutCard
             }
             .padding()
         }
@@ -75,6 +78,33 @@ struct GeneralTab: View {
                         NSWorkspace.shared.open(url)
                     }
                     .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    // MARK: - About
+
+    private var aboutCard: some View {
+        GroupBox(label: Label("About", systemImage: "info.circle")) {
+            HStack(spacing: 14) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Glide \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+                        .font(.headline)
+                    Text("Free and open source. Everything stays on your Mac.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Welcome Tour") {
+                    OnboardingController.shared.show()
+                }
+                Button("GitHub") {
+                    NSWorkspace.shared.open(URL(string: "https://github.com/Vatsal057/Glide")!)
                 }
             }
             .padding(8)

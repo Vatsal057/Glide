@@ -4,7 +4,15 @@ import ApplicationServices
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         EngineBridge.shared.startEngine()
-        checkAccessibilityPermission()
+        if OnboardingController.shouldShow {
+            OnboardingController.shared.show()
+        } else {
+            checkAccessibilityPermission()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        GlideConfigStore.shared.flushPendingSave()
     }
 
     private func checkAccessibilityPermission() {
@@ -74,6 +82,10 @@ final class EngineBridge: ObservableObject {
     private var wakeObserver:  NSObjectProtocol?
     private var accessibilityActiveObserver: NSObjectProtocol?
     private var accessibilityPollTimer: Timer?
+    private var tapHealthTimer: Timer?
+    /// User's toggle state captured at sleep so wake can restore it instead of
+    /// force-enabling gestures the user had switched off.
+    private var wasEnabledBeforeSleep = true
     private var started = false
 
     func startEngine() {
@@ -95,6 +107,7 @@ final class EngineBridge: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in
                 NSLog("[App] Sleep — stopping engine")
+                self?.wasEnabledBeforeSleep = self?.isEnabled ?? true
                 GestureEngine.shared.stop()
                 self?.isEnabled = false
             }
@@ -104,10 +117,20 @@ final class EngineBridge: ObservableObject {
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                NSLog("[App] Wake — restarting engine")
-                self?.isEnabled = true
+                guard let self else { return }
+                NSLog("[App] Wake — restoring engine (enabled: \(self.wasEnabledBeforeSleep))")
                 GestureEngine.shared.stop()
-                GestureEngine.shared.start()
+                self.isEnabled = self.wasEnabledBeforeSleep
+            }
+        }
+
+        // Event taps get silently disabled by macOS (timeouts, permission churn).
+        // Periodically verify and revive them while gestures are enabled.
+        tapHealthTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+            Task { @MainActor in
+                let engine = GestureEngine.shared
+                guard engine.isRunning else { return }
+                engine.inputManager.checkHealth()
             }
         }
     }

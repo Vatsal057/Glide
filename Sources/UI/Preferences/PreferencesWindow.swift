@@ -33,15 +33,19 @@ struct PreferencesWindow: View {
                     .tag(tab)
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 200)
+            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 220)
+            .safeAreaInset(edge: .bottom) { sidebarStatus }
         } detail: {
-            switch selectedTab {
-            case .appSwitcher:   AppSwitcherTab()
-            case .gestures:      GesturesTab()
-            case .tuning:        TuningTab()
-            case .general:       GeneralTab()
-            case .configuration: ConfigurationTab()
+            Group {
+                switch selectedTab {
+                case .appSwitcher:   AppSwitcherTab()
+                case .gestures:      GesturesTab()
+                case .tuning:        TuningTab()
+                case .general:       GeneralTab()
+                case .configuration: ConfigurationTab()
+                }
             }
+            .navigationTitle(selectedTab.rawValue)
         }
         .frame(minWidth: 760, minHeight: 520)
         .onAppear {
@@ -51,5 +55,27 @@ struct PreferencesWindow: View {
         .onDisappear {
             NSApp.setActivationPolicy(.accessory)
         }
+    }
+
+    /// Engine status pinned under the sidebar — visible from every tab.
+    private var sidebarStatus: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+            Toggle(isOn: $engineBridge.isEnabled) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(engineBridge.isEnabled && preferencesStore.accessibilityGranted ? .green : .orange)
+                        .frame(width: 8, height: 8)
+                    Text(engineBridge.isEnabled
+                         ? (preferencesStore.accessibilityGranted ? "Gestures active" : "Needs permission")
+                         : "Gestures paused")
+                        .font(.callout)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 10)
     }
 }
