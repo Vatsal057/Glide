@@ -281,6 +281,8 @@ struct GestureMatchSignature: Hashable {
 
 struct GestureRule: Codable, Identifiable, Equatable {
     var id        = UUID()
+    /// Optional user-given label ("Zoom out in Photos"). Empty/nil → auto label.
+    var name:      String?
     var fingers:   Int              = 3
     var direction: GestureDirection = .click
     var speed:     GestureSpeed     = .normal
@@ -315,6 +317,18 @@ struct GestureRule: Codable, Identifiable, Equatable {
     var menuItemLabel: String? {
         guard action == .customMenuItem, let menuItemPath, !menuItemPath.isEmpty else { return nil }
         return menuItemPath.joined(separator: " › ")
+    }
+
+    /// Custom name if set, otherwise a label derived from the action.
+    var displayName: String {
+        if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
+        if action == .customShortcut, let s = customShortcut, s.isValid {
+            return "Shortcut: \(s.displayString)"
+        }
+        if action == .advancedKeyboard, !advancedKeyboard.isEmpty {
+            return "Advanced Keyboard"
+        }
+        return menuItemLabel ?? action.rawValue
     }
 
     var isActive: Bool {
@@ -373,7 +387,8 @@ struct GestureRule: Codable, Identifiable, Equatable {
         return rule
     }
 
-    init(fingers: Int, direction: GestureDirection, speed: GestureSpeed = .normal,
+    init(name: String? = nil,
+         fingers: Int, direction: GestureDirection, speed: GestureSpeed = .normal,
          action: GestureAction, appPath: String? = nil, appFilter: String? = nil,
          windowStateFilter: WindowStateFilter = .any,
          modifierFilter: ModifierFilter = .any,
@@ -392,6 +407,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
          continuousEndKeyboard: [KeyboardInputStep] = [],
          menuItemPath: [String]? = nil, customShortcut: KeyboardShortcut? = nil,
          isDraft: Bool = false) {
+        self.name                = name
         self.fingers             = fingers
         self.direction           = direction
         self.speed               = speed
@@ -423,6 +439,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id        = (try? c.decodeIfPresent(UUID.self,          forKey: .id))        ?? UUID()
+        name      = try? c.decodeIfPresent(String.self,         forKey: .name)
         fingers   = (try? c.decode(Int.self,                    forKey: .fingers))   ?? 3
         direction = (try? c.decode(GestureDirection.self,       forKey: .direction)) ?? .click
         speed     = (try? c.decodeIfPresent(GestureSpeed.self,  forKey: .speed))     ?? .normal

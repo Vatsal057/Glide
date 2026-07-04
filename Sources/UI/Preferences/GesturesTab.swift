@@ -1,41 +1,77 @@
 import SwiftUI
 
+// ─────────────────────────────────────────────
+// MARK: - GesturesTab
+//
+// Master–detail: searchable, filterable gesture list on the left,
+// full editor on the right. Rules can be renamed, duplicated, deleted.
+// ─────────────────────────────────────────────
+
 struct GesturesTab: View {
     @EnvironmentObject var store: PreferencesStore
     @State private var selectedRule: GestureRule.ID? = nil
+    @State private var searchText = ""
+    @State private var fingerFilter: Int? = nil      // nil = all
+    @State private var renameTarget: GestureRule.ID? = nil
+    @State private var renameText = ""
+
+    private var visibleGroups: [(fingers: Int, rules: [GestureRule])] {
+        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        return store.rulesGroupedByFingers().compactMap { group in
+            if let f = fingerFilter, group.fingers != f { return nil }
+            let rules = q.isEmpty ? group.rules : group.rules.filter {
+                $0.displayName.lowercased().contains(q)
+                || $0.action.rawValue.lowercased().contains(q)
+                || $0.direction.rawValue.lowercased().contains(q)
+            }
+            return rules.isEmpty ? nil : (fingers: group.fingers, rules: rules)
+        }
+    }
 
     var body: some View {
         HSplitView {
-            // Left: rule list
+            // ── Left: rule list ──
             VStack(spacing: 0) {
+                listHeader
+
                 List(selection: $selectedRule) {
-                    ForEach(store.rulesGroupedByFingers(), id: \.fingers) { group in
-                        Section("\(group.fingers) Fingers") {
+                    ForEach(visibleGroups, id: \.fingers) { group in
+                        Section {
                             ForEach(group.rules) { rule in
                                 RuleRow(rule: rule)
                                     .tag(rule.id)
-                            }
-                            .onDelete { offsets in
-                                let ids = group.rules.map(\.id)
-                                let storeOffsets = IndexSet(
-                                    offsets.compactMap { i in
-                                        store.rules.firstIndex { $0.id == ids[i] }
+                                    .contextMenu {
+                                        Button("Rename…") { beginRename(rule) }
+                                        Button("Duplicate") {
+                                            if let newID = store.duplicateRule(rule.id) { selectedRule = newID }
+                                        }
+                                        Divider()
+                                        Button("Delete", role: .destructive) {
+                                            if selectedRule == rule.id { selectedRule = nil }
+                                            store.removeRule(rule.id)
+                                        }
                                     }
-                                )
-                                store.deleteRules(at: storeOffsets)
                             }
+                        } header: {
+                            Label("\(group.fingers) Fingers", systemImage: "hand.raised")
+                                .font(.caption.bold())
                         }
                     }
                 }
-                .listStyle(.inset(alternatesRowBackgrounds: true))
+                .listStyle(.inset)
+
+                if visibleGroups.isEmpty {
+                    listEmptyState
+                }
 
                 Divider()
 
                 HStack {
-                    Button(action: {
+                    Button {
                         let id = store.addRule()
+                        searchText = ""; fingerFilter = nil
                         selectedRule = id
-                    }) {
+                    } label: {
                         Label("Add Gesture", systemImage: "plus")
                     }
                     .buttonStyle(.plain)
@@ -43,33 +79,110 @@ struct GesturesTab: View {
 
                     Spacer()
 
-                    Text("\(store.rules.filter { !$0.isDraft }.count) gestures")
+                    Text("\(store.rules.filter(\.isActive).count) active · \(store.rules.filter { !$0.isDraft }.count) total")
                         .foregroundStyle(.secondary)
                         .font(.caption)
                         .padding(8)
                 }
             }
-            .frame(minWidth: 260, maxWidth: 320)
+            .frame(minWidth: 280, maxWidth: 340)
 
-            // Right: rule editor
+            // ── Right: rule editor ──
             Group {
                 if let id = selectedRule,
                    let idx = store.rules.firstIndex(where: { $0.id == id }) {
-                    RuleEditor(rule: $store.rules[idx])
-                        .id(id)
+                    RuleEditor(rule: $store.rules[idx], onDelete: {
+                        selectedRule = nil
+                        store.removeRule(id)
+                    }, onDuplicate: {
+                        if let newID = store.duplicateRule(id) { selectedRule = newID }
+                    })
+                    .id(id)
                 } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "hand.draw")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.secondary)
-                        Text("No Gesture Selected")
-                            .font(.title2)
-                        Text("Select a gesture from the list or click + to add one.")
-                            .foregroundStyle(.secondary)
-                    }
+                    editorEmptyState
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .alert("Rename Gesture", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        )) {
+            TextField("Name", text: $renameText)
+            Button("Rename") {
+                if let id = renameTarget { store.renameRule(id, to: renameText) }
+                renameTarget = nil
+            }
+            Button("Cancel", role: .cancel) { renameTarget = nil }
+        } message: {
+            Text("Give this gesture a name you'll recognize, like “Zoom out in Photos”. Leave empty to go back to the automatic name.")
+        }
+    }
+
+    private func beginRename(_ rule: GestureRule) {
+        renameText = rule.name ?? ""
+        renameTarget = rule.id
+    }
+
+    // MARK: List chrome
+
+    private var listHeader: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search gestures", text: $searchText)
+                    .textFieldStyle(.plain)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(6)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 7))
+
+            Picker("", selection: $fingerFilter) {
+                Text("All").tag(Int?.none)
+                Text("3").tag(Int?.some(3))
+                Text("4").tag(Int?.some(4))
+                Text("5").tag(Int?.some(5))
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+        .padding(10)
+    }
+
+    private var listEmptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: searchText.isEmpty ? "hand.draw" : "magnifyingglass")
+                .font(.title)
+                .foregroundStyle(.secondary)
+            Text(searchText.isEmpty ? "No gestures yet" : "No matches")
+                .font(.headline)
+            Text(searchText.isEmpty
+                 ? "Click Add Gesture to create your first one."
+                 : "Try a different search or filter.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var editorEmptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "hand.draw")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+            Text("No Gesture Selected")
+                .font(.title2)
+            Text("Select a gesture from the list or click + to add one.")
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -80,6 +193,20 @@ struct RuleRow: View {
     let rule: GestureRule
     @EnvironmentObject var store: PreferencesStore
 
+    private var subtitle: String {
+        var parts: [String] = [rule.direction.rawValue]
+        if !rule.direction.isClickLike && rule.speed != .any {
+            parts.append(rule.speed.rawValue)
+        }
+        if rule.modifierFilter.requiresModifierHeld {
+            parts.append(rule.modifierFilter.rawValue)
+        }
+        if rule.appFilter != nil {
+            parts.append(store.appFilterLabel(for: rule.appFilter))
+        }
+        return parts.joined(separator: " · ")
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: rule.action.iconName)
@@ -87,36 +214,32 @@ struct RuleRow: View {
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(ruleDisplayLabel(rule))
-                    .font(.body)
+                Text(rule.displayName)
+                    .font(.body.weight(.medium))
                     .lineLimit(1)
-
-                HStack(spacing: 4) {
-                    Text(rule.direction.rawValue)
-                    if !rule.direction.isClickLike {
-                        Text("·")
-                        Text(rule.speed.rawValue)
-                    }
-                    if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction,
-                                                              modifierFilter: rule.modifierFilter) {
-                        Text("·")
-                        Image(systemName: "rectangle.2.swap")
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
             Spacer()
 
+            if store.isRuleShadowed(rule) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                    .help("Overridden by another gesture with the same trigger")
+            }
             if !rule.isActive {
                 Image(systemName: "pause.circle.fill")
                     .foregroundStyle(.secondary)
                     .font(.caption)
+                    .help(rule.isDraft ? "Not configured yet" : "Inactive")
             }
         }
-        .padding(.vertical, 2)
-        .opacity(rule.isActive ? 1 : 0.5)
+        .padding(.vertical, 3)
+        .opacity(rule.isActive ? 1 : 0.55)
     }
 }
 
@@ -124,14 +247,15 @@ struct RuleRow: View {
 
 struct RuleEditor: View {
     @Binding var rule: GestureRule
+    var onDelete: () -> Void = {}
+    var onDuplicate: () -> Void = {}
     @EnvironmentObject var store: PreferencesStore
     @State private var showMenuPicker = false
 
-    private var displayTitle: String {
-        if rule.action == .customShortcut, let s = rule.customShortcut, s.isValid {
-            return "Shortcut: \(s.displayString)"
-        }
-        return rule.menuItemLabel ?? rule.action.rawValue
+    private var autoName: String {
+        var copy = rule
+        copy.name = nil
+        return copy.displayName
     }
 
     private var categorizedActions: [(String, [GestureAction])] {
@@ -162,22 +286,52 @@ struct RuleEditor: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
 
-                // Header
-                HStack {
+                // ── Header: glyph + editable name + actions ──
+                HStack(spacing: 12) {
                     Image(systemName: rule.action.iconName)
                         .font(.title)
                         .foregroundStyle(Color.accentColor)
-                    VStack(alignment: .leading) {
-                        Text(displayTitle)
-                            .font(.title2.bold())
+                        .frame(width: 30)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        TextField(autoName, text: Binding(
+                            get: { rule.name ?? "" },
+                            set: { newValue in
+                                let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+                                rule.name = trimmed.isEmpty ? nil : newValue
+                            }
+                        ))
+                        .textFieldStyle(.plain)
+                        .font(.title2.bold())
+
+                        Text(rule.name == nil ? "Type to name this gesture" : autoName)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                     }
+
                     Spacer()
-                    // Replaced Toggle with a pseudo-enabled check, rule is active if action != .doNothing
+
                     if store.isRuleShadowed(rule) {
                         Text("Overridden by another rule")
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
+
+                    Button {
+                        onDuplicate()
+                    } label: {
+                        Image(systemName: "plus.square.on.square")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Duplicate gesture")
+
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Delete gesture")
                 }
                 .padding()
                 .background(.quinary)
@@ -688,16 +842,6 @@ struct MenuItemPickerSheet: View {
 }
 
 // MARK: - Helpers
-
-private func ruleDisplayLabel(_ rule: GestureRule) -> String {
-    if rule.action == .customShortcut, let s = rule.customShortcut, s.isValid {
-        return "Shortcut: \(s.displayString)"
-    }
-    if rule.action == .advancedKeyboard, !rule.advancedKeyboard.isEmpty {
-        return "Advanced Keyboard"
-    }
-    return rule.menuItemLabel ?? rule.action.rawValue
-}
 
 struct EditorSection<Content: View>: View {
     let title: String

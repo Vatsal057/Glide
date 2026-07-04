@@ -129,6 +129,23 @@ final class PreferencesStore: ObservableObject {
         rules.removeAll { $0.id == id }
     }
 
+    @discardableResult
+    func duplicateRule(_ id: UUID) -> UUID? {
+        guard let idx = rules.firstIndex(where: { $0.id == id }) else { return nil }
+        var copy = rules[idx]
+        copy.id = UUID()
+        copy.name = "\(copy.displayName) Copy"
+        rules.insert(copy, at: idx + 1)
+        return copy.id
+    }
+
+    func renameRule(_ id: UUID, to newName: String) {
+        guard var rule = rules.first(where: { $0.id == id }) else { return }
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        rule.name = trimmed.isEmpty ? nil : trimmed
+        updateRule(rule)
+    }
+
     func updateWindowTargetingMode(_ m: WindowTargetingMode) {
         windowTargetingMode = m
         Settings.shared.windowTargetingMode = m

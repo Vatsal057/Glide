@@ -56,6 +56,7 @@ struct GlideConfig {
     }
 
     struct Gesture {
+        var name: String? = nil     // user-given label
         var type: String            // "swipe" | "click"
         var direction: String?      // "up" | "down" | "left" | "right" — nil for click
         var fingers: Int
@@ -144,6 +145,7 @@ extension GlideConfig {
                         : (rule.direction == .click ? "click" : "swipe")
             let normalized = GestureRule.migratingLegacyAppFilter(rule)
             return GlideConfig.Gesture(
+                name:        rule.name,
                 type:        typeStr,
                 direction:   isClick ? nil     : yamlDirection(rule.direction),
                 fingers:     rule.fingers,
@@ -236,6 +238,7 @@ extension GlideConfig {
             }()
 
             let migrated = GestureRule.migratingLegacyAppFilter(GestureRule(
+                name:      g.name,
                 fingers:   g.fingers,
                 direction: direction,
                 speed:     speed,
@@ -377,6 +380,7 @@ enum GlideConfigSerializer {
         let comment = "\(g.fingers)-finger \(g.type)\(g.direction.map { " \($0)" } ?? "")\(g.speed.map { " (\($0))" } ?? "") → \(g.action)"
         lines.append("    # \(comment)")
         lines.append("    - type: \(g.type)")
+        if let n = g.name, !n.isEmpty { lines.append("      name: \"\(escape(n))\"") }
         if let d = g.direction { lines.append("      direction: \(d)") }
         lines.append("      fingers: \(g.fingers)")
         if let s = g.speed { lines.append("      speed: \(s)") }
@@ -696,6 +700,7 @@ enum GlideConfigParser {
             let (_, key, val) = tokenize(line)
             switch key {
             case "type":       g.type      = val ?? g.type
+            case "name":       g.name      = stringVal(val)
             case "direction":  g.direction = val
             case "fingers":    g.fingers   = intVal(val) ?? g.fingers
             case "speed":      g.speed     = val
