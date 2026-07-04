@@ -106,6 +106,37 @@ codesign --force --sign - "$APP_BUNDLE"
 
 echo "✅  Signed"
 
+# ── Optional DMG for distribution ────────────
+if [[ "${1:-}" == "--dmg" ]]; then
+    echo "Creating DMG…"
+    DMG_STAGE="$BUILD_DIR/dmg-stage"
+    DMG_PATH="$BUILD_DIR/$APP_NAME.dmg"
+    rm -rf "$DMG_STAGE" "$DMG_PATH"
+    mkdir -p "$DMG_STAGE"
+    cp -R "$APP_BUNDLE" "$DMG_STAGE/"
+    ln -s /Applications "$DMG_STAGE/Applications"
+    cat > "$DMG_STAGE/READ ME - How to Install.txt" <<'EOF'
+How to install Glide
+====================
+
+1. Drag Glide.app onto the Applications folder icon.
+
+2. Because Glide is a free open-source app (not notarized by Apple),
+   macOS may say the app is "damaged" on first launch. It is not.
+   Open Terminal and run this one line to fix it:
+
+       xattr -cr /Applications/Glide.app
+
+3. Open Glide from Applications. When prompted, grant Accessibility
+   access in System Settings -> Privacy & Security -> Accessibility.
+
+4. Look for the hand icon in your menu bar. Enjoy!
+EOF
+    hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DMG_PATH"
+    rm -rf "$DMG_STAGE"
+    echo "✅  DMG: $DMG_PATH"
+fi
+
 # ── Print result ─────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

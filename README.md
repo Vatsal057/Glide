@@ -6,6 +6,25 @@ Glide works in the background and intercepts your trackpad movements, translatin
 
 ---
 
+## Installation
+
+1. Download the latest **Glide-vX.Y.Z.dmg** from the [Releases page](https://github.com/Vatsal057/Glide/releases/latest).
+2. Open the DMG and drag **Glide** into the **Applications** folder.
+3. Glide is free and open source, so it isn't notarized by Apple. If macOS says the app is *"damaged and can't be opened"*, it isn't — that's just Gatekeeper. Run this one line in Terminal to fix it:
+
+   ```sh
+   xattr -cr /Applications/Glide.app
+   ```
+
+4. Open Glide and grant Accessibility access when prompted (**System Settings → Privacy & Security → Accessibility**).
+5. The hand icon appears in your menu bar — you're ready to go.
+
+**Requirements:** macOS 13 (Ventura) or later, Apple Silicon or Intel.
+
+**Building from source:** clone the repo and run `./build.sh` (needs Xcode Command Line Tools). Add `--dmg` to also produce a DMG.
+
+---
+
 ## Table of Contents
 1. [Core Concepts](#1-core-concepts)
 2. [Smart Filters & Conditions](#2-smart-filters--conditions)

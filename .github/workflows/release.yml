@@ -11,26 +11,38 @@ permissions:
 jobs:
   build-and-release:
     runs-on: macos-latest
-    
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      
-      - name: Enable Execution for Build Script
-        run: chmod +x build.sh
-        
-      - name: Build Glide App
-        run: ./build.sh
-        
-      - name: Compress App Bundle
+
+      - name: Set Version from Tag
         run: |
-          cd build
-          # -y preserves symlinks which are vital for macOS app bundles
-          zip -yr Glide.app.zip Glide.app
-          
+          VERSION="${GITHUB_REF_NAME#v}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" Info.plist
+
+      - name: Build Glide App + DMG
+        run: |
+          chmod +x build.sh
+          ./build.sh --dmg
+          mv build/Glide.dmg "build/Glide-${GITHUB_REF_NAME}.dmg"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/Glide.app.zip
+          files: build/Glide-*.dmg
           name: Glide ${{ github.ref_name }}
           generate_release_notes: true
+          body: |
+            ## Install
+
+            1. Download **Glide-${{ github.ref_name }}.dmg** below and open it.
+            2. Drag **Glide** into the **Applications** folder.
+            3. Glide is free and open source, so it isn't notarized by Apple. If macOS says the app is "damaged", run this one line in Terminal:
+
+               ```
+               xattr -cr /Applications/Glide.app
+               ```
+
+            4. Open Glide, then grant Accessibility access in **System Settings → Privacy & Security → Accessibility**.

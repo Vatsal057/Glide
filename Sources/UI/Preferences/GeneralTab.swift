@@ -35,7 +35,7 @@ struct GeneralTab: View {
                         Divider().padding(.leading, 12)
 
                         SettingsRow(label: "Launch at Login") {
-                            Toggle("Start Gesture automatically when you log in", isOn: Binding(get: { store.launchAtLoginEnabled }, set: store.updateLaunchAtLogin))
+                            Toggle("Start Glide automatically when you log in", isOn: Binding(get: { store.launchAtLoginEnabled }, set: store.updateLaunchAtLogin))
                         }
                     }
                 }

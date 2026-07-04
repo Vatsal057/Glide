@@ -25,6 +25,15 @@ struct MenuBarView: View {
 
         Divider()
 
+        Button("Check for Updates…") {
+            NSWorkspace.shared.open(URL(string: "https://github.com/Vatsal057/Glide/releases/latest")!)
+        }
+
+        Text("Glide \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+            .foregroundStyle(.secondary)
+
+        Divider()
+
         Button("Quit Glide") {
             NSApplication.shared.terminate(nil)
         }

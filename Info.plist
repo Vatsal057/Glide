@@ -18,6 +18,8 @@
     <string>APPL</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSPrincipalClass</key>
