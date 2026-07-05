@@ -332,6 +332,12 @@ struct TuningTab: View {
                     SliderRow(label: "Swipe Coherence", value: tuningBinding(\.swipeCoherenceThreshold),
                               range: 0.1...1.0, format: "%.2f",
                               hint: "How uniformly fingers must move. 1.0 = perfectly aligned.")
+                    SliderRow(label: "Rotation Threshold", value: tuningBinding(\.rotationThresholdDegrees),
+                              range: 10...180, format: "%.0f°",
+                              hint: "Total twist before a rotate gesture fires. Lower = more sensitive.")
+                    SliderRow(label: "Tap & Hold Duration", value: tuningBinding(\.tapHoldDuration),
+                              range: 0.3...3.0, format: "%.2fs",
+                              hint: "How long fingers must rest motionless to fire a Tap & Hold.")
                     SliderRow(label: "Continuous Step", value: tuningBinding(\.continuousStepThreshold),
                               range: 0.005...0.08, format: "%.3f",
                               hint: "Distance per repeat of a continuous action.")

@@ -116,4 +116,63 @@ enum SystemActions {
         let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
         NSWorkspace.shared.open(url)
     }
+
+    // MARK: - Media / display keys (NX system-defined events)
+
+    /// Hardware media-key codes from IOKit's ev_keymap.h.
+    enum MediaKey: Int32 {
+        case volumeUp       = 0   // NX_KEYTYPE_SOUND_UP
+        case volumeDown     = 1   // NX_KEYTYPE_SOUND_DOWN
+        case brightnessUp   = 2   // NX_KEYTYPE_BRIGHTNESS_UP
+        case brightnessDown = 3   // NX_KEYTYPE_BRIGHTNESS_DOWN
+        case mute           = 7   // NX_KEYTYPE_MUTE
+        case play           = 16  // NX_KEYTYPE_PLAY
+        case next           = 17  // NX_KEYTYPE_NEXT — skip to next track
+        case previous       = 18  // NX_KEYTYPE_PREVIOUS — skip to previous track
+    }
+
+    static func sendMediaKey(_ key: MediaKey) {
+        func post(down: Bool) {
+            let flags = NSEvent.ModifierFlags(rawValue: down ? 0xA00 : 0xB00)
+            let data1 = Int((key.rawValue << 16) | ((down ? 0xA : 0xB) << 8))
+            guard let event = NSEvent.otherEvent(with: .systemDefined, location: .zero,
+                                                 modifierFlags: flags, timestamp: 0,
+                                                 windowNumber: 0, context: nil,
+                                                 subtype: 8, data1: data1, data2: -1) else { return }
+            event.cgEvent?.post(tap: .cghidEventTap)
+        }
+        post(down: true)
+        post(down: false)
+    }
+
+    // MARK: - User scripts
+
+    /// Runs a Shortcuts.app shortcut by name via /usr/bin/shortcuts.
+    static func runShortcut(named name: String) {
+        runProcess("/usr/bin/shortcuts", ["run", name], label: "Shortcut '\(name)'")
+    }
+
+    static func runShellCommand(_ script: String) {
+        runProcess("/bin/zsh", ["-c", script], label: "Shell command")
+    }
+
+    static func runAppleScript(_ source: String) {
+        runProcess("/usr/bin/osascript", ["-e", source], label: "AppleScript")
+    }
+
+    /// Fire-and-forget: user-configured scripts must never block the gesture pipeline.
+    private static func runProcess(_ path: String, _ arguments: [String], label: String) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: path)
+            process.arguments = arguments
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            do {
+                try process.run()
+            } catch {
+                AppLogger.debug("[Action] \(label) failed to launch: \(error.localizedDescription)")
+            }
+        }
+    }
 }

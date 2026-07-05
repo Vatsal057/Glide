@@ -13,7 +13,7 @@ final class GestureProcessor {
 
         switch phase {
         case .idle:
-            guard GestureRuleResolver.hasAnySwipeRule(fingers: n) else { return nil }
+            guard GestureRuleResolver.hasAnySwipeRule(fingers: n) || GestureRuleResolver.hasRotationRule(fingers: n) else { return nil }
             if tuning.edgeMarginEnabled {
                 let m = tuning.edgeMargin
                 if frame.cx < m.left || frame.cx > (1.0 - m.right) || frame.cy < m.bottom || frame.cy > (1.0 - m.top) { return nil }
@@ -31,7 +31,7 @@ final class GestureProcessor {
 
         case .candidate(var data):
             if n > data.fingers {
-                guard GestureRuleResolver.hasAnySwipeRule(fingers: n) else { return .ignored }
+                guard GestureRuleResolver.hasAnySwipeRule(fingers: n) || GestureRuleResolver.hasRotationRule(fingers: n) else { return .ignored }
                 return .candidate(CandidateData(
                     startX: frame.cx, startY: frame.cy,
                     fingers: n, startTime: now,
@@ -57,6 +57,20 @@ final class GestureProcessor {
             data.cumulativeSpreadDelta += frameDelta
             data.prevSpread = frame.spread
             if frame.coherence < data.minCoherence { data.minCoherence = frame.coherence }
+
+            // Rotation: fingers orbit the centroid (low coherence, stable spread,
+            // little centroid travel) — must be checked before the pinch/coherence
+            // guards below, which would discard exactly that motion signature.
+            data.cumulativeTwist += frame.twist
+            if abs(data.cumulativeTwist) >= tuning.rotationThresholdDegrees, movedFromStart < 0.10 {
+                let direction: GestureDirection = data.cumulativeTwist < 0 ? .rotateCW : .rotateCCW
+                if let rule = GestureRuleResolver.bestRule(fingers: data.fingers, direction: direction,
+                                                           modifiers: data.modifiersAtStart) {
+                    engine?.clearReciprocalToken()
+                    engine?.executeGestureRuleAction(rule)
+                    return .fired
+                }
+            }
 
             if frameDelta > tuning.pinchFrameSpreadThreshold * 1.5 { return .ignored }
             let totalSpreadChange = abs(frame.spread - data.initialSpread)

@@ -195,7 +195,7 @@ struct RuleRow: View {
 
     private var subtitle: String {
         var parts: [String] = [rule.direction.rawValue]
-        if !rule.direction.isClickLike && rule.speed != .any {
+        if rule.direction.hasSpeed && rule.speed != .any {
             parts.append(rule.speed.rawValue)
         }
         if rule.modifierFilter.requiresModifierHeld {
@@ -268,6 +268,7 @@ struct RuleEditor: View {
         categorizedActions.compactMap { category, actions in
             let filtered = actions.filter {
                 $0 != .openApp && $0 != .customMenuItem
+                    && $0 != .runShortcut && $0 != .runShellCommand && $0 != .runAppleScript
             }
             return filtered.isEmpty ? nil : (category, filtered)
         }
@@ -398,7 +399,7 @@ struct RuleEditor: View {
                             }
                         }
 
-                        if !rule.direction.isClickLike {
+                        if rule.direction.hasSpeed {
                             EditorRow(label: "Speed") {
                                 Picker("", selection: $rule.speed) {
                                     ForEach(GestureSpeed.allCases, id: \.self) { s in
@@ -432,6 +433,22 @@ struct RuleEditor: View {
                                         }
                                     }
                             }
+                        }
+
+                        EditorRow(label: "Haptic") {
+                            Picker("", selection: Binding<HapticPattern?>(
+                                get: { rule.hapticPattern },
+                                set: { newValue in
+                                    rule.hapticPattern = newValue
+                                    if let p = newValue { HapticEngine.shared.play(p) }
+                                })) {
+                                Text("Automatic (by action)").tag(HapticPattern?.none)
+                                Divider()
+                                ForEach(HapticPattern.allCases, id: \.self) { pattern in
+                                    Text(pattern.displayName).tag(HapticPattern?.some(pattern))
+                                }
+                            }
+                            .frame(maxWidth: 200)
                         }
                     }
 
@@ -500,7 +517,7 @@ struct RuleEditor: View {
                             .frame(maxWidth: 200)
                         }
 
-                        if !rule.direction.isClickLike {
+                        if rule.direction.hasSpeed {
                             if !rule.continuous {
                                 EditorRow(label: "Reciprocal") {
                                     Toggle("Reverse gesture undoes this action", isOn: $rule.reciprocalEnabled)
@@ -558,8 +575,15 @@ struct RuleEditor: View {
                 if newValue == .advancedKeyboard {
                     rule.advancedKeyboard = []
                 }
+                if newValue == .runShortcut {
+                    rule.shortcutName = nil
+                }
+                if newValue == .runShellCommand || newValue == .runAppleScript {
+                    rule.script = nil
+                }
                 if rule.isDraft && newValue != .doNothing
-                    && newValue != .customMenuItem && newValue != .customShortcut && newValue != .advancedKeyboard {
+                    && newValue != .customMenuItem && newValue != .customShortcut && newValue != .advancedKeyboard
+                    && newValue != .runShortcut && newValue != .runShellCommand && newValue != .runAppleScript {
                     store.markRuleConfigured(rule.id)
                 }
             }
@@ -637,6 +661,50 @@ struct RuleEditor: View {
         if rule.action == .advancedKeyboard {
             EditorRow(label: "Advanced Keyboard") {
                 KeyboardSequenceEditor(steps: $rule.advancedKeyboard)
+            }
+        }
+
+        if rule.action == .runShortcut {
+            EditorRow(label: "Shortcut Name") {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Exact name from Shortcuts.app", text: Binding(
+                        get: { rule.shortcutName ?? "" },
+                        set: { rule.shortcutName = $0.isEmpty ? nil : $0 }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 320)
+                    .onSubmit {
+                        if rule.shortcutName != nil { store.markRuleConfigured(rule.id) }
+                    }
+                    Text("Runs the shortcut via Shortcuts.app when the gesture fires.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .onChange(of: rule.shortcutName) { _ in
+                if !(rule.shortcutName ?? "").isEmpty { store.markRuleConfigured(rule.id) }
+            }
+        }
+
+        if rule.action == .runShellCommand || rule.action == .runAppleScript {
+            EditorRow(label: rule.action == .runShellCommand ? "Command" : "Script") {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextEditor(text: Binding(
+                        get: { rule.script ?? "" },
+                        set: { rule.script = $0.isEmpty ? nil : $0 }
+                    ))
+                    .font(.system(.body, design: .monospaced))
+                    .frame(maxWidth: 380, minHeight: 60, maxHeight: 120)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                    Text(rule.action == .runShellCommand
+                         ? "Runs with /bin/zsh -c in the background."
+                         : "Runs with osascript in the background.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .onChange(of: rule.script) { _ in
+                if !(rule.script ?? "").isEmpty { store.markRuleConfigured(rule.id) }
             }
         }
     }
@@ -896,6 +964,9 @@ extension GestureAction {
         case .customMenuItem:     return "list.bullet.rectangle"
         case .customShortcut:     return "keyboard"
         case .advancedKeyboard:   return "keyboard.badge.ellipsis"
+        case .runShortcut:        return "square.2.layers.3d"
+        case .runShellCommand:    return "terminal"
+        case .runAppleScript:     return "applescript"
         // Window management
         case .minimizeWindow:     return "minus.square"
         case .minimizeAllApps:    return "minus.square.fill"
@@ -926,6 +997,15 @@ extension GestureAction {
         case .screenshotAreaClipboard:  return "viewfinder.circle"
         case .screenshotFullClipboard:  return "camera.fill"
         case .screenshotToolbar:        return "camera.viewfinder"
+        // Media & display
+        case .playPause:      return "playpause"
+        case .nextTrack:      return "forward.end"
+        case .previousTrack:  return "backward.end"
+        case .volumeUp:       return "speaker.wave.3"
+        case .volumeDown:     return "speaker.wave.1"
+        case .muteToggle:     return "speaker.slash"
+        case .brightnessUp:   return "sun.max"
+        case .brightnessDown: return "sun.min"
         // System
         case .spotlight:    return "magnifyingglass.circle"
         case .notifCenter:  return "bell"

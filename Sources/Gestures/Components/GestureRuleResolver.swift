@@ -46,6 +46,18 @@ final class GestureRuleResolver {
         return filter == bundleID
     }
 
+    static func hasRotationRule(fingers: Int) -> Bool {
+        Settings.shared.rules.contains {
+            $0.isActive && $0.fingers == fingers && $0.direction.isRotation
+        }
+    }
+
+    static func hasHoldRule(fingers: Int) -> Bool {
+        Settings.shared.rules.contains {
+            $0.isActive && $0.fingers == fingers && $0.direction == .tapHold
+        }
+    }
+
     static func hasAnySwipeRule(fingers: Int) -> Bool {
         if Settings.shared.appSwitcher.enabled, fingers == Settings.shared.appSwitcher.fingers {
             return true

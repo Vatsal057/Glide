@@ -9,6 +9,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             checkAccessibilityPermission()
         }
+        // Re-assert on launch — System Settings may have re-enabled native gestures.
+        SystemGestureManager.reconcileIfAutoEnabled()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -47,6 +47,10 @@ final class GestureEngine {
     /// Upper bound before a deferred click is force-flushed as a normal click.
     private let pendingClickSafetyTimeout: TimeInterval = 0.7
 
+    /// Pending Tap & Hold — fires when fingers rest motionless past tapHoldDuration.
+    private var holdWorkItem: DispatchWorkItem?
+    private var holdArmedFingerCount = 0
+
     // MARK: - Observable state
     private(set) var currentPhaseName: String = "Idle"
     private(set) var currentFingerCount: Int = 0
@@ -76,6 +80,7 @@ final class GestureEngine {
         reciprocalToken = nil
         lastFiredSwipe = nil
         pendingClickTimeout?.cancel(); pendingClickTimeout = nil; pendingClick = nil
+        cancelHoldTimer()
         touchSessionStart = nil; touchSessionMovement = 0
         lastThreeFingerTapEnd = 0; isSystemZoomSession = false
 
@@ -101,6 +106,7 @@ final class GestureEngine {
         reciprocalToken = nil
         lastStepTime = 0
         pendingClickTimeout?.cancel(); pendingClickTimeout = nil; pendingClick = nil
+        cancelHoldTimer()
         isRunning = false
         AppSwitcherState.shared.stopMRUTracking()
         updateObservableState()
@@ -147,6 +153,13 @@ final class GestureEngine {
         inputManager.setSuppressionActive(frame.count >= 3 && !isSystemZoomSession)
         currentFingerCount = Int(frame.count)
 
+        // Tap & Hold: (re)arm whenever the resting finger count changes, cancel on lift.
+        if frame.count >= 3 {
+            if Int(frame.count) != holdArmedFingerCount { armHoldTimer(fingerCount: Int(frame.count)) }
+        } else {
+            cancelHoldTimer()
+        }
+
         if frame.count < 3 {
             TouchTracker.glideClickFingerCount = 0
             finishIfNeeded()
@@ -163,6 +176,42 @@ final class GestureEngine {
             phase = nextPhase
             updateObservableState()
         }
+    }
+
+    // MARK: - Tap & Hold
+
+    private func armHoldTimer(fingerCount n: Int) {
+        holdWorkItem?.cancel()
+        holdWorkItem = nil
+        holdArmedFingerCount = n
+        guard GestureRuleResolver.hasHoldRule(fingers: n) else { return }
+        let work = DispatchWorkItem { [weak self] in self?.fireHoldIfStillValid(fingerCount: n) }
+        holdWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Settings.shared.tuning.tapHoldDuration, execute: work)
+    }
+
+    private func cancelHoldTimer() {
+        holdWorkItem?.cancel()
+        holdWorkItem = nil
+        holdArmedFingerCount = 0
+    }
+
+    private func fireHoldIfStillValid(fingerCount n: Int) {
+        holdWorkItem = nil
+        guard isRunning,
+              TouchTracker.glideActiveTouches == Int32(n),
+              TouchTracker.glideClickFingerCount == 0,
+              NSEvent.pressedMouseButtons & 1 == 0,   // physical press → click/force-click path
+              !isSystemZoomSession,
+              touchSessionMovement < tapMaxMovement else { return }
+        switch phase {
+        case .fired, .switchingApps, .continuousSwipe: return
+        default: break
+        }
+        guard let rule = GestureRuleResolver.bestRule(fingers: n, direction: .tapHold,
+                                                      modifiers: captureModifiers()) else { return }
+        Haptic.forRule(rule)   // the instant the hold is recognized
+        fireClickRule(rule, label: "Hold", fingerCount: n)
     }
 
     // MARK: - Actions
@@ -182,6 +231,10 @@ final class GestureEngine {
         //   • deep press → it was a force click  (processForceClick cancels this)
         // With no force rule, fire instantly (no added latency).
         let hasForceRule = GestureRuleResolver.bestRule(fingers: n, direction: .forceClick, modifiers: modifiers) != nil
+        // Haptic at the moment the click is recognized (mouse-down), even when the
+        // action itself is deferred until force-click resolution — feedback should
+        // track the gesture, not the outcome.
+        Haptic.forRule(rule)
         if hasForceRule {
             pendingClickTimeout?.cancel()
             pendingClick = (rule: rule, fingers: n)
@@ -229,6 +282,7 @@ final class GestureEngine {
 
         let modifiers = captureModifiers()
         guard let rule = GestureRuleResolver.bestRule(fingers: n, direction: .forceClick, modifiers: modifiers) else { return }
+        Haptic.forRule(rule)   // at the deep press itself
         fireClickRule(rule, label: "Force Click", fingerCount: n)
     }
 
@@ -243,7 +297,8 @@ final class GestureEngine {
             ActionExecutor.shared.execute(rule.action, appPath: rule.appPath,
                                           menuItemPath: rule.menuItemPath, menuTargetBundleID: rule.appFilter,
                                           customShortcut: rule.customShortcut,
-                                          advancedKeyboard: rule.advancedKeyboard)
+                                          advancedKeyboard: rule.advancedKeyboard,
+                                          shortcutName: rule.shortcutName, script: rule.script)
         }
         updateObservableState()
     }
@@ -344,11 +399,12 @@ final class GestureEngine {
     // MARK: - Reciprocal & Continuous
 
     func executeGestureRuleAction(_ rule: GestureRule) {
-        Haptic.forAction(rule.action)
+        Haptic.forRule(rule)
         ActionExecutor.shared.execute(rule.action, appPath: rule.appPath,
                                       menuItemPath: rule.menuItemPath, menuTargetBundleID: rule.appFilter,
                                       customShortcut: rule.customShortcut,
-                                      advancedKeyboard: rule.advancedKeyboard)
+                                      advancedKeyboard: rule.advancedKeyboard,
+                                      shortcutName: rule.shortcutName, script: rule.script)
     }
 
     func executeSwipeRule(_ rule: GestureRule, fingers: Int, direction: GestureDirection) {

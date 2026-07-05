@@ -35,7 +35,8 @@ final class ActionExecutor {
 
     func execute(_ action: GestureAction, appPath: String? = nil, menuItemPath: [String]? = nil,
                  menuTargetBundleID: String? = nil, customShortcut: KeyboardShortcut? = nil,
-                 advancedKeyboard: [KeyboardInputStep] = []) {
+                 advancedKeyboard: [KeyboardInputStep] = [],
+                 shortcutName: String? = nil, script: String? = nil) {
         AppLogger.debug("[Action] \(action.rawValue)")
         switch action {
 
@@ -105,6 +106,25 @@ final class ActionExecutor {
 
         case .advancedKeyboard:
             KeyboardEmulator.shared.executeKeyboardSteps(advancedKeyboard)
+
+        case .runShortcut:
+            if let name = shortcutName { SystemActions.runShortcut(named: name) }
+
+        case .runShellCommand:
+            if let script { SystemActions.runShellCommand(script) }
+
+        case .runAppleScript:
+            if let script { SystemActions.runAppleScript(script) }
+
+        // Media & display
+        case .playPause:      SystemActions.sendMediaKey(.play)
+        case .nextTrack:      SystemActions.sendMediaKey(.next)
+        case .previousTrack:  SystemActions.sendMediaKey(.previous)
+        case .volumeUp:       SystemActions.sendMediaKey(.volumeUp)
+        case .volumeDown:     SystemActions.sendMediaKey(.volumeDown)
+        case .muteToggle:     SystemActions.sendMediaKey(.mute)
+        case .brightnessUp:   SystemActions.sendMediaKey(.brightnessUp)
+        case .brightnessDown: SystemActions.sendMediaKey(.brightnessDown)
 
         case .emptyTrash:    SystemActions.emptyTrash()
         case .openFinder:    SystemActions.openFinder()

@@ -32,10 +32,14 @@ final class PreferencesStore: ObservableObject {
     @Published private(set) var tuning: GestureTuning = .init()
     @Published private(set) var windowTargetingMode: WindowTargetingMode = .focusedThenCursor
     @Published private(set) var hapticFeedbackEnabled = true
+    @Published private(set) var hapticAssignments: [HapticEvent: HapticPattern] = HapticEvent.defaultAssignments
     @Published private(set) var debugLoggingEnabled = false
     @Published private(set) var launchAtLoginEnabled = false
     @Published private(set) var accessibilityGranted = false
     @Published private(set) var diagnostics = RuleDiagnostics()
+    @Published private(set) var autoDisableNativeGestures = false
+    @Published private(set) var nativeConflicts: [SystemGestureManager.Conflict] = []
+    @Published private(set) var disabledNativeGestures: [SystemGestureManager.NativeGesture] = []
 
 
     private init() { reload() }
@@ -47,6 +51,7 @@ final class PreferencesStore: ObservableObject {
         tuning = s.tuning
         windowTargetingMode = s.windowTargetingMode
         hapticFeedbackEnabled = s.hapticFeedbackEnabled
+        hapticAssignments = s.hapticAssignments
         debugLoggingEnabled = s.debugLoggingEnabled
         // The login item can be toggled behind our back in System Settings —
         // SMAppService is the source of truth, the YAML value just mirrors it.
@@ -57,6 +62,8 @@ final class PreferencesStore: ObservableObject {
         }
         refreshAccessibilityStatus()
         diagnostics = buildDiagnostics(for: rules)
+        autoDisableNativeGestures = s.autoDisableNativeGestures
+        refreshNativeConflicts()
     }
 
     func refreshAccessibilityStatus() {
@@ -110,6 +117,8 @@ final class PreferencesStore: ObservableObject {
         }
         Settings.shared.appSwitcher = copy
         appSwitcher = Settings.shared.appSwitcher
+        SystemGestureManager.reconcileIfAutoEnabled()
+        refreshNativeConflicts()
     }
 
     /// Horizontal swipes reserved for app switcher on this finger count (when enabled).
@@ -154,6 +163,17 @@ final class PreferencesStore: ObservableObject {
     func updateHapticFeedback(_ v: Bool) {
         hapticFeedbackEnabled = v
         Settings.shared.hapticFeedbackEnabled = v
+    }
+
+    func updateHapticPattern(_ pattern: HapticPattern, for event: HapticEvent) {
+        hapticAssignments[event] = pattern
+        Settings.shared.hapticAssignments = hapticAssignments
+        HapticEngine.shared.play(pattern)   // let the user feel the choice immediately
+    }
+
+    func resetHapticAssignments() {
+        hapticAssignments = HapticEvent.defaultAssignments
+        Settings.shared.hapticAssignments = hapticAssignments
     }
 
     func updateDebugLogging(_ v: Bool) {
@@ -307,6 +327,50 @@ final class PreferencesStore: ObservableObject {
     private func persistRules() {
         Settings.shared.rules = rules.map(sanitizedRule)
         diagnostics = buildDiagnostics(for: rules)
+        SystemGestureManager.reconcileIfAutoEnabled()
+        refreshNativeConflicts()
+    }
+
+    // MARK: Native gesture conflicts
+
+    func refreshNativeConflicts() {
+        nativeConflicts = SystemGestureManager.currentConflicts(rules: Settings.shared.rules,
+                                                                appSwitcher: Settings.shared.appSwitcher)
+        disabledNativeGestures = SystemGestureManager.disabledByGlide()
+    }
+
+    func reEnableNativeGesture(_ gesture: SystemGestureManager.NativeGesture) {
+        SystemGestureManager.reEnableNativeGestures([gesture])
+        scheduleConflictRefresh()
+    }
+
+    func reEnableAllNativeGestures() {
+        SystemGestureManager.reEnableNativeGestures(disabledNativeGestures)
+        scheduleConflictRefresh()
+    }
+
+    func updateAutoDisableNativeGestures(_ v: Bool) {
+        autoDisableNativeGestures = v
+        Settings.shared.autoDisableNativeGestures = v
+        if v { SystemGestureManager.reconcileIfAutoEnabled() }
+        scheduleConflictRefresh()
+    }
+
+    func disableNativeConflict(_ conflict: SystemGestureManager.Conflict) {
+        SystemGestureManager.disableNativeGestures([conflict.native])
+        scheduleConflictRefresh()
+    }
+
+    func disableAllNativeConflicts() {
+        SystemGestureManager.disableNativeGestures(nativeConflicts.map(\.native))
+        scheduleConflictRefresh()
+    }
+
+    /// The defaults writes run off-main; re-read after they had a moment to land.
+    private func scheduleConflictRefresh() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.refreshNativeConflicts()
+        }
     }
 
     private func sanitizedRule(_ r: GestureRule) -> GestureRule {

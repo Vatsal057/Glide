@@ -28,6 +28,7 @@ struct GlideConfig {
         var hapticFeedback: Bool = true
         var debugLogging: Bool = false
         var launchAtLogin: Bool = false
+        var autoDisableNativeGestures: Bool = false
     }
 
     struct AppSwitcher {
@@ -48,6 +49,8 @@ struct GlideConfig {
         var pinchFrameSpreadThreshold: Float = 0.008
         var swipeCoherenceThreshold: Float = 0.30
         var swipeAngleTolerance: Float = 45.0
+        var rotationThresholdDegrees: Float = 30
+        var tapHoldDuration: Double = 0.5
         var edgeMarginEnabled: Bool = true
         var edgeMarginLeft: Float = 0.05
         var edgeMarginRight: Float = 0.05
@@ -69,6 +72,9 @@ struct GlideConfig {
         var menuPath: [String]?
         var shortcutKeyCode: Int?
         var shortcutModifiers: [String]?
+        var shortcutName: String? = nil
+        var script: String? = nil
+        var haptic: String? = nil   // per-gesture HapticPattern rawValue; nil = automatic
         var advancedKeyboard: [String]?
         var reciprocal: Bool
         var continuous: Bool = false
@@ -92,6 +98,8 @@ struct GlideConfig {
     var preferences: Preferences = Preferences()
     var appSwitcher: AppSwitcher = AppSwitcher()
     var tuning: Tuning = Tuning()
+    /// haptic event rawValue → pattern rawValue (see HapticEvent / HapticPattern)
+    var haptics: [String: String] = [:]
     var gestures: [Gesture] = []
 }
 
@@ -115,8 +123,10 @@ extension GlideConfig {
 
         cfg.preferences.windowTargeting  = s.windowTargetingMode.rawValue
         cfg.preferences.hapticFeedback   = s.hapticFeedbackEnabled
+        cfg.haptics = Dictionary(uniqueKeysWithValues: s.hapticAssignments.map { ($0.key.rawValue, $0.value.rawValue) })
         cfg.preferences.debugLogging     = s.debugLoggingEnabled
         cfg.preferences.launchAtLogin    = s.launchAtLoginEnabled
+        cfg.preferences.autoDisableNativeGestures = s.autoDisableNativeGestures
 
         cfg.appSwitcher.enabled = s.appSwitcher.enabled
         cfg.appSwitcher.fingers = s.appSwitcher.fingers
@@ -133,6 +143,8 @@ extension GlideConfig {
         cfg.tuning.pinchFrameSpreadThreshold = t.pinchFrameSpreadThreshold
         cfg.tuning.swipeCoherenceThreshold   = t.swipeCoherenceThreshold
         cfg.tuning.swipeAngleTolerance       = t.swipeAngleTolerance
+        cfg.tuning.rotationThresholdDegrees  = t.rotationThresholdDegrees
+        cfg.tuning.tapHoldDuration           = t.tapHoldDuration
         cfg.tuning.edgeMarginEnabled         = t.edgeMarginEnabled
         cfg.tuning.edgeMarginLeft            = t.edgeMargin.left
         cfg.tuning.edgeMarginRight           = t.edgeMargin.right
@@ -140,16 +152,22 @@ extension GlideConfig {
         cfg.tuning.edgeMarginBottom          = t.edgeMargin.bottom
 
         cfg.gestures = s.rules.map { rule in
-            let isClick = rule.direction.isClickLike
-            let typeStr = rule.direction == .forceClick ? "force_click"
-                        : (rule.direction == .click ? "click" : "swipe")
+            let typeStr: String
+            switch rule.direction {
+            case .forceClick:           typeStr = "force_click"
+            case .click:                typeStr = "click"
+            case .tapHold:              typeStr = "hold"
+            case .rotateCW, .rotateCCW: typeStr = "rotate"
+            default:                    typeStr = "swipe"
+            }
+            let hasDirection = !rule.direction.isClickLike
             let normalized = GestureRule.migratingLegacyAppFilter(rule)
             return GlideConfig.Gesture(
                 name:        rule.name,
                 type:        typeStr,
-                direction:   isClick ? nil     : yamlDirection(rule.direction),
+                direction:   hasDirection ? yamlDirection(rule.direction) : nil,
                 fingers:     rule.fingers,
-                speed:       isClick ? nil     : rule.speed.rawValue.lowercased(),
+                speed:       rule.direction.hasSpeed ? rule.speed.rawValue.lowercased() : nil,
                 action:      rule.action.rawValue,
                 appFilter:      normalized.appFilter,
                 windowState:    normalized.windowStateFilter.yamlValue,
@@ -158,6 +176,9 @@ extension GlideConfig {
                 menuPath:       rule.menuItemPath,
                 shortcutKeyCode: rule.customShortcut.map { Int($0.keyCode) },
                 shortcutModifiers: rule.customShortcut?.yamlModifiers,
+                shortcutName: rule.shortcutName,
+                script:       rule.script,
+                haptic:       rule.hapticPattern?.rawValue,
                 advancedKeyboard: rule.advancedKeyboard.map(\.token).nilIfEmpty,
                 reciprocal:  rule.reciprocalEnabled,
                 continuous:  rule.continuous,
@@ -207,6 +228,8 @@ extension GlideConfig {
         t.pinchFrameSpreadThreshold = tuning.pinchFrameSpreadThreshold
         t.swipeCoherenceThreshold   = tuning.swipeCoherenceThreshold
         t.swipeAngleTolerance       = tuning.swipeAngleTolerance
+        t.rotationThresholdDegrees  = tuning.rotationThresholdDegrees
+        t.tapHoldDuration           = tuning.tapHoldDuration
         t.edgeMarginEnabled         = tuning.edgeMarginEnabled
         t.edgeMargin.left           = tuning.edgeMarginLeft
         t.edgeMargin.right          = tuning.edgeMarginRight
@@ -224,6 +247,13 @@ extension GlideConfig {
                 direction = .click
             } else if g.type == "force_click" {
                 direction = .forceClick
+            } else if g.type == "hold" {
+                direction = .tapHold
+            } else if g.type == "rotate" {
+                switch g.direction?.lowercased() {
+                case "ccw", "counterclockwise": direction = .rotateCCW
+                default:                        direction = .rotateCW
+                }
             } else {
                 guard let d = swiftDirection(g.direction) else { return nil }
                 direction = d
@@ -237,7 +267,7 @@ extension GlideConfig {
                 }
             }()
 
-            let migrated = GestureRule.migratingLegacyAppFilter(GestureRule(
+            var rule = GestureRule(
                 name:      g.name,
                 fingers:   g.fingers,
                 direction: direction,
@@ -266,9 +296,12 @@ extension GlideConfig {
                 menuItemPath:      g.menuPath,
                 customShortcut:    KeyboardShortcut(yamlKeyCode: g.shortcutKeyCode,
                                                      modifiers: g.shortcutModifiers),
+                shortcutName:      g.shortcutName,
+                script:            g.script,
                 isDraft:           g.draft
-            ))
-            return migrated
+            )
+            rule.hapticPattern = g.haptic.flatMap(HapticPattern.init(rawValue:))
+            return GestureRule.migratingLegacyAppFilter(rule)
         }
     }
 
@@ -282,8 +315,11 @@ extension GlideConfig {
         case .swipeRight: return "right"
         case .swipeUp:    return "up"
         case .swipeDown:  return "down"
+        case .rotateCW:   return "cw"
+        case .rotateCCW:  return "ccw"
         case .click:      return "none"
         case .forceClick: return "none"
+        case .tapHold:    return "none"
         }
     }
 
@@ -326,6 +362,13 @@ enum GlideConfigSerializer {
             "    haptic_feedback: \(config.preferences.hapticFeedback ? "true" : "false")",
             "    debug_logging: \(config.preferences.debugLogging ? "true" : "false")",
             "    launch_at_login: \(config.preferences.launchAtLogin ? "true" : "false")",
+            "    auto_disable_native_gestures: \(config.preferences.autoDisableNativeGestures ? "true" : "false")",
+            "",
+            "  # ── Haptic patterns (per event) ────────────────────",
+            "  haptics:",
+        ]
+        lines += config.haptics.sorted { $0.key < $1.key }.map { "    \($0.key): \"\($0.value)\"" }
+        lines += [
             "",
             "  # ── App Switcher (hold + swipe to browse, release to confirm) ──",
             "  app_switcher:",
@@ -346,6 +389,8 @@ enum GlideConfigSerializer {
             "    pinch_frame_spread_threshold: \(fmt(config.tuning.pinchFrameSpreadThreshold))",
             "    swipe_coherence_threshold: \(fmt(config.tuning.swipeCoherenceThreshold))",
             "    swipe_angle_tolerance: \(String(format: "%.1f", config.tuning.swipeAngleTolerance))",
+            "    rotation_threshold_degrees: \(String(format: "%.1f", config.tuning.rotationThresholdDegrees))",
+            "    tap_hold_duration: \(String(format: "%.2f", config.tuning.tapHoldDuration))",
             "",
             "    edge_margin:",
             "      enabled: \(config.tuning.edgeMarginEnabled ? "true" : "false")",
@@ -386,6 +431,7 @@ enum GlideConfigSerializer {
         if let s = g.speed { lines.append("      speed: \(s)") }
         if g.draft { lines.append("      draft: true") }
         lines.append("      action: \"\(escape(g.action))\"")
+        if let h = g.haptic { lines.append("      haptic: \"\(h)\"") }
         if let ws = g.windowState { lines.append("      window_state: \(ws)") }
         if let mf = g.modifierFilter { lines.append("      modifier_filter: \(mf)") }
         lines.append("      app_filter: \(g.appFilter.map { "\"\($0)\"" } ?? "null")")
@@ -432,6 +478,13 @@ enum GlideConfigSerializer {
         if g.action == GestureAction.advancedKeyboard.rawValue {
             appendStringList(g.advancedKeyboard, key: "advanced_keyboard", to: &lines)
         }
+        if g.action == GestureAction.runShortcut.rawValue, let name = g.shortcutName, !name.isEmpty {
+            lines.append("      shortcut_name: \"\(escape(name))\"")
+        }
+        if (g.action == GestureAction.runShellCommand.rawValue || g.action == GestureAction.runAppleScript.rawValue),
+           let script = g.script, !script.isEmpty {
+            lines.append("      script: \"\(escape(script))\"")
+        }
         if g.continuousNegativeAction == GestureAction.customShortcut.rawValue {
             appendShortcut(g.continuousNegativeShortcutKeyCode, modifiers: g.continuousNegativeShortcutModifiers,
                            keyPrefix: "continuous_update_negative", to: &lines)
@@ -471,6 +524,7 @@ enum GlideConfigSerializer {
     private static func escape(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
          .replacingOccurrences(of: "\"", with: "\\\"")
+         .replacingOccurrences(of: "\n", with: "\\n")
     }
 }
 
@@ -496,6 +550,7 @@ enum GlideConfigParser {
             switch key {
             case "speed":       i += 1; parseSpeed(lines, from: &i, parentIndent: indent, into: &cfg.speed)
             case "preferences":  i += 1; parsePreferences(lines, from: &i, parentIndent: indent, into: &cfg.preferences)
+            case "haptics":     i += 1; parseHaptics(lines, from: &i, parentIndent: indent, into: &cfg.haptics)
             case "app_switcher": i += 1; parseAppSwitcher(lines, from: &i, parentIndent: indent, into: &cfg.appSwitcher)
             case "tuning":       i += 1; parseTuning(lines, from: &i, parentIndent: indent, into: &cfg.tuning)
             case "gestures":    i += 1; parseGestures(lines, from: &i, parentIndent: indent, into: &cfg.gestures); return cfg
@@ -535,8 +590,21 @@ enum GlideConfigParser {
             case "haptic_feedback":  prefs.hapticFeedback  = boolVal(val)   ?? prefs.hapticFeedback
             case "debug_logging":    prefs.debugLogging    = boolVal(val)   ?? prefs.debugLogging
             case "launch_at_login":  prefs.launchAtLogin   = boolVal(val)   ?? prefs.launchAtLogin
+            case "auto_disable_native_gestures": prefs.autoDisableNativeGestures = boolVal(val) ?? prefs.autoDisableNativeGestures
             default: break
             }
+            i += 1
+        }
+    }
+
+    private static func parseHaptics(_ lines: [String], from i: inout Int, parentIndent: Int, into haptics: inout [String: String]) {
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
+            if let k = key, let v = stringVal(val) { haptics[k] = v }
             i += 1
         }
     }
@@ -577,6 +645,8 @@ enum GlideConfigParser {
             case "pinch_frame_spread_threshold": tuning.pinchFrameSpreadThreshold = floatVal(val)  ?? tuning.pinchFrameSpreadThreshold
             case "swipe_coherence_threshold":    tuning.swipeCoherenceThreshold   = floatVal(val)  ?? tuning.swipeCoherenceThreshold
             case "swipe_angle_tolerance":        tuning.swipeAngleTolerance       = floatVal(val)  ?? tuning.swipeAngleTolerance
+            case "rotation_threshold_degrees":   tuning.rotationThresholdDegrees  = floatVal(val)  ?? tuning.rotationThresholdDegrees
+            case "tap_hold_duration":            tuning.tapHoldDuration           = doubleVal(val) ?? tuning.tapHoldDuration
             case "edge_margin":
                 let marginIndent = ind
                 i += 1
@@ -715,6 +785,9 @@ enum GlideConfigParser {
                 g.menuPath = parseMenuPathList(lines, from: &i, parentIndent: menuIndent)
                 continue
             case "shortcut_key_code": g.shortcutKeyCode = intVal(val)
+            case "shortcut_name":     g.shortcutName    = stringVal(val)
+            case "script":            g.script          = stringVal(val)
+            case "haptic":            g.haptic          = stringVal(val)
             case "shortcut_modifiers":
                 let modIndent = ind
                 i += 1
@@ -828,7 +901,7 @@ enum GlideConfigParser {
         var escaping = false
         for ch in s {
             if escaping {
-                result.append(ch)
+                result.append(ch == "n" ? "\n" : ch)
                 escaping = false
             } else if ch == "\\" {
                 escaping = true

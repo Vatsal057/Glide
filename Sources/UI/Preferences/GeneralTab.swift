@@ -24,11 +24,6 @@ struct GeneralTab: View {
                         }
                         Divider().padding(.leading, 12)
 
-                        SettingsRow(label: "Haptic Feedback") {
-                            Toggle("Vibrate trackpad on gesture recognition", isOn: Binding(get: { store.hapticFeedbackEnabled }, set: store.updateHapticFeedback))
-                        }
-                        Divider().padding(.leading, 12)
-
                         SettingsRow(label: "Debug Logging") {
                             Toggle("Write gesture details to Console", isOn: Binding(get: { store.debugLoggingEnabled }, set: store.updateDebugLogging))
                         }
@@ -39,6 +34,12 @@ struct GeneralTab: View {
                         }
                     }
                 }
+
+                // Haptics
+                hapticsCard
+
+                // Native gesture conflicts
+                nativeGesturesCard
 
                 // Stats dashboard
                 statsDashboard
@@ -81,6 +82,138 @@ struct GeneralTab: View {
                 }
             }
             .padding(8)
+        }
+    }
+
+    // MARK: - Haptics
+
+    private var hapticsCard: some View {
+        GroupBox(label: Label("Haptics", systemImage: "waveform")) {
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsRow(label: "Haptic Feedback") {
+                    Toggle("Vibrate trackpad on gesture recognition", isOn: Binding(get: { store.hapticFeedbackEnabled }, set: store.updateHapticFeedback))
+                }
+
+                ForEach(HapticEvent.allCases, id: \.self) { event in
+                    Divider().padding(.leading, 12)
+                    SettingsRow(label: event.displayName) {
+                        Picker("", selection: Binding(
+                            get: { store.hapticAssignments[event] ?? event.defaultPattern },
+                            set: { store.updateHapticPattern($0, for: event) })) {
+                            ForEach(HapticPattern.allCases, id: \.self) { pattern in
+                                Text(pattern.displayName).tag(pattern)
+                            }
+                        }
+                        .frame(maxWidth: 200)
+                        .disabled(!store.hapticFeedbackEnabled)
+                    }
+                }
+
+                Divider().padding(.leading, 12)
+                HStack {
+                    Text("Selecting a pattern plays it on the trackpad.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Reset to Defaults") { store.resetHapticAssignments() }
+                        .disabled(!store.hapticFeedbackEnabled)
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    // MARK: - Native Gesture Conflicts
+
+    private var nativeGesturesCard: some View {
+        GroupBox(label: Label("macOS Gesture Conflicts", systemImage: "exclamationmark.arrow.triangle.2.circlepath")) {
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsRow(label: "Auto-Disable") {
+                    Toggle("Turn off macOS gestures that collide with Glide gestures",
+                           isOn: Binding(get: { store.autoDisableNativeGestures },
+                                         set: store.updateAutoDisableNativeGestures))
+                }
+
+                if store.nativeConflicts.isEmpty {
+                    Divider().padding(.leading, 12)
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("No conflicts — no active macOS gesture shares a trigger with your Glide gestures.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(12)
+                } else {
+                    ForEach(store.nativeConflicts) { conflict in
+                        Divider().padding(.leading, 12)
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(conflict.native.title)
+                                    .font(.callout.weight(.medium))
+                                Text("Collides with: \(conflict.glideTriggers.joined(separator: ", "))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                if !conflict.native.appliesWithoutLogout {
+                                    Text("May need a log out & back in to fully take effect.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                            Spacer()
+                            Button("Disable") { store.disableNativeConflict(conflict) }
+                                .help("Turns the native macOS gesture off (restarts the Dock)")
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                    }
+
+                    if store.nativeConflicts.count > 1 {
+                        Divider().padding(.leading, 12)
+                        HStack {
+                            Spacer()
+                            Button("Disable All Native Conflicts") { store.disableAllNativeConflicts() }
+                        }
+                        .padding(12)
+                    }
+                }
+
+                // ── Re-enable anything Glide turned off ──
+                if !store.disabledNativeGestures.isEmpty {
+                    Divider().padding(.leading, 12)
+                    HStack {
+                        Text("Disabled by Glide")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if store.disabledNativeGestures.count > 1 {
+                            Button("Re-enable All") { store.reEnableAllNativeGestures() }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+
+                    ForEach(store.disabledNativeGestures) { gesture in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "slash.circle")
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 2)
+                            Text(gesture.title)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Re-enable") { store.reEnableNativeGesture(gesture) }
+                                .help("Restores the native macOS gesture to how it was before Glide disabled it")
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                    }
+                }
+            }
         }
     }
 
@@ -141,7 +274,7 @@ struct GeneralTab: View {
                     color: .orange
                 )
                 StatCard(
-                    value: "\(store.rules.filter { $0.reciprocalEnabled && !$0.direction.isClickLike }.count)",
+                    value: "\(store.rules.filter { $0.reciprocalEnabled && $0.direction.hasSpeed }.count)",
                     label: "Reciprocal Pairs",
                     icon: "arrow.left.and.right",
                     color: .teal

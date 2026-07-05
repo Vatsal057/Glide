@@ -12,16 +12,24 @@ enum GestureFingers: Int, Codable, CaseIterable {
 enum GestureDirection: String, Codable, CaseIterable {
     case click           = "Click"
     case forceClick      = "Force Click"
+    case tapHold         = "Tap & Hold"
     case swipeLeftRight  = "Left / Right"
     case swipeUpDown     = "Up / Down"
     case swipeLeft       = "Swipe Left"
     case swipeRight      = "Swipe Right"
     case swipeUp         = "Swipe Up"
     case swipeDown       = "Swipe Down"
+    case rotateCW        = "Rotate Clockwise"
+    case rotateCCW       = "Rotate Counterclockwise"
 
-    /// True for tap-style gestures (normal or force click) that have no axis,
-    /// speed, reciprocal or continuous behaviour.
-    var isClickLike: Bool { self == .click || self == .forceClick }
+    /// True for tap-style gestures (normal click, force click, tap & hold) that
+    /// have no axis, speed, reciprocal or continuous behaviour.
+    var isClickLike: Bool { self == .click || self == .forceClick || self == .tapHold }
+
+    var isRotation: Bool { self == .rotateCW || self == .rotateCCW }
+
+    /// Directions with a movement axis — the only ones with speed tiers.
+    var hasSpeed: Bool { !isClickLike && !isRotation }
 }
 
 enum GestureSpeed: String, Codable, CaseIterable {
@@ -216,6 +224,17 @@ enum GestureAction: String, Codable, CaseIterable {
     case customMenuItem            = "Menu Item…"
     case customShortcut            = "Keyboard Shortcut…"
     case advancedKeyboard          = "Advanced Keyboard…"
+    case runShortcut               = "Run Shortcut…"
+    case runShellCommand           = "Shell Command…"
+    case runAppleScript            = "AppleScript…"
+    case playPause                 = "Play / Pause"
+    case nextTrack                 = "Next Track"
+    case previousTrack             = "Previous Track"
+    case volumeUp                  = "Volume Up"
+    case volumeDown                = "Volume Down"
+    case muteToggle                = "Mute / Unmute"
+    case brightnessUp              = "Brightness Up"
+    case brightnessDown            = "Brightness Down"
     case emptyTrash                = "Empty Trash"
     case openFinder                = "Open Finder"
     case openDownloads             = "Open Downloads"
@@ -231,7 +250,10 @@ enum GestureAction: String, Codable, CaseIterable {
                      .snapBottomLeft, .snapBottomRight, .centerWindow, .moveNextDisplay]),
         ("Screenshots", [.screenshotArea, .screenshotFull, .screenshotAreaClipboard,
                          .screenshotFullClipboard, .screenshotToolbar]),
-        ("Custom", [.customMenuItem, .customShortcut, .advancedKeyboard]),
+        ("Media", [.playPause, .nextTrack, .previousTrack, .volumeUp, .volumeDown,
+                   .muteToggle, .brightnessUp, .brightnessDown]),
+        ("Custom", [.customMenuItem, .customShortcut, .advancedKeyboard,
+                    .runShortcut, .runShellCommand, .runAppleScript]),
         ("System", [.missionControl, .appExpose, .showDesktop, .launchpad, .spotlight, .notifCenter,
                     .lockScreen, .sleep, .emptyTrash, .openFinder, .openDownloads]),
         ("Other", [.doNothing]),
@@ -258,6 +280,12 @@ enum GestureAction: String, Codable, CaseIterable {
              .centerWindow:      return .restoreWindow
         case .switchAppNext:     return .switchAppPrev
         case .switchAppPrev:     return .switchAppNext
+        case .volumeUp:          return .volumeDown
+        case .volumeDown:        return .volumeUp
+        case .brightnessUp:      return .brightnessDown
+        case .brightnessDown:    return .brightnessUp
+        case .nextTrack:         return .previousTrack
+        case .previousTrack:     return .nextTrack
         default:                 return nil
         }
     }
@@ -311,6 +339,13 @@ struct GestureRule: Codable, Identifiable, Equatable {
     var menuItemPath: [String]?
     /// Key combo for `.customShortcut`.
     var customShortcut: KeyboardShortcut?
+    /// Shortcuts.app shortcut name for `.runShortcut`.
+    var shortcutName: String?
+    /// Script text for `.runShellCommand` / `.runAppleScript`.
+    var script: String?
+    /// Per-gesture haptic override. nil → automatic (pattern assigned to the
+    /// action's category in Preferences › General › Haptics).
+    var hapticPattern: HapticPattern?
     /// New rules start as drafts until configured in the editor.
     var isDraft: Bool               = false
 
@@ -350,6 +385,12 @@ struct GestureRule: Codable, Identifiable, Equatable {
             return !advancedKeyboard.isEmpty
         }
         if action == .openApp { return appPath != nil && !(appPath?.isEmpty ?? true) }
+        if action == .runShortcut {
+            return !(shortcutName ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        if action == .runShellCommand || action == .runAppleScript {
+            return !(script ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
         return true
     }
 
@@ -374,7 +415,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
         GestureMatchSignature(
             fingers: fingers,
             direction: direction,
-            speed: (speed == .any || direction.isClickLike) ? .normal : speed,
+            speed: (speed == .any || !direction.hasSpeed) ? .normal : speed,
             appFilter: appFilter,
             windowStateFilter: windowStateFilter,
             modifierFilter: modifierFilter
@@ -406,6 +447,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
          continuousPositiveKeyboard: [KeyboardInputStep] = [],
          continuousEndKeyboard: [KeyboardInputStep] = [],
          menuItemPath: [String]? = nil, customShortcut: KeyboardShortcut? = nil,
+         shortcutName: String? = nil, script: String? = nil,
          isDraft: Bool = false) {
         self.name                = name
         self.fingers             = fingers
@@ -432,6 +474,8 @@ struct GestureRule: Codable, Identifiable, Equatable {
         self.continuousEndKeyboard = continuousEndKeyboard
         self.menuItemPath        = menuItemPath
         self.customShortcut      = customShortcut
+        self.shortcutName        = shortcutName
+        self.script              = script
         self.isDraft             = isDraft
     }
 
@@ -464,6 +508,8 @@ struct GestureRule: Codable, Identifiable, Equatable {
         continuousEndKeyboard      = (try? c.decodeIfPresent([KeyboardInputStep].self, forKey: .continuousEndKeyboard)) ?? []
         menuItemPath      = try? c.decodeIfPresent([String].self, forKey: .menuItemPath)
         customShortcut    = try? c.decodeIfPresent(KeyboardShortcut.self, forKey: .customShortcut)
+        shortcutName      = try? c.decodeIfPresent(String.self, forKey: .shortcutName)
+        script            = try? c.decodeIfPresent(String.self, forKey: .script)
         isDraft           = (try? c.decodeIfPresent(Bool.self,  forKey: .isDraft)) ?? false
         self = Self.migratingLegacyAppFilter(self)
     }
@@ -526,6 +572,10 @@ struct GestureTuning: Codable, Equatable {
     var pinchFrameSpreadThreshold:  Float        = 0.008
     var swipeCoherenceThreshold:    Float        = 0.30
     var swipeAngleTolerance:        Float        = 45
+    /// Total twist (degrees) around the centroid before a rotation gesture fires.
+    var rotationThresholdDegrees:   Float        = 30
+    /// Motionless contact time (seconds) before a Tap & Hold gesture fires.
+    var tapHoldDuration:            TimeInterval = 0.5
     var edgeMarginEnabled:          Bool         = true
     var edgeMargin:                 EdgeMargin   = EdgeMargin()
 
@@ -546,6 +596,8 @@ struct GestureTuning: Codable, Equatable {
         pinchFrameSpreadThreshold = try c.decodeIfPresent(Float.self,        forKey: .pinchFrameSpreadThreshold) ?? 0.008
         swipeCoherenceThreshold   = try c.decodeIfPresent(Float.self,        forKey: .swipeCoherenceThreshold)   ?? 0.30
         swipeAngleTolerance       = try c.decodeIfPresent(Float.self,        forKey: .swipeAngleTolerance)       ?? 45
+        rotationThresholdDegrees  = try c.decodeIfPresent(Float.self,        forKey: .rotationThresholdDegrees)  ?? 30
+        tapHoldDuration           = try c.decodeIfPresent(TimeInterval.self, forKey: .tapHoldDuration)           ?? 0.5
         edgeMarginEnabled         = try c.decodeIfPresent(Bool.self,         forKey: .edgeMarginEnabled)         ?? true
         edgeMargin                = try c.decodeIfPresent(EdgeMargin.self,   forKey: .edgeMargin)                ?? EdgeMargin()
     }
@@ -576,8 +628,10 @@ final class Settings {
     private var _tuning:          GestureTuning       = GestureTuning()
     private var _windowTargeting: WindowTargetingMode = .focusedThenCursor
     private var _hapticFeedback:  Bool                = true
+    private var _hapticAssignments: [HapticEvent: HapticPattern] = HapticEvent.defaultAssignments
     private var _debugLogging:    Bool                = false
     private var _launchAtLogin:   Bool                = false
+    private var _autoDisableNativeGestures: Bool      = false
 
     // MARK: Public interface
 
@@ -610,6 +664,15 @@ final class Settings {
         set { _hapticFeedback = newValue; GlideConfigStore.shared.scheduleSave() }
     }
 
+    var hapticAssignments: [HapticEvent: HapticPattern] {
+        get { _hapticAssignments }
+        set { _hapticAssignments = newValue; GlideConfigStore.shared.scheduleSave() }
+    }
+
+    func hapticPattern(for event: HapticEvent) -> HapticPattern {
+        _hapticAssignments[event] ?? event.defaultPattern
+    }
+
     var debugLoggingEnabled: Bool {
         get { _debugLogging }
         set { _debugLogging = newValue; GlideConfigStore.shared.scheduleSave() }
@@ -618,6 +681,11 @@ final class Settings {
     var launchAtLoginEnabled: Bool {
         get { _launchAtLogin }
         set { _launchAtLogin = newValue; GlideConfigStore.shared.scheduleSave() }
+    }
+
+    var autoDisableNativeGestures: Bool {
+        get { _autoDisableNativeGestures }
+        set { _autoDisableNativeGestures = newValue; GlideConfigStore.shared.scheduleSave() }
     }
 
     func resetTuning() { tuning = GestureTuning() }
@@ -634,8 +702,16 @@ final class Settings {
         tuningLock.lock(); _tuning = normalizedTuning; tuningLock.unlock()
         _windowTargeting = WindowTargetingMode(rawValue: config.preferences.windowTargeting) ?? .focusedThenCursor
         _hapticFeedback  = config.preferences.hapticFeedback
+        _hapticAssignments = HapticEvent.defaultAssignments.merging(
+            config.haptics.compactMap { key, value -> (HapticEvent, HapticPattern)? in
+                guard let event = HapticEvent(rawValue: key), let pattern = HapticPattern(rawValue: value) else { return nil }
+                return (event, pattern)
+            },
+            uniquingKeysWith: { _, loaded in loaded }
+        )
         _debugLogging    = config.preferences.debugLogging
         _launchAtLogin   = config.preferences.launchAtLogin
+        _autoDisableNativeGestures = config.preferences.autoDisableNativeGestures
     }
 
     // MARK: App Switcher ↔ gesture rules
@@ -677,7 +753,8 @@ final class Settings {
     private static func normalizedRule(_ rule: GestureRule) -> GestureRule {
         var r = GestureRule.migratingLegacyAppFilter(rule)
         r.fingers = min(max(r.fingers, 2), 5)
-        r.speed   = (r.speed == .any || r.direction.isClickLike) ? .normal : r.speed
+        r.speed   = (r.speed == .any || !r.direction.hasSpeed) ? .normal : r.speed
+        if r.direction.isRotation { r.reciprocalEnabled = false; r.reciprocalAction = nil }
         if r.direction.isClickLike {
             r.reciprocalEnabled = false
             r.continuous = false
@@ -735,6 +812,8 @@ final class Settings {
         n.pinchFrameSpreadThreshold = max(0.001, n.pinchFrameSpreadThreshold)
         n.swipeCoherenceThreshold  = max(0.0, min(n.swipeCoherenceThreshold, 0.95))
         n.swipeAngleTolerance      = max(20, min(n.swipeAngleTolerance, 45))
+        n.rotationThresholdDegrees = max(10, min(n.rotationThresholdDegrees, 180))
+        n.tapHoldDuration          = max(0.3, min(n.tapHoldDuration, 3.0))
         let clamp = { (v: Float) in max(EdgeMargin.range.lowerBound,
                                         min(v, EdgeMargin.range.upperBound)) }
         n.edgeMargin.left   = clamp(n.edgeMargin.left)

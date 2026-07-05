@@ -121,9 +121,8 @@ final class GestureInputManager {
                 let count = TouchTracker.getThreeFingerCount()
                 let peak = TouchTracker.getSessionPeakActiveTouches()
                 if TouchTracker.clickGestureMatchesFingerState(count: count, peak: peak) {
-                    if Settings.shared.hapticFeedbackEnabled {
-                        NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
-                    }
+                    // No app haptic here: a physical click already gives native
+                    // down/up feedback — adding one reads as a triple "crunch".
                     DispatchQueue.main.async { GestureEngine.shared.processClick(fingerCount: count) }
                 }
                 return Unmanaged.passUnretained(event)

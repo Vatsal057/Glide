@@ -6,36 +6,37 @@ import Cocoa
 
 enum Haptic {
 
+    /// Rule-aware entry point: per-gesture override wins, else the pattern
+    /// assigned to the action's category.
+    static func forRule(_ rule: GestureRule) {
+        if let pattern = rule.hapticPattern {
+            HapticEngine.shared.play(pattern)
+        } else {
+            forAction(rule.action)
+        }
+    }
+
     static func forAction(_ action: GestureAction) {
-        guard Settings.shared.hapticFeedbackEnabled else { return }
-        let pattern: NSHapticFeedbackManager.FeedbackPattern
         switch action {
-        case .quitApp, .forceQuitApp, .quitFrontmost, .closeWindow, .sleep, .lockScreen, .openApp:
-            pattern = .generic
+        case .doNothing:
+            return
+        case .quitApp, .forceQuitApp, .quitFrontmost, .closeWindow, .emptyTrash:
+            HapticEngine.shared.play(event: .destructiveAction)
         case .minimizeWindow, .minimizeAllApps, .restoreMinimizedApps,
              .maximizeWindow, .restoreWindow,
              .enterFullscreen, .exitFullscreen, .toggleFullscreen,
              .snapLeft, .snapRight, .snapTopLeft, .snapTopRight,
              .snapBottomLeft, .snapBottomRight, .centerWindow, .moveNextDisplay:
-            pattern = .levelChange
-        case .doNothing:
-            return
+            HapticEngine.shared.play(event: .windowAction)
         default:
-            pattern = .alignment
+            HapticEngine.shared.play(event: .otherAction)
         }
-        NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: .now)
     }
 
-    static func switcherStep()   { fire(.alignment) }
-    static func switcherOpen()   { fire(.generic) }
-    static func switcherCommit() { fire(.generic) }
-    static func reciprocal()     { fire(.levelChange) }
-    static func click()          { fire(.levelChange) }
-
-    private static func fire(_ pattern: NSHapticFeedbackManager.FeedbackPattern) {
-        guard Settings.shared.hapticFeedbackEnabled else { return }
-        NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: .now)
-    }
+    static func switcherStep()   { HapticEngine.shared.play(event: .switcherStep) }
+    static func switcherOpen()   { HapticEngine.shared.play(event: .switcherOpen) }
+    static func switcherCommit() { HapticEngine.shared.play(event: .switcherCommit) }
+    static func reciprocal()     { HapticEngine.shared.play(event: .reciprocal) }
 }
 import Foundation
 
