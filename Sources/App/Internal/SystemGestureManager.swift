@@ -70,8 +70,25 @@ enum SystemGestureManager {
         key: "TrackpadThreeFingerTapGesture",
         title: "3-Finger Tap (Look Up & Data Detectors)",
         defaultEnabled: false, dockKeys: [], appliesWithoutLogout: true)
+    // Never reported as conflicts: Glide has no pinch gestures and its
+    // processor rejects pinch-shaped input (pinchSpreadThreshold), so native
+    // pinch/spread can't collide. Kept in `all` only so copies disabled by an
+    // earlier build can still be re-enabled via disabledByGlide().
+    static let launchpadPinch = NativeGesture(
+        key: "TrackpadFourFingerPinchGesture",
+        title: "Pinch with Thumb & 3 Fingers (Launchpad)",
+        defaultEnabled: true,
+        dockKeys: ["showLaunchpadGestureEnabled"],
+        appliesWithoutLogout: true)
+    static let showDesktopSpread = NativeGesture(
+        key: "TrackpadFiveFingerPinchGesture",
+        title: "Spread with Thumb & 3 Fingers (Show Desktop)",
+        defaultEnabled: true,
+        dockKeys: ["showDesktopGestureEnabled"],
+        appliesWithoutLogout: true)
 
-    static let all = [threeFingerHoriz, threeFingerVert, fourFingerHoriz, fourFingerVert, threeFingerTap]
+    static let all = [threeFingerHoriz, threeFingerVert, fourFingerHoriz, fourFingerVert,
+                      threeFingerTap, launchpadPinch, showDesktopSpread]
 
     struct Conflict: Identifiable, Equatable {
         var id: String { native.key }

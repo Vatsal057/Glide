@@ -138,27 +138,27 @@ enum TouchTracker {
     }
 }
 let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
-    var validTouches: [MTTouch] = []
+    // Runs up to 120×/s per device — single pass, one array, capacity reserved
+    // up front so steady-state frames make no heap allocations.
+    var activeTouches: [MTTouch] = []
     if let data, count > 0 {
         let n = Int(count)
+        activeTouches.reserveCapacity(n)
         let raw = data.assumingMemoryBound(to: MTTouch.self)
         let tuning = Settings.shared.tuning
+        let edge = tuning.edgeMarginEnabled
+        let m = tuning.edgeMargin
 
-        if tuning.edgeMarginEnabled {
-            let m = tuning.edgeMargin
-            for i in 0..<n {
-                let t = raw[i]
+        for i in 0..<n {
+            let t = raw[i]
+            guard t.state >= 3 && t.state <= 4 else { continue }
+            if edge {
                 let x = t.normalizedPosition.x; let y = t.normalizedPosition.y
-                if !(x < m.left || x > 1.0 - m.right || y < m.bottom || y > 1.0 - m.top) {
-                    validTouches.append(t)
-                }
+                if x < m.left || x > 1.0 - m.right || y < m.bottom || y > 1.0 - m.top { continue }
             }
-        } else {
-            for i in 0..<n { validTouches.append(raw[i]) }
+            activeTouches.append(t)
         }
     }
-
-    let activeTouches = validTouches.filter { $0.state >= 3 && $0.state <= 4 }
     if let dev = device {
         TouchTracker.updateDeviceFingerCount(device: dev, count: activeTouches.count)
     }
@@ -202,8 +202,10 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
         }
     }
     if TouchTracker._fingerFirstSeen.count != activeTouches.count {
-        let activeIDs = Set(activeTouches.map { $0.identifier })
-        TouchTracker._fingerFirstSeen = TouchTracker._fingerFirstSeen.filter { activeIDs.contains($0.key) }
+        // ≤11 touches — linear scan beats building a Set every frame.
+        for key in TouchTracker._fingerFirstSeen.keys where !activeTouches.contains(where: { $0.identifier == key }) {
+            TouchTracker._fingerFirstSeen.removeValue(forKey: key)
+        }
     }
     if let oldest = TouchTracker._fingerFirstSeen.values.min(),
        let newest = TouchTracker._fingerFirstSeen.values.max() {
