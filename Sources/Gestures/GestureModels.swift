@@ -36,7 +36,13 @@ struct CandidateData {
     var prevSpread: Float
     var minCoherence: Float
     var prevCx: Float; var prevCy: Float
-    var velocitySamples: [Float]
+    /// Wall-clock time when the centroid first moved past the movement epsilon —
+    /// speed is measured from here, not finger-down, so resting fingers don't read slow.
+    var movementStartTime: TimeInterval?
+    /// Per-frame centroid velocities (widths/second) for classic speed logic.
+    var velocitySamples: [Float] = []
+    /// Timestamp of the previous frame — turns per-frame distances into velocities.
+    var lastFrameTime: TimeInterval
     var gestureKind: GestureKind = .unknown
     var classificationFrameDelay: Int = 0
     /// Accumulated signed twist (degrees) — drives rotation gesture detection.
@@ -48,7 +54,9 @@ struct SwipeTrackData {
     var lastX: Float; var lastY: Float
     let fingers: Int; let startTime: TimeInterval
     let modifiersAtStart: CapturedModifiers
+    var movementStartTime: TimeInterval?
     var velocitySamples: [Float]
+    var lastFrameTime: TimeInterval
     var recentDeltas: [(dx: Float, dy: Float)]
     let initialSpread: Float
     var prevSpread: Float

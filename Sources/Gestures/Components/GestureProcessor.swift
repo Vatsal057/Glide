@@ -26,7 +26,7 @@ final class GestureProcessor {
                 frameCount: 1, cumulativeSpreadDelta: 0,
                 prevSpread: frame.spread, minCoherence: frame.coherence,
                 prevCx: frame.cx, prevCy: frame.cy,
-                velocitySamples: []
+                movementStartTime: nil, lastFrameTime: now
             ))
 
         case .candidate(var data):
@@ -40,7 +40,7 @@ final class GestureProcessor {
                     frameCount: 1, cumulativeSpreadDelta: 0,
                     prevSpread: frame.spread, minCoherence: frame.coherence,
                     prevCx: frame.cx, prevCy: frame.cy,
-                    velocitySamples: []
+                    movementStartTime: nil, lastFrameTime: now
                 ))
             }
             if n < data.fingers { return .ignored }
@@ -49,8 +49,12 @@ final class GestureProcessor {
             let frameDx = frame.cx - data.prevCx
             let frameDy = frame.cy - data.prevCy
             let movedFromStart = ((frame.cx - data.startX) * (frame.cx - data.startX) + (frame.cy - data.startY) * (frame.cy - data.startY)).squareRoot()
+            let frameDt = now - data.lastFrameTime
+            data.lastFrameTime = now
             if movedFromStart >= max(0.002, tuning.initialThreshold * 0.12) {
-                SpeedClassifier.appendVelocitySample((frameDx * frameDx + frameDy * frameDy).squareRoot(), to: &data.velocitySamples, tuning: tuning)
+                if data.movementStartTime == nil { data.movementStartTime = now }
+                let frameDist = (frameDx * frameDx + frameDy * frameDy).squareRoot()
+                SpeedClassifier.appendVelocitySample(frameDist / Float(max(frameDt, 0.001)), to: &data.velocitySamples)
             }
             data.prevCx = frame.cx; data.prevCy = frame.cy
             let frameDelta = abs(frame.spread - data.prevSpread)
@@ -95,7 +99,8 @@ final class GestureProcessor {
                 let swipeData = SwipeTrackData(
                     startX: data.startX, startY: data.startY, lastX: frame.cx, lastY: frame.cy,
                     fingers: data.fingers, startTime: data.startTime,
-                    modifiersAtStart: data.modifiersAtStart, velocitySamples: data.velocitySamples,
+                    modifiersAtStart: data.modifiersAtStart, movementStartTime: data.movementStartTime,
+                    velocitySamples: data.velocitySamples, lastFrameTime: now,
                     recentDeltas: [], initialSpread: data.initialSpread, prevSpread: frame.spread,
                     cumulativeSpreadDelta: data.cumulativeSpreadDelta, continuousRefX: frame.cx, continuousRefY: frame.cy,
                     lastContinuousActionTime: 0, continuousRule: nil, lockedSpeed: nil
@@ -156,7 +161,12 @@ final class GestureProcessor {
             return .ignored
         }
 
-        SpeedClassifier.appendVelocitySample(frameDist, to: &updated.velocitySamples, tuning: tuning)
+        if updated.movementStartTime == nil, frameDist > 0 {
+            updated.movementStartTime = now
+        }
+        let frameDt = now - updated.lastFrameTime
+        updated.lastFrameTime = now
+        SpeedClassifier.appendVelocitySample(frameDist / Float(max(frameDt, 0.001)), to: &updated.velocitySamples)
         updated.recentDeltas.insert((dx: frameDx, dy: frameDy), at: 0)
 
         var totalDx: Float = 0, totalDy: Float = 0
@@ -176,11 +186,36 @@ final class GestureProcessor {
 
         if engine?.consumeReciprocalToken(fingers: data.fingers, direction: direction, now: now) == true { return .fired }
 
-        let elapsed = max(now - updated.startTime, 0.001)
         let candidateRules = GestureRuleResolver.matchingRules(fingers: data.fingers, direction: direction, modifiers: updated.modifiersAtStart)
         if updated.lockedSpeed == nil {
             let configuredSpeeds = Set(candidateRules.map { $0.speed == .any ? GestureSpeed.normal : $0.speed })
-            guard let intent = SpeedClassifier.classifySpeedIntent(velocitySamples: updated.velocitySamples, totalDisplacement: swipeCentroidMovement, elapsedSeconds: elapsed, configuredSpeeds: configuredSpeeds, tuning: tuning) else { return .lockedSwipe(updated) }
+            let elapsed = max(now - (updated.movementStartTime ?? updated.startTime), 0.001)
+            // Per-frame tuning thresholds date from a fixed-60fps assumption; ×60 converts
+            // them to widths/second so existing user settings keep their meaning.
+            let slowMax = tuning.slowVelocityThreshold * 60
+            let fastMin = tuning.fastVelocityThreshold * 60
+            let intent: GestureSpeed?
+            switch tuning.speedLogic {
+            case .simple:
+                intent = SpeedClassifier.classify(
+                    totalDisplacement: swipeCentroidMovement,
+                    elapsedSeconds: elapsed,
+                    configuredSpeeds: configuredSpeeds,
+                    slowMax: slowMax,
+                    fastMin: fastMin
+                )
+            case .classic:
+                intent = SpeedClassifier.classifyClassic(
+                    velocitySamples: updated.velocitySamples,
+                    totalDisplacement: swipeCentroidMovement,
+                    elapsedSeconds: elapsed,
+                    configuredSpeeds: configuredSpeeds,
+                    slowMax: slowMax,
+                    fastMin: fastMin,
+                    initialDistance: tuning.initialThreshold
+                )
+            }
+            guard let intent else { return .lockedSwipe(updated) }
             updated.lockedSpeed = intent
         }
         let speed = updated.lockedSpeed ?? .normal
@@ -210,11 +245,8 @@ final class GestureProcessor {
     private func processContinuousSwipeFrame(_ frame: TouchFrameData, data: SwipeTrackData, tuning: GestureTuning) -> GesturePhase {
         var updated = data
         let now = ProcessInfo.processInfo.systemUptime
-        let frameDx = frame.cx - data.lastX
-        let frameDy = frame.cy - data.lastY
         updated.lastX = frame.cx; updated.lastY = frame.cy
         updated.prevSpread = frame.spread
-        SpeedClassifier.appendVelocitySample((frameDx * frameDx + frameDy * frameDy).squareRoot(), to: &updated.velocitySamples, tuning: tuning)
 
         let swipeCentroidMovement = ((frame.cx - updated.startX) * (frame.cx - updated.startX) + (frame.cy - updated.startY) * (frame.cy - updated.startY)).squareRoot()
         if abs(frame.spread - updated.initialSpread) > 0.003 && abs(frame.spread - updated.initialSpread) > swipeCentroidMovement * 0.8 {

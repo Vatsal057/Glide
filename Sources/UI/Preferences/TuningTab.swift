@@ -51,6 +51,21 @@ struct TuningTab: View {
 
                 TuningSection(title: "Swipe Speed", icon: "speedometer") {
                     explainer("Only matters for gestures you've set to trigger on a Fast or Slow swipe.")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker("Detection method", selection: speedLogicBinding) {
+                            Text("Simple").tag(SpeedLogic.simple)
+                            Text("Classic").tag(SpeedLogic.classic)
+                        }
+                        .pickerStyle(.segmented)
+                        Text(store.tuning.speedLogic == .simple
+                             ? "Simple: one average-speed reading decides the tier. Predictable and consistent."
+                             : "Classic: reads peak speed, acceleration, and timing. Snappier flicks, more nuanced but less consistent.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 4)
+                    Divider().padding(.horizontal, 12)
                     FriendlySlider(
                         title: "Flick detection",
                         subtitle: "How easily a quick flick counts as a “fast” swipe.",
@@ -212,6 +227,8 @@ struct TuningTab: View {
         )
     }
 
+    private var speedLogicBinding: Binding<SpeedLogic> { tuningBinding(\.speedLogic) }
+
     /// Maps a raw field onto a 0–1 slider. `range` runs from the value at the
     /// slider's LEFT end to the value at its RIGHT end (may be descending).
     private func mapped(_ keyPath: WritableKeyPath<GestureTuning, Float>, range: ClosedRange<Float>) -> Binding<Double> {
@@ -316,8 +333,6 @@ struct TuningTab: View {
                     SliderRow(label: "Slow Velocity Threshold", value: tuningBinding(\.slowVelocityThreshold),
                               range: 0.001...0.008, format: "%.3f",
                               hint: "Base threshold for controlled slow intent.")
-                    StepperRow(label: "Speed Sample Frames", value: tuningBinding(\.speedSampleCount),
-                               range: 2...20, hint: "Movement frames used for smoothed velocity.")
                     SliderRow(label: "Angle Tolerance", value: tuningBinding(\.swipeAngleTolerance),
                               range: 20...45, format: "%.0f°",
                               hint: "Half-width of the direction cone. Lower = stricter.")

@@ -2,64 +2,113 @@ import Foundation
 
 enum SpeedClassifier {
 
-    /// Rolling window of recent per-frame centroid displacements (movement-gated in candidate phase).
-    static func appendVelocitySample(_ distance: Float, to samples: inout [Float], tuning: GestureTuning) {
-        guard distance > 0 else { return }
-        samples.append(distance)
-        let cap = tuning.speedSampleCount
-        if samples.count > cap {
-            samples.removeFirst(samples.count - cap)
+    /// Grace window: below this elapsed time a not-yet-fast swipe stays unclassified,
+    /// so a fast swipe whose first frames straddle the trigger distance isn't
+    /// prematurely locked as normal/slow.
+    static let graceSeconds: TimeInterval = 0.05
+
+    /// Classifies swipe speed from average velocity at the moment the swipe
+    /// crosses the trigger distance.
+    ///
+    /// - Parameters:
+    ///   - totalDisplacement: centroid travel since movement start (trackpad widths)
+    ///   - elapsedSeconds: wall-clock time since movement start
+    ///   - configuredSpeeds: tiers that have rules for this direction/fingers
+    ///   - slowMax: average speed at or below which a swipe is slow (widths/second)
+    ///   - fastMin: average speed at or above which a swipe is fast (widths/second)
+    /// - Returns: locked tier, or nil to defer within the grace window.
+    static func classify(
+        totalDisplacement: Float,
+        elapsedSeconds: TimeInterval,
+        configuredSpeeds: Set<GestureSpeed>,
+        slowMax: Float,
+        fastMin: Float
+    ) -> GestureSpeed? {
+        let activeSpeeds = configuredSpeeds.isEmpty ? Set([GestureSpeed.normal]) : configuredSpeeds
+        if activeSpeeds.count == 1 {
+            return activeSpeeds.first
+        }
+
+        let speed = totalDisplacement / Float(max(elapsedSeconds, 0.01))
+
+        if activeSpeeds.contains(.fast), speed >= fastMin {
+            return .fast
+        }
+        if elapsedSeconds < graceSeconds {
+            return nil
+        }
+        if activeSpeeds.contains(.slow), speed <= slowMax {
+            return .slow
+        }
+        if activeSpeeds.contains(.normal) {
+            return .normal
+        }
+        // Only slow+fast configured and speed fell between them: nearest tier wins.
+        return speed >= (slowMax + fastMin) / 2 ? .fast : .slow
+    }
+
+    // ─────────────────────────────────────────────
+    // MARK: - Classic logic
+    // ─────────────────────────────────────────────
+
+    /// Rolling window for classic mode's velocity statistics.
+    static let classicSampleCap = 8
+
+    /// Appends a time-normalized velocity sample (trackpad-widths/second).
+    static func appendVelocitySample(_ velocity: Float, to samples: inout [Float]) {
+        guard velocity > 0 else { return }
+        samples.append(velocity)
+        if samples.count > classicSampleCap {
+            samples.removeFirst(samples.count - classicSampleCap)
         }
     }
 
-    /// Classifies and locks swipe intent from distance, smoothed velocity, acceleration, and hold time.
-    static func classifySpeedIntent(
+    /// Classic multi-signal classifier: locks swipe intent from distance, smoothed
+    /// velocity, acceleration, and hold time. Kept as a selectable mode.
+    ///
+    /// Fixed relative to the original: samples arrive as widths/second (no 60fps
+    /// assumption), elapsed runs from movement start rather than finger-down, and
+    /// the window is 8 samples instead of 4.
+    static func classifyClassic(
         velocitySamples: [Float],
         totalDisplacement: Float,
         elapsedSeconds: TimeInterval,
         configuredSpeeds: Set<GestureSpeed>,
-        tuning: GestureTuning
+        slowMax: Float,
+        fastMin: Float,
+        initialDistance: Float
     ) -> GestureSpeed? {
         let activeSpeeds = configuredSpeeds.isEmpty ? Set([GestureSpeed.normal]) : configuredSpeeds
         if activeSpeeds.count == 1 {
-            return activeSpeeds.first ?? .normal
+            return activeSpeeds.first
         }
-
-        let slowFrame = tuning.slowVelocityThreshold
-        let fastFrame = tuning.fastVelocityThreshold
-        let initialDistance = tuning.initialThreshold
-        let fps: Float = 60
-        let slowPerSecond = slowFrame * fps
-        let fastPerSecond = fastFrame * fps
-
         guard !velocitySamples.isEmpty else { return nil }
+
         let sorted = velocitySamples.sorted()
-        let medianFrame: Float = {
-            return sorted[sorted.count / 2]
-        }()
-        let peakFrame = velocitySamples.max() ?? 0
-        let meanFrame = velocitySamples.reduce(0, +) / Float(velocitySamples.count)
+        let median = sorted[sorted.count / 2]
+        let peak = sorted.last ?? 0
+        let mean = velocitySamples.reduce(0, +) / Float(velocitySamples.count)
         let peakAcceleration = zip(velocitySamples.dropFirst(), velocitySamples).map { current, previous in
             max(0, current - previous)
         }.max() ?? 0
 
         let perSecond: Float = totalDisplacement / Float(max(elapsedSeconds, 0.05))
-        let consistency = meanFrame > 0 ? (peakFrame - (sorted.first ?? 0)) / meanFrame : 0
+        let consistency = mean > 0 ? (peak - (sorted.first ?? 0)) / mean : 0
 
         let classificationHold: TimeInterval = 0.060
         let slowHold: TimeInterval = 0.090
         let fastReleaseWindow: TimeInterval = 0.145
         let slowDistance = initialDistance * 1.25
-        let clearFastAcceleration = max((fastFrame - slowFrame) * 0.60, fastFrame * 0.35)
+        let clearFastAcceleration = max((fastMin - slowMax) * 0.60, fastMin * 0.35)
 
         let hasExplosiveStart =
             peakAcceleration >= clearFastAcceleration ||
-            peakFrame >= fastFrame * 1.35
+            peak >= fastMin * 1.35
         let isFastFlick =
             activeSpeeds.contains(.fast) &&
             elapsedSeconds <= fastReleaseWindow &&
             hasExplosiveStart &&
-            (peakFrame >= fastFrame || perSecond >= fastPerSecond * 0.90)
+            (peak >= fastMin || perSecond >= fastMin * 0.90)
 
         if elapsedSeconds < classificationHold && !isFastFlick {
             return nil
@@ -71,9 +120,9 @@ enum SpeedClassifier {
 
         let looksControlledSlow =
             activeSpeeds.contains(.slow) &&
-            medianFrame <= slowFrame * 1.12 &&
-            perSecond <= slowPerSecond * 1.30 &&
-            peakFrame < fastFrame * 0.80 &&
+            median <= slowMax * 1.12 &&
+            perSecond <= slowMax * 1.30 &&
+            peak < fastMin * 0.80 &&
             peakAcceleration < clearFastAcceleration &&
             consistency < 2.20
 
@@ -94,7 +143,7 @@ enum SpeedClassifier {
             activeSpeeds.contains(.fast) &&
             elapsedSeconds <= 0.220 &&
             hasExplosiveStart &&
-            (peakFrame >= fastFrame * 1.10 || perSecond >= fastPerSecond)
+            (peak >= fastMin * 1.10 || perSecond >= fastMin)
 
         if isClearFast {
             return .fast
@@ -102,9 +151,9 @@ enum SpeedClassifier {
 
         let nearSlowBoundary =
             activeSpeeds.contains(.slow) &&
-            medianFrame <= slowFrame * 1.30 &&
-            perSecond <= slowPerSecond * 1.55 &&
-            peakFrame < fastFrame * 0.85
+            median <= slowMax * 1.30 &&
+            perSecond <= slowMax * 1.55 &&
+            peak < fastMin * 0.85
 
         if nearSlowBoundary && (elapsedSeconds < slowHold || totalDisplacement < slowDistance) {
             return nil
@@ -113,7 +162,7 @@ enum SpeedClassifier {
         let nearFastBoundary =
             activeSpeeds.contains(.fast) &&
             elapsedSeconds <= 0.180 &&
-            (peakFrame >= fastFrame * 0.85 || perSecond >= fastPerSecond * 0.80)
+            (peak >= fastMin * 0.85 || perSecond >= fastMin * 0.80)
 
         if nearFastBoundary && activeSpeeds.contains(.normal) {
             return nil

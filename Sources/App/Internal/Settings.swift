@@ -558,6 +558,14 @@ struct AppSwitcherSettings: Codable, Equatable {
     }
 }
 
+/// Which speed classifier decides slow/normal/fast.
+enum SpeedLogic: String, Codable, CaseIterable {
+    /// Average speed (distance ÷ time) at trigger distance. Deterministic, two thresholds.
+    case simple
+    /// Multi-signal: peak/median velocity, acceleration, hold windows. Original feel.
+    case classic
+}
+
 struct GestureTuning: Codable, Equatable {
     var initialThreshold:           Float        = 0.014
     var appSwitcherStepThreshold:   Float        = 0.003
@@ -566,7 +574,7 @@ struct GestureTuning: Codable, Equatable {
     var continuousDebounce:         TimeInterval = 0.08
     var fastVelocityThreshold:      Float        = 0.009
     var slowVelocityThreshold:      Float        = 0.005
-    var speedSampleCount:           Int          = 4
+    var speedLogic:                 SpeedLogic   = .simple
     var candidateFrames:            Int          = 3
     var pinchSpreadThreshold:       Float        = 0.015
     var pinchFrameSpreadThreshold:  Float        = 0.008
@@ -590,7 +598,8 @@ struct GestureTuning: Codable, Equatable {
         continuousDebounce        = try c.decodeIfPresent(TimeInterval.self, forKey: .continuousDebounce)        ?? 0.08
         fastVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .fastVelocityThreshold)     ?? 0.009
         slowVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .slowVelocityThreshold)     ?? 0.005
-        speedSampleCount          = try c.decodeIfPresent(Int.self,          forKey: .speedSampleCount)          ?? 4
+        speedLogic                = (try? c.decodeIfPresent(SpeedLogic.self, forKey: .speedLogic))
+                                    .flatMap { $0 }                                                              ?? .simple
         candidateFrames           = try c.decodeIfPresent(Int.self,          forKey: .candidateFrames)           ?? 3
         pinchSpreadThreshold      = try c.decodeIfPresent(Float.self,        forKey: .pinchSpreadThreshold)      ?? 0.015
         pinchFrameSpreadThreshold = try c.decodeIfPresent(Float.self,        forKey: .pinchFrameSpreadThreshold) ?? 0.008
@@ -806,7 +815,6 @@ final class Settings {
         n.slowVelocityThreshold    = max(0.001, min(n.slowVelocityThreshold, 0.020))
         n.fastVelocityThreshold    = max(n.slowVelocityThreshold + 0.001,
                                          max(0.003, min(n.fastVelocityThreshold, 0.030)))
-        n.speedSampleCount         = max(2, min(n.speedSampleCount, 20))
         n.candidateFrames          = max(1, min(n.candidateFrames, 8))
         n.pinchSpreadThreshold     = max(0.002, n.pinchSpreadThreshold)
         n.pinchFrameSpreadThreshold = max(0.001, n.pinchFrameSpreadThreshold)

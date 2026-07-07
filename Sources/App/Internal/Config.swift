@@ -20,7 +20,7 @@ struct GlideConfig {
         var swipeThreshold: Float = 0.014
         var fastVelocityThreshold: Float = 0.009
         var slowVelocityThreshold: Float = 0.005
-        var speedSampleCount: Int = 4
+        var speedLogic: String = "simple"   // "simple" | "classic"
     }
 
     struct Preferences {
@@ -119,7 +119,7 @@ extension GlideConfig {
         cfg.speed.swipeThreshold         = t.initialThreshold
         cfg.speed.fastVelocityThreshold  = t.fastVelocityThreshold
         cfg.speed.slowVelocityThreshold  = t.slowVelocityThreshold
-        cfg.speed.speedSampleCount       = t.speedSampleCount
+        cfg.speed.speedLogic             = t.speedLogic.rawValue
 
         cfg.preferences.windowTargeting  = s.windowTargetingMode.rawValue
         cfg.preferences.hapticFeedback   = s.hapticFeedbackEnabled
@@ -218,7 +218,7 @@ extension GlideConfig {
         t.initialThreshold          = speed.swipeThreshold
         t.fastVelocityThreshold     = speed.fastVelocityThreshold
         t.slowVelocityThreshold     = speed.slowVelocityThreshold
-        t.speedSampleCount          = speed.speedSampleCount
+        t.speedLogic                = SpeedLogic(rawValue: speed.speedLogic.lowercased()) ?? .simple
         t.appSwitcherStepThreshold  = tuning.appSwitcherStepThreshold
         t.appSwitcherDebounce       = tuning.appSwitcherDebounce
         t.continuousStepThreshold   = tuning.continuousStepThreshold
@@ -354,7 +354,7 @@ enum GlideConfigSerializer {
             "    swipe_threshold: \(fmt(config.speed.swipeThreshold))",
             "    fast_velocity_threshold: \(fmt(config.speed.fastVelocityThreshold))",
             "    slow_velocity_threshold: \(fmt(config.speed.slowVelocityThreshold))",
-            "    speed_sample_count: \(config.speed.speedSampleCount)",
+            "    speed_logic: \(config.speed.speedLogic)",
             "",
             "  # ── Preferences ────────────────────────────────────",
             "  preferences:",
@@ -571,8 +571,8 @@ enum GlideConfigParser {
             case "swipe_threshold":          speed.swipeThreshold         = floatVal(val) ?? speed.swipeThreshold
             case "fast_velocity_threshold":  speed.fastVelocityThreshold  = floatVal(val) ?? speed.fastVelocityThreshold
             case "slow_velocity_threshold":  speed.slowVelocityThreshold  = floatVal(val) ?? speed.slowVelocityThreshold
-            case "speed_sample_count":       speed.speedSampleCount       = intVal(val)   ?? speed.speedSampleCount
-            default: break
+            case "speed_logic":              speed.speedLogic             = stringVal(val) ?? speed.speedLogic
+            default: break  // includes retired speed_sample_count from old exports
             }
             i += 1
         }
