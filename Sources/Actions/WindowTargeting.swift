@@ -502,27 +502,34 @@ final class WindowTargeting {
     }
 
     func finderHasAnyWindow() -> Bool {
+        // Ask Finder directly how many windows it has. This is the reliable signal:
+        // Finder reports 0 when nothing is open and >0 when a real browser window
+        // exists, regardless of Space or minimized state. Requires the Automation
+        // (Apple Events) entitlement, which the app already declares.
+        let script = """
+        tell application "Finder"
+            return count of windows
+        end tell
+        """
+        var error: NSDictionary?
+        guard let descriptor = NSAppleScript(source: script)?.executeAndReturnError(&error) else {
+            // Most common cause: macOS Automation ("Apple Events") permission for
+            // Glide → Finder hasn't been granted, so we can't ask Finder directly.
+            // The AX fallback only sees windows on the *current* Space, so a Finder
+            // window on another Desktop will be missed here (and wrongly skipped).
+            AppLogger.debug("[Finder] AppleScript window count unavailable (grant Automation → Finder). error: \(error ?? [:]) — falling back to AX")
+            return hasRealWindowForFinderFallback()
+        }
+        let count = descriptor.int32Value
+        AppLogger.debug("[Finder] AppleScript window count = \(count)")
+        return count > 0
+    }
+
+    private func hasRealWindowForFinderFallback() -> Bool {
         guard let finder = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) else {
             return false
         }
-        // CGWindowList sees windows in every Space and minimized ones, and needs no
-        // Automation permission. AX (kAXWindowsAttribute) misses other-Space windows,
-        // so it's only a last resort.
-        guard let info = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            return hasRealWindow(for: finder.processIdentifier)
-        }
-        let pid = Int(finder.processIdentifier)
-        return info.contains { win in
-            guard win[kCGWindowOwnerPID as String] as? Int == pid,
-                  win[kCGWindowLayer as String] as? Int == 0,
-                  (win[kCGWindowAlpha as String] as? Double ?? 1) > 0,
-                  let boundsDict = win[kCGWindowBounds as String] as? [String: Any],
-                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else { return false }
-            // Finder always owns helper windows even with nothing open — observed:
-            // full-width 1728×33 strips and a 64×64 proxy. Real Finder windows can't
-            // go below ~344×236, so a generous 150×100 floor separates them cleanly.
-            return bounds.width >= 150 && bounds.height >= 100
-        }
+        return hasRealWindow(for: finder.processIdentifier)
     }
 
     private func shouldMinimizeWindow(_ window: AXUIElement) -> Bool {

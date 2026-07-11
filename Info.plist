@@ -30,5 +30,7 @@
 	<string>13.0</string>
     <key>NSAccessibilityUsageDescription</key>
     <string>Glide requires Accessibility access to detect gestures and control windows.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Glide controls Finder to detect whether it has open windows, so it can skip a windowless Finder in the app switcher.</string>
 </dict>
 </plist>
