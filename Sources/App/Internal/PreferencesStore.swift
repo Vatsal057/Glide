@@ -96,10 +96,6 @@ final class PreferencesStore: ObservableObject {
         return winner.id != rule.id
     }
 
-    func duplicateCount(for rule: GestureRule) -> Int {
-        rules.filter { $0.isActive && $0.matchSignature == rule.matchSignature }.count
-    }
-
     func resetRules() {
         rules = Settings.defaultRules.map(sanitizedRule)
     }
@@ -299,10 +295,6 @@ final class PreferencesStore: ObservableObject {
             ?? bundleID.components(separatedBy: ".").last?.capitalized ?? bundleID
     }
 
-    func windowStateLabel(_ state: WindowStateFilter) -> String {
-        state.rawValue
-    }
-
     func appLabel(for path: String?) -> String {
         guard let path else { return "Choose App…" }
         return URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
@@ -311,10 +303,6 @@ final class PreferencesStore: ObservableObject {
     func menuItemTargetLabel(bundleID: String?) -> String {
         guard let bundleID else { return "Frontmost App" }
         return appFilterLabel(for: bundleID)
-    }
-
-    var draftRules: [GestureRule] {
-        rules.filter(\.isDraft)
     }
 
     /// Configured rules grouped by finger count (preserves list order within each group).
@@ -373,29 +361,9 @@ final class PreferencesStore: ObservableObject {
         }
     }
 
+    /// Same normalization the engine applies, plus: any rule with an action set stops being a draft.
     private func sanitizedRule(_ r: GestureRule) -> GestureRule {
-        var copy = r
-        if copy.direction.isClickLike {
-            copy.speed = .normal
-            copy.reciprocalEnabled = false
-        }
-        if !copy.supportsContinuousGestures {
-            copy.continuous = false
-            copy.continuousNegativeAction = .doNothing
-            copy.continuousPositiveAction = .doNothing
-            copy.continuousEndAction = .doNothing
-            copy.continuousNegativeShortcut = nil
-            copy.continuousPositiveShortcut = nil
-            copy.continuousEndShortcut = nil
-            copy.continuousBeginKeyboard = []
-            copy.continuousNegativeKeyboard = []
-            copy.continuousPositiveKeyboard = []
-            copy.continuousEndKeyboard = []
-        }
-        if copy.continuous {
-            copy.reciprocalEnabled = false
-            copy.reciprocalAction = nil
-        }
+        var copy = Settings.normalizedRule(r)
         if copy.action != .doNothing { copy.isDraft = false }
         return copy
     }

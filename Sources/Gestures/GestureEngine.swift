@@ -23,7 +23,6 @@ final class GestureEngine {
     
     var lastStepTime: TimeInterval = 0
     private lazy var keyEventSource = CGEventSource(stateID: .hidSystemState)
-    var peakResetWorkItem: DispatchWorkItem?
 
     /// macOS accessibility zoom is "double-tap three fingers, then drag". A brief,
     /// motionless 3-finger tap followed by an immediate 3-finger re-touch is that
@@ -292,7 +291,7 @@ final class GestureEngine {
         phase = .fired
 
         if rule.action == .quitApp {
-            ActionExecutor.shared.quitAppAtCursor(NSEvent.mouseLocation)
+            WindowTargeting.shared.quitAppAtCursor(NSEvent.mouseLocation)
         } else {
             ActionExecutor.shared.execute(rule.action, appPath: rule.appPath,
                                           menuItemPath: rule.menuItemPath, menuTargetBundleID: rule.appFilter,
@@ -375,23 +374,8 @@ final class GestureEngine {
         
         if Settings.shared.appSwitcher.restoreMinimizedOnCommit {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                self.restoreMinimizedWindows()
-            }
-        }
-    }
-
-    private func restoreMinimizedWindows() {
-        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
-        let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
-        var windowsRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-              let windows = windowsRef as? [AXUIElement] else { return }
-
-        for window in windows {
-            var minimizedRef: CFTypeRef?
-            if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedRef) == .success,
-               let isMinimized = minimizedRef as? Bool, isMinimized {
-                AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, false as CFTypeRef)
+                guard let front = NSWorkspace.shared.frontmostApplication else { return }
+                WindowTargeting.shared.unminimizeWindows(of: front.processIdentifier)
             }
         }
     }

@@ -713,24 +713,6 @@ enum GlideConfigParser {
         return items.isEmpty ? nil : items
     }
 
-    private static func parseMenuPathList(_ lines: [String], from i: inout Int, parentIndent: Int) -> [String]? {
-        var path: [String] = []
-        while i < lines.count {
-            let line = lines[i].trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { i += 1; continue }
-            let ind = leadingSpaces(lines[i])
-            if ind <= parentIndent { break }
-            if line.hasPrefix("-") {
-                let item = line.dropFirst().trimmingCharacters(in: .whitespaces)
-                if let s = stringVal(String(item)) { path.append(s) }
-                i += 1
-                continue
-            }
-            break
-        }
-        return path.isEmpty ? nil : path
-    }
-
     private static func parseGestureBlock(_ lines: [String], from i: inout Int, blockIndent: Int) -> GlideConfig.Gesture {
         var g = GlideConfig.Gesture(type: "", direction: nil, fingers: 3,
                                     speed: nil, action: "", appFilter: nil, windowState: nil,
@@ -782,7 +764,7 @@ enum GlideConfigParser {
             case "menu_path":
                 let menuIndent = ind
                 i += 1
-                g.menuPath = parseMenuPathList(lines, from: &i, parentIndent: menuIndent)
+                g.menuPath = parseStringList(lines, from: &i, parentIndent: menuIndent)
                 continue
             case "shortcut_key_code": g.shortcutKeyCode = intVal(val)
             case "shortcut_name":     g.shortcutName    = stringVal(val)
@@ -862,7 +844,6 @@ enum GlideConfigParser {
     }
 
     private static func leadingSpaces(_ s: String) -> Int { s.prefix(while: { $0 == " " }).count }
-    private static func indentOf(_ lines: [String], at i: Int) -> Int { i < lines.count ? leadingSpaces(lines[i]) : 0 }
 
     @discardableResult
     private static func scanToKey(_ key: String, in lines: [String], from i: inout Int) -> Bool {

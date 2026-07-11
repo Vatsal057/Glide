@@ -215,18 +215,6 @@ enum MenuItemCatalog {
         }
     }
 
-    private static func axMenuForBarItem(_ item: AXUIElement) -> AXUIElement? {
-        if let sub = axSubmenu(item) { return sub }
-        for child in axChildren(item) {
-            if axRole(child) == (kAXMenuRole as String) { return child }
-        }
-        var ref: CFTypeRef?
-        if AXUIElementCopyAttributeValue(item, "AXMenu" as CFString, &ref) == .success {
-            return axElement(from: ref)
-        }
-        return nil
-    }
-
     private static func resolveRunningApp(bundleID: String?) -> NSRunningApplication? {
         if let bundleID {
             return NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == bundleID }
@@ -235,47 +223,60 @@ enum MenuItemCatalog {
             $0.activationPolicy == .regular ? $0 : nil
         }
     }
+}
 
-    // MARK: AX helpers
+// ─────────────────────────────────────────────
+// MARK: - Shared AX helpers (catalog + executor)
+// ─────────────────────────────────────────────
 
-    private static func axChildren(_ element: AXUIElement) -> [AXUIElement] {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &ref) == .success,
-              let list = ref as? [AXUIElement] else { return [] }
-        return list
+private func axChildren(_ element: AXUIElement) -> [AXUIElement] {
+    var ref: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &ref) == .success,
+          let list = ref as? [AXUIElement] else { return [] }
+    return list
+}
+
+private func axSubmenu(_ item: AXUIElement) -> AXUIElement? {
+    axChildren(item).first { axRole($0) == (kAXMenuRole as String) }
+}
+
+private func axMenuForBarItem(_ item: AXUIElement) -> AXUIElement? {
+    if let sub = axSubmenu(item) { return sub }
+    var ref: CFTypeRef?
+    if AXUIElementCopyAttributeValue(item, "AXMenu" as CFString, &ref) == .success {
+        return axElement(from: ref)
     }
+    return nil
+}
 
-    private static func axSubmenu(_ item: AXUIElement) -> AXUIElement? {
-        for child in axChildren(item) {
-            if axRole(child) == (kAXMenuRole as String) { return child }
-        }
-        return nil
-    }
+private func axTitle(_ element: AXUIElement) -> String? {
+    var ref: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &ref) == .success else { return nil }
+    if let s = ref as? String, !s.isEmpty { return s }
+    if let attr = ref as? NSAttributedString { return attr.string }
+    return nil
+}
 
-    private static func axTitle(_ element: AXUIElement) -> String? {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &ref) == .success else { return nil }
-        if let s = ref as? String, !s.isEmpty { return s }
-        if let attr = ref as? NSAttributedString { return attr.string }
-        return nil
-    }
+private func axRole(_ element: AXUIElement) -> String? {
+    var ref: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &ref) == .success else { return nil }
+    return ref as? String
+}
 
-    private static func axRole(_ element: AXUIElement) -> String? {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &ref) == .success else { return nil }
-        return ref as? String
-    }
+private func axBool(_ element: AXUIElement, _ attr: CFString) -> Bool? {
+    var ref: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attr, &ref) == .success else { return nil }
+    return ref as? Bool
+}
 
-    private static func axBool(_ element: AXUIElement, _ attr: CFString) -> Bool? {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attr, &ref) == .success else { return nil }
-        return ref as? Bool
-    }
+private func axElement(from ref: CFTypeRef?) -> AXUIElement? {
+    guard let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+    return unsafeBitCast(ref, to: AXUIElement.self)
+}
 
-    private static func axElement(from ref: CFTypeRef?) -> AXUIElement? {
-        guard let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
-        return unsafeBitCast(ref, to: AXUIElement.self)
-    }
+private func escapeAppleScript(_ s: String) -> String {
+    s.replacingOccurrences(of: "\\", with: "\\\\")
+     .replacingOccurrences(of: "\"", with: "\\\"")
 }
 
 // ─────────────────────────────────────────────
@@ -329,7 +330,7 @@ enum MenuItemExecutor {
         var index = 1
         while index < path.count - 1 {
             guard let item = findMenuItem(named: path[index], in: currentMenu),
-                  let submenu = axSubmenu(of: item) else { return false }
+                  let submenu = axSubmenu(item) else { return false }
             _ = axPress(item)
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
             currentMenu = submenu
@@ -365,42 +366,8 @@ enum MenuItemExecutor {
         return nil
     }
 
-    private static func axMenuForBarItem(_ item: AXUIElement) -> AXUIElement? {
-        axSubmenu(of: item) ?? axChildren(item).first { axRole($0) == (kAXMenuRole as String) }
-    }
-
-    private static func axSubmenu(of item: AXUIElement) -> AXUIElement? {
-        axChildren(item).first { axRole($0) == (kAXMenuRole as String) }
-    }
-
     private static func axPress(_ element: AXUIElement) -> Bool {
         AXUIElementPerformAction(element, kAXPressAction as CFString) == .success
-    }
-
-    private static func axChildren(_ element: AXUIElement) -> [AXUIElement] {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &ref) == .success,
-              let list = ref as? [AXUIElement] else { return [] }
-        return list
-    }
-
-    private static func axTitle(_ element: AXUIElement) -> String? {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &ref) == .success else { return nil }
-        if let s = ref as? String, !s.isEmpty { return s }
-        if let attr = ref as? NSAttributedString { return attr.string }
-        return nil
-    }
-
-    private static func axRole(_ element: AXUIElement) -> String? {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &ref) == .success else { return nil }
-        return ref as? String
-    }
-
-    private static func axElement(from ref: CFTypeRef?) -> AXUIElement? {
-        guard let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
-        return unsafeBitCast(ref, to: AXUIElement.self)
     }
 
     private static func runClickScript(processName: String, bundleID: String, clause: String, path: [String]) {
@@ -440,20 +407,11 @@ enum MenuItemExecutor {
               front.activationPolicy == .regular else { return nil }
         return front
     }
-
-    /// Builds AppleScript click target, e.g. `menu item "New Tab" of menu "File" of menu bar 1`
-    static func buildClickClause(path: [String]) -> String {
-        MenuItemCatalog.buildClickClause(path: path)
-    }
-
-    private static func escapeAppleScript(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\")
-         .replacingOccurrences(of: "\"", with: "\\\"")
-    }
 }
 
 extension MenuItemCatalog {
 
+    /// Builds AppleScript click target, e.g. `menu item "New Tab" of menu "File" of menu bar 1`
     static func buildClickClause(path: [String]) -> String {
         guard path.count >= 2 else { return "" }
         var anchor = "menu \"\(escapeAppleScript(path[0]))\" of menu bar 1"
@@ -466,10 +424,5 @@ extension MenuItemCatalog {
         let leaf = path[path.count - 1]
         let parentMenu = path[path.count - 2]
         return "menu item \"\(escapeAppleScript(leaf))\" of menu \"\(escapeAppleScript(parentMenu))\" of \(anchor)"
-    }
-
-    fileprivate static func escapeAppleScript(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\")
-         .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }

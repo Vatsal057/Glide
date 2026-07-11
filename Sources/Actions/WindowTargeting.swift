@@ -28,17 +28,7 @@ final class WindowTargeting {
         savedFrames = savedFrames.filter { running.contains($0.key.pid) }
     }
 
-    func pruneSavedFrame(for pid: pid_t) {
-        savedFrames = savedFrames.filter { $0.key.pid != pid }
-        pruneStaleMinimizedWindows(for: pid)
-    }
-
     // MARK: - Minimize / Restore state
-
-    var hasRestorableMinimizedApps: Bool {
-        pruneStaleMinimizedWindows()
-        return !(minimizeAllSession?.windows.isEmpty ?? true)
-    }
 
     private struct MinimizedWindowRecord {
         let window: AXUIElement
@@ -315,6 +305,13 @@ final class WindowTargeting {
         DispatchQueue.main.asyncAfter(deadline: .now() + totalDelay, execute: activateItem)
     }
 
+    /// Unminimizes every minimized window of the given app (app-switcher commit).
+    func unminimizeWindows(of pid: pid_t) {
+        for w in windows(for: pid) where axBool(w, attribute: kAXMinimizedAttribute as CFString) == true {
+            setAXBool(w, attribute: kAXMinimizedAttribute as CFString, value: false)
+        }
+    }
+
     func maximize() {
         guard let w = targetWindow() else { return }
         pruneOrphanedFrames()
@@ -535,12 +532,6 @@ final class WindowTargeting {
         return true
     }
 
-    private func pid(for element: AXUIElement) -> pid_t? {
-        var p: pid_t = 0
-        guard AXUIElementGetPid(element, &p) == .success else { return nil }
-        return p
-    }
-
     private func screen(for window: AXUIElement) -> NSScreen? {
         guard let frame = axFrame(window) else { return NSScreen.main }
         let cocoa  = cocoaFrame(fromAXFrame: frame)
@@ -558,11 +549,9 @@ final class WindowTargeting {
             width: w, height: h))
     }
 
-    private func pruneStaleMinimizedWindows(for pid: pid_t? = nil) {
+    private func pruneStaleMinimizedWindows() {
         guard var session = minimizeAllSession else { return }
         session.windows.removeAll { record in
-            // Always drop records for a terminated PID.
-            if let pid, record.pid == pid { return true }
             // Drop if the app has quit.
             if NSRunningApplication(processIdentifier: record.pid)?.isTerminated == true { return true }
             // Drop if the window is no longer minimized (e.g. user manually restored it).

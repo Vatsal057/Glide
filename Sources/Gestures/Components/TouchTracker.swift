@@ -19,7 +19,6 @@ enum TouchTracker {
     fileprivate static var _fingerFirstSeen: [Int32: TimeInterval] = [:]
     fileprivate static var _activeTouches: Int32 = 0
     fileprivate static var _clickFingerCount: Int32 = 0
-    fileprivate static var _peakFingerCount: Int32 = 0
     fileprivate static var _lastMTTimestamp: TimeInterval = 0
     fileprivate static var _lastDispatchedCount: Int32 = 0
     fileprivate static var _oldestFingerAge: Double = 0
@@ -115,11 +114,6 @@ enum TouchTracker {
         set { stateLock.lock(); defer { stateLock.unlock() }; _clickFingerCount = newValue }
     }
 
-    static var glidePeakFingerCount: Int32 {
-        get { stateLock.lock(); defer { stateLock.unlock() }; return _peakFingerCount }
-        set { stateLock.lock(); defer { stateLock.unlock() }; _peakFingerCount = newValue }
-    }
-
     static func resetGlobalMTState() {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -127,7 +121,6 @@ enum TouchTracker {
         _sessionPeakActiveTouches = 0
         _activeTouches = 0
         _clickFingerCount = 0
-        _peakFingerCount = 0
         _lastMTTimestamp = 0
         _lastDispatchedCount = 0
         _fingerFirstSeen.removeAll(keepingCapacity: true)
@@ -184,10 +177,6 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
         if hadTouches {
             DispatchQueue.main.async {
                 TouchTracker.glideClickFingerCount = 0
-                GestureEngine.shared.peakResetWorkItem?.cancel()
-                let work = DispatchWorkItem { TouchTracker.glidePeakFingerCount = 0 }
-                GestureEngine.shared.peakResetWorkItem = work
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
                 GestureEngine.shared.onTouches(TouchFrameData(count: 0, cx: 0, cy: 0, spread: 0, coherence: 1))
             }
         }
@@ -219,19 +208,11 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
         TouchTracker._lastFingerLiftTime = nowTs
     }
 
-    if activeCount >= 3 {
-        TouchTracker._peakFingerCount = activeCount
-    }
-
     let skipDispatch = activeCount < 3 && activeCount == TouchTracker._lastDispatchedCount
     if !skipDispatch {
         TouchTracker._lastDispatchedCount = activeCount
     }
     TouchTracker.stateLock.unlock()
-
-    if activeCount >= 3 && prevActiveTouches < 3 {
-        DispatchQueue.main.async { GestureEngine.shared.peakResetWorkItem?.cancel() }
-    }
 
     if skipDispatch { return 0 }
 

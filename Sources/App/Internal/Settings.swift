@@ -4,11 +4,6 @@ import Cocoa
 // MARK: - Enums
 // ─────────────────────────────────────────────
 
-enum GestureFingers: Int, Codable, CaseIterable {
-    case two = 2, three = 3, four = 4, five = 5
-    var label: String { "\(rawValue) Fingers" }
-}
-
 enum GestureDirection: String, Codable, CaseIterable {
     case click           = "Click"
     case forceClick      = "Force Click"
@@ -44,8 +39,6 @@ enum GestureSpeed: String, Codable, CaseIterable {
 enum WindowTargetingMode: String, Codable, CaseIterable {
     case focusedThenCursor = "Focused Window First"
     case cursorThenFocused = "Window Under Cursor First"
-
-    var label: String { rawValue }
 }
 
 /// Restricts a gesture rule to the frontmost window's layout state.
@@ -731,10 +724,8 @@ final class Settings {
 
     /// Pulls legacy app-switcher gesture rules into `AppSwitcherSettings` and removes them from the list.
     static func migrateLegacyAppSwitcherRules(into switcher: inout AppSwitcherSettings, rules: inout [GestureRule]) {
-        let legacy = rules.filter { isAppSwitcherAction($0.action) }
-        guard !legacy.isEmpty else { return }
+        guard rules.contains(where: { isAppSwitcherAction($0.action) }) else { return }
         if !switcher.enabled { switcher.enabled = true }
-        _ = legacy.first?.fingers
         rules.removeAll { isAppSwitcherAction($0.action) }
     }
 
@@ -759,7 +750,7 @@ final class Settings {
         return copy.map { normalizedRule($0) }
     }
 
-    private static func normalizedRule(_ rule: GestureRule) -> GestureRule {
+    static func normalizedRule(_ rule: GestureRule) -> GestureRule {
         var r = GestureRule.migratingLegacyAppFilter(rule)
         r.fingers = min(max(r.fingers, 2), 5)
         r.speed   = (r.speed == .any || !r.direction.hasSpeed) ? .normal : r.speed
@@ -770,7 +761,6 @@ final class Settings {
             r.continuousNegativeAction = .doNothing
             r.continuousPositiveAction = .doNothing
             r.continuousEndAction = .doNothing
-            r.advancedKeyboard = []
             r.continuousNegativeShortcut = nil
             r.continuousPositiveShortcut = nil
             r.continuousEndShortcut = nil
@@ -1014,12 +1004,6 @@ enum KeyCodeLabels {
         default:   return "Key \(keyCode)"
         }
     }
-
-    static let commonKeys: [(name: String, keyCode: UInt16)] = [
-        ("Tab", 0x30), ("Space", 0x31), ("Return", 0x24), ("Esc", 0x35), ("Delete", 0x33),
-        ("Left Arrow", 0x5E), ("Right Arrow", 0x5F), ("Down Arrow", 0x60), ("Up Arrow", 0x61),
-        ("Option", 0x3A), ("Shift", 0x38), ("Command", 0x37), ("Control", 0x3B)
-    ]
 
     static func keyCode(forToken token: String) -> UInt16? {
         switch token.lowercased().replacingOccurrences(of: "_", with: "") {

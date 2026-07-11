@@ -11,26 +11,6 @@ final class ActionExecutor {
     static let shared = ActionExecutor()
     private init() {}
 
-    var hasRestorableMinimizedApps: Bool {
-        WindowTargeting.shared.hasRestorableMinimizedApps
-    }
-
-    func pruneSavedFrame(for pid: pid_t) {
-        WindowTargeting.shared.pruneSavedFrame(for: pid)
-    }
-
-    func isFrontmostWindowFullscreen() -> Bool {
-        WindowTargeting.shared.isFrontmostWindowFullscreen()
-    }
-
-    func isFrontmostWindowMaximized() -> Bool {
-        WindowTargeting.shared.isFrontmostWindowMaximized()
-    }
-
-    func quitAppAtCursor(_ location: NSPoint) {
-        WindowTargeting.shared.quitAppAtCursor(location)
-    }
-
     // MARK: - Action dispatch
 
     func execute(_ action: GestureAction, appPath: String? = nil, menuItemPath: [String]? = nil,

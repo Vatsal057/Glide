@@ -18,8 +18,8 @@ final class GestureRuleResolver {
         modifiers: CapturedModifiers
     ) -> [GestureRule] {
         let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let isFullscreen = ActionExecutor.shared.isFrontmostWindowFullscreen()
-        let isMaximized  = ActionExecutor.shared.isFrontmostWindowMaximized()
+        let isFullscreen = WindowTargeting.shared.isFrontmostWindowFullscreen()
+        let isMaximized  = WindowTargeting.shared.isFrontmostWindowMaximized()
 
         return Settings.shared.rules.filter { rule in
             rule.isActive
