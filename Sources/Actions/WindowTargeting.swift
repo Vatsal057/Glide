@@ -503,28 +503,52 @@ final class WindowTargeting {
         }
     }
 
-    func finderHasAnyWindow() -> Bool {
-        // Ask Finder directly how many windows it has. This is the reliable signal:
-        // Finder reports 0 when nothing is open and >0 when a real browser window
-        // exists, regardless of Space or minimized state. Requires the Automation
-        // (Apple Events) entitlement, which the app already declares.
-        let script = """
-        tell application "Finder"
-            return count of windows
-        end tell
-        """
-        var error: NSDictionary?
-        guard let descriptor = NSAppleScript(source: script)?.executeAndReturnError(&error) else {
-            // Most common cause: macOS Automation ("Apple Events") permission for
-            // Glide → Finder hasn't been granted, so we can't ask Finder directly.
-            // The AX fallback only sees windows on the *current* Space, so a Finder
-            // window on another Desktop will be missed here (and wrongly skipped).
-            AppLogger.debug("[Finder] AppleScript window count unavailable (grant Automation → Finder). error: \(error ?? [:]) — falling back to AX")
-            return hasRealWindowForFinderFallback()
+    // ── Finder window cache ──
+    //
+    // The app switcher wants to know if Finder has any window (skipWindowlessFinder).
+    // The reliable answer needs an Apple Event to Finder, but a SYNCHRONOUS Apple
+    // Event in the gesture path is poison: the first-ever call shows the Automation
+    // consent dialog, and Finder doesn't answer at all while it's busy servicing a
+    // drag — exactly when the switcher is opened mid-drag. So the switcher reads a
+    // cached answer and the refresh runs as a background osascript process.
+
+    /// Last known "Finder has a window" answer. Defaults to true so a cold cache
+    /// never skips Finder (skipping is the cosmetic optimization, not skipping is safe).
+    private(set) var finderLikelyHasWindows = true
+    private var finderCacheRefreshInFlight = false
+
+    /// Refreshes the cache off the main thread. Call after reading the cache —
+    /// the current switcher open uses the last answer, the next one is fresh.
+    func refreshFinderWindowCache() {
+        guard !finderCacheRefreshInFlight else { return }
+        finderCacheRefreshInFlight = true
+        DispatchQueue.global(qos: .utility).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", "tell application \"Finder\" to return count of windows"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            var hasWindows: Bool?
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus == 0,
+                   let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                       .trimmingCharacters(in: .whitespacesAndNewlines),
+                   let count = Int(out) {
+                    hasWindows = count > 0
+                }
+            } catch {
+                AppLogger.debug("[Finder] osascript window count failed: \(error.localizedDescription)")
+            }
+            DispatchQueue.main.async {
+                // ponytail: AX fallback only sees the current Space — good enough
+                // for a skip heuristic when Automation permission is denied.
+                self.finderLikelyHasWindows = hasWindows ?? self.hasRealWindowForFinderFallback()
+                self.finderCacheRefreshInFlight = false
+            }
         }
-        let count = descriptor.int32Value
-        AppLogger.debug("[Finder] AppleScript window count = \(count)")
-        return count > 0
     }
 
     private func hasRealWindowForFinderFallback() -> Bool {

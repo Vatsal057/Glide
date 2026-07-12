@@ -87,6 +87,9 @@ final class GestureEngine {
         MultitouchBridge.shared.start(callback: glideMTCallback)
         inputManager.installMonitors()
         AppSwitcherState.shared.startMRUTracking()
+        if Settings.shared.appSwitcher.skipWindowlessFinder {
+            WindowTargeting.shared.refreshFinderWindowCache()   // warm before first switcher open
+        }
         
         isRunning = true
         updateObservableState()
@@ -342,10 +345,13 @@ final class GestureEngine {
         var finderIndex: Int? = nil
         if Settings.shared.appSwitcher.skipWindowlessFinder {
             if let idx = apps.firstIndex(where: { $0.bundleIdentifier == "com.apple.finder" }) {
-                if !WindowTargeting.shared.finderHasAnyWindow() {
+                // Cached answer — never a synchronous Apple Event mid-gesture
+                // (Finder can't reply while it's busy, e.g. servicing a drag).
+                if !WindowTargeting.shared.finderLikelyHasWindows {
                     finderIndex = idx
                 }
             }
+            WindowTargeting.shared.refreshFinderWindowCache()   // fresh for the next open
         }
 
         if let fi = finderIndex, currentIndex == fi {

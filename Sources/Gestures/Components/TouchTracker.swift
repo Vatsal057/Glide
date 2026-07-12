@@ -152,6 +152,7 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
             activeTouches.append(t)
         }
     }
+
     if let dev = device {
         TouchTracker.updateDeviceFingerCount(device: dev, count: activeTouches.count)
     }
