@@ -100,12 +100,16 @@ enum SystemGestureManager {
     // MARK: - Detection
 
     static func isNativeEnabled(_ gesture: NativeGesture) -> Bool {
+        // Enabled if ANY trackpad domain says so — built-in and Bluetooth pads
+        // can disagree, and the gesture fires on whichever pad has it on.
+        var sawValue = false
         for domain in trackpadDomains {
             if let value = UserDefaults(suiteName: domain)?.object(forKey: gesture.key) as? Int {
-                return value != 0
+                if value != 0 { return true }
+                sawValue = true
             }
         }
-        return gesture.defaultEnabled
+        return sawValue ? false : gesture.defaultEnabled
     }
 
     /// Native gestures Glide previously disabled (a backup snapshot exists), so

@@ -204,7 +204,7 @@ final class GestureEngine {
               !isSystemZoomSession,
               touchSessionMovement < tapMaxMovement else { return }
         switch phase {
-        case .fired, .switchingApps, .continuousSwipe: return
+        case .fired, .switchingApps, .continuousSwipe, .lockedSwipe: return
         default: break
         }
         guard let rule = GestureRuleResolver.bestRule(fingers: n, direction: .tapHold,

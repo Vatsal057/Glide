@@ -17,7 +17,6 @@ final class GestureInputManager {
     var clickObservationSource: CFRunLoopSource?
     var clickTapInstalled = false
 
-    var lastClickEventTime: TimeInterval = 0
     var interactionMonitors: [Any] = []
     var pressureMonitor: Any?
     var lastForceClickTime: TimeInterval = 0
@@ -60,11 +59,6 @@ final class GestureInputManager {
                 if type == .leftMouseDown {
                     if TouchTracker.glideActiveTouches >= 3 {
                         TouchTracker.glideClickFingerCount = TouchTracker.glideActiveTouches
-                    } else {
-                        // Button pressed with <3 fingers → a click-drag, not a click
-                        // gesture. Snapshot the resting finger(s) as drag anchors so a
-                        // swipe added mid-drag (e.g. open the app switcher) still works.
-                        TouchTracker.armDragAnchors()
                     }
                     return Unmanaged.passUnretained(cgEvent)
                 }
@@ -117,7 +111,6 @@ final class GestureInputManager {
             options: .listenOnly,
             eventsOfInterest: mask,
             callback: { _, type, event, _ in
-                GestureEngine.shared.inputManager.lastClickEventTime = ProcessInfo.processInfo.systemUptime
                 if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                     if let tap = GestureEngine.shared.inputManager.clickObservationTap {
                         CGEvent.tapEnable(tap: tap, enable: true)
@@ -177,8 +170,6 @@ final class GestureInputManager {
     /// NSEvent pressure monitor; the cooldown dedupes if both ever see the same press.
     func handleDeepPress(stage: Int) {
         guard stage >= 2, let engine = engine, engine.isRunning else { return }
-        // A deep press during a click-drag is the drag pressure, not a force-click gesture.
-        guard !TouchTracker.dragAnchorsActive else { return }
         let count = TouchTracker.getThreeFingerCount()
         let peak = TouchTracker.getSessionPeakActiveTouches()
         guard TouchTracker.clickGestureMatchesFingerState(count: count, peak: peak) else { return }
@@ -202,15 +193,11 @@ final class GestureInputManager {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
         }
-        let now = ProcessInfo.processInfo.systemUptime
         if let tap = clickObservationTap {
-            let stale = now - lastClickEventTime > 10.0
             if !CFMachPortIsValid(tap) {
                 teardownClickObservationTap(); setupClickObservationTap()
             } else if !CGEvent.tapIsEnabled(tap: tap) {
                 CGEvent.tapEnable(tap: tap, enable: true)
-            } else if stale && TouchTracker.glideActiveTouches >= 3 {
-                teardownClickObservationTap(); setupClickObservationTap()
             }
         }
     }

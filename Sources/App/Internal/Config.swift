@@ -34,7 +34,6 @@ struct GlideConfig {
     struct AppSwitcher {
         var enabled: Bool = true
         var fingers: Int = 3
-        var useMRUOrdering: Bool = true
         var skipWindowlessFinder: Bool = true
         var restoreMinimizedOnCommit: Bool = true
     }
@@ -77,6 +76,8 @@ struct GlideConfig {
         var haptic: String? = nil   // per-gesture HapticPattern rawValue; nil = automatic
         var advancedKeyboard: [String]?
         var reciprocal: Bool
+        /// Custom inverse action for the reciprocal swipe; nil = automatic inverse.
+        var reciprocalAction: String? = nil
         var continuous: Bool = false
         var continuousNegativeAction: String?
         var continuousPositiveAction: String?
@@ -130,7 +131,6 @@ extension GlideConfig {
 
         cfg.appSwitcher.enabled = s.appSwitcher.enabled
         cfg.appSwitcher.fingers = s.appSwitcher.fingers
-        cfg.appSwitcher.useMRUOrdering = s.appSwitcher.useMRUOrdering
         cfg.appSwitcher.skipWindowlessFinder = s.appSwitcher.skipWindowlessFinder
         cfg.appSwitcher.restoreMinimizedOnCommit = s.appSwitcher.restoreMinimizedOnCommit
 
@@ -181,6 +181,7 @@ extension GlideConfig {
                 haptic:       rule.hapticPattern?.rawValue,
                 advancedKeyboard: rule.advancedKeyboard.map(\.token).nilIfEmpty,
                 reciprocal:  rule.reciprocalEnabled,
+                reciprocalAction: rule.reciprocalAction?.rawValue,
                 continuous:  rule.continuous,
                 continuousNegativeAction: rule.continuousNegativeAction == .doNothing ? nil : rule.continuousNegativeAction.rawValue,
                 continuousPositiveAction: rule.continuousPositiveAction == .doNothing ? nil : rule.continuousPositiveAction.rawValue,
@@ -207,7 +208,6 @@ extension GlideConfig {
         var s = AppSwitcherSettings()
         s.enabled = appSwitcher.enabled
         s.fingers = appSwitcher.fingers
-        s.useMRUOrdering = appSwitcher.useMRUOrdering
         s.skipWindowlessFinder = appSwitcher.skipWindowlessFinder
         s.restoreMinimizedOnCommit = appSwitcher.restoreMinimizedOnCommit
         return AppSwitcherSettings.normalized(s)
@@ -278,6 +278,7 @@ extension GlideConfig {
                 windowStateFilter: WindowStateFilter(yamlValue: g.windowState) ?? .any,
                 modifierFilter:    ModifierFilter(yamlValue: g.modifierFilter) ?? .any,
                 reciprocalEnabled: g.reciprocal,
+                reciprocalAction:  g.reciprocalAction.flatMap(GestureAction.init(rawValue:)),
                 continuous:        g.continuous,
                 continuousNegativeAction: g.continuousNegativeAction.flatMap(GestureAction.init(rawValue:)) ?? .doNothing,
                 continuousPositiveAction: g.continuousPositiveAction.flatMap(GestureAction.init(rawValue:)) ?? .doNothing,
@@ -374,7 +375,6 @@ enum GlideConfigSerializer {
             "  app_switcher:",
             "    enabled: \(config.appSwitcher.enabled ? "true" : "false")",
             "    fingers: \(config.appSwitcher.fingers)",
-            "    use_mru_ordering: \(config.appSwitcher.useMRUOrdering ? "true" : "false")",
             "    skip_windowless_finder: \(config.appSwitcher.skipWindowlessFinder ? "true" : "false")",
             "    restore_minimized_on_commit: \(config.appSwitcher.restoreMinimizedOnCommit ? "true" : "false")",
             "",
@@ -438,8 +438,12 @@ enum GlideConfigSerializer {
         if g.type == "swipe" || g.appPath != nil {
             lines.append("      app_path: \(g.appPath.map { "\"\(escape($0))\"" } ?? "null")")
             lines.append("      reciprocal: \(g.reciprocal ? "true" : "false")")
+            if let ra = g.reciprocalAction {
+                lines.append("      reciprocal_action: \"\(escape(ra))\"")
+            }
             if g.type == "swipe" {
                 lines.append("      continuous: \(g.continuous ? "true" : "false")")
+                appendStringList(g.continuousBeginKeyboard, key: "continuous_begin_keyboard", to: &lines)
                 if let action = g.continuousNegativeAction {
                     lines.append("      continuous_update_negative_action: \"\(escape(action))\"")
                 }
@@ -619,7 +623,6 @@ enum GlideConfigParser {
             switch key {
             case "enabled": switcher.enabled = boolVal(val) ?? switcher.enabled
             case "fingers": switcher.fingers = intVal(val) ?? switcher.fingers
-            case "use_mru_ordering": switcher.useMRUOrdering = boolVal(val) ?? switcher.useMRUOrdering
             case "skip_windowless_finder": switcher.skipWindowlessFinder = boolVal(val) ?? switcher.skipWindowlessFinder
             case "restore_minimized_on_commit": switcher.restoreMinimizedOnCommit = boolVal(val) ?? switcher.restoreMinimizedOnCommit
             default: break
@@ -781,6 +784,7 @@ enum GlideConfigParser {
                 g.advancedKeyboard = parseStringList(lines, from: &i, parentIndent: listIndent)
                 continue
             case "reciprocal": g.reciprocal = boolVal(val) ?? g.reciprocal
+            case "reciprocal_action": g.reciprocalAction = stringVal(val).map(mapActionSynonym)
             case "continuous": g.continuous = boolVal(val) ?? g.continuous
             case "continuous_update_negative_action": g.continuousNegativeAction = stringVal(val).map(mapActionSynonym)
             case "continuous_update_positive_action": g.continuousPositiveAction = stringVal(val).map(mapActionSynonym)

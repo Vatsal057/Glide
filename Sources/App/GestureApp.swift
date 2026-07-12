@@ -109,6 +109,7 @@ final class EngineBridge: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in
                 NSLog("[App] Sleep — stopping engine")
+                GlideConfigStore.shared.flushPendingSave()
                 self?.wasEnabledBeforeSleep = self?.isEnabled ?? true
                 GestureEngine.shared.stop()
                 self?.isEnabled = false

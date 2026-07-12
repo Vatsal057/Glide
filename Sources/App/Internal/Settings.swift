@@ -537,8 +537,6 @@ struct AppSwitcherSettings: Codable, Equatable {
     var enabled: Bool = true
     /// Always 3 — horizontal swipes with three fingers are reserved for the switcher.
     var fingers: Int = 3
-    /// Order apps by most-recently-used (matches Cmd+Tab ordering).
-    var useMRUOrdering: Bool = true
     /// Skip Finder in the switcher when it has no open windows.
     var skipWindowlessFinder: Bool = true
     /// Unminimize windows of the selected app when you release the gesture.
@@ -870,7 +868,9 @@ struct KeyboardShortcut: Codable, Equatable, Hashable {
         return parts.joined()
     }
 
-    var isValid: Bool { keyCode != 0 }
+    // keyCode 0 is the A key — "not set" is modeled by a nil KeyboardShortcut,
+    // so every constructed shortcut is valid.
+    var isValid: Bool { true }
 
     init(keyCode: UInt16, command: Bool = false, shift: Bool = false,
          control: Bool = false, option: Bool = false) {
@@ -882,7 +882,7 @@ struct KeyboardShortcut: Codable, Equatable, Hashable {
     }
 
     init?(yamlKeyCode: Int?, modifiers: [String]?) {
-        guard let yamlKeyCode, yamlKeyCode > 0 else { return nil }
+        guard let yamlKeyCode, yamlKeyCode >= 0 else { return nil }
         keyCode = UInt16(yamlKeyCode)
         command = false; shift = false; control = false; option = false
         for mod in modifiers ?? [] {
@@ -966,41 +966,62 @@ enum KeyCodeLabels {
         case 0x39: return "Caps Lock"
         case 0x3A: return "⌥"
         case 0x3B: return "⌃"
-        case 0x3C: return "Fn"
-        case 0x3D: return "F17"
-        case 0x3E: return "Volume Up"
-        case 0x3F: return "Volume Down"
-        case 0x40: return "Mute"
-        case 0x41: return "F18"
-        case 0x43: return "F19"
-        case 0x45: return "F20"
-        case 0x47: return "Clear"
-        case 0x48: return "F5"
-        case 0x49: return "F6"
-        case 0x4A: return "F7"
-        case 0x4B: return "F3"
-        case 0x4C: return "F8"
-        case 0x4D: return "F9"
-        case 0x4E: return "F11"
-        case 0x4F: return "F13"
-        case 0x50: return "F16"
-        case 0x51: return "F14"
-        case 0x52: return "F10"
-        case 0x53: return "F12"
-        case 0x54: return "F15"
-        case 0x55: return "Help"
-        case 0x56: return "Home"
-        case 0x57: return "Page Up"
-        case 0x58: return "Forward Delete"
-        case 0x59: return "F4"
-        case 0x5A: return "End"
-        case 0x5B: return "F2"
-        case 0x5C: return "Page Down"
-        case 0x5D: return "F1"
-        case 0x5E: return "Left"
-        case 0x5F: return "Right"
-        case 0x60: return "Down"
-        case 0x61: return "Up"
+        // Codes below follow HIToolbox Events.h (kVK_*).
+        case 0x3C: return "Right ⇧"
+        case 0x3D: return "Right ⌥"
+        case 0x3E: return "Right ⌃"
+        case 0x3F: return "Fn"
+        case 0x40: return "F17"
+        case 0x41: return "Keypad ."
+        case 0x43: return "Keypad *"
+        case 0x45: return "Keypad +"
+        case 0x47: return "Keypad Clear"
+        case 0x48: return "Volume Up"
+        case 0x49: return "Volume Down"
+        case 0x4A: return "Mute"
+        case 0x4B: return "Keypad /"
+        case 0x4C: return "Keypad ⏎"
+        case 0x4E: return "Keypad -"
+        case 0x4F: return "F18"
+        case 0x50: return "F19"
+        case 0x51: return "Keypad ="
+        case 0x52: return "Keypad 0"
+        case 0x53: return "Keypad 1"
+        case 0x54: return "Keypad 2"
+        case 0x55: return "Keypad 3"
+        case 0x56: return "Keypad 4"
+        case 0x57: return "Keypad 5"
+        case 0x58: return "Keypad 6"
+        case 0x59: return "Keypad 7"
+        case 0x5A: return "F20"
+        case 0x5B: return "Keypad 8"
+        case 0x5C: return "Keypad 9"
+        case 0x60: return "F5"
+        case 0x61: return "F6"
+        case 0x62: return "F7"
+        case 0x63: return "F3"
+        case 0x64: return "F8"
+        case 0x65: return "F9"
+        case 0x67: return "F11"
+        case 0x69: return "F13"
+        case 0x6A: return "F16"
+        case 0x6B: return "F14"
+        case 0x6D: return "F10"
+        case 0x6F: return "F12"
+        case 0x71: return "F15"
+        case 0x72: return "Help"
+        case 0x73: return "Home"
+        case 0x74: return "Page Up"
+        case 0x75: return "Forward Delete"
+        case 0x76: return "F4"
+        case 0x77: return "End"
+        case 0x78: return "F2"
+        case 0x79: return "Page Down"
+        case 0x7A: return "F1"
+        case 0x7B: return "Left"
+        case 0x7C: return "Right"
+        case 0x7D: return "Down"
+        case 0x7E: return "Up"
         default:   return "Key \(keyCode)"
         }
     }
@@ -1012,10 +1033,10 @@ enum KeyCodeLabels {
         case "return", "enter": return 0x24
         case "esc", "escape": return 0x35
         case "delete", "backspace": return 0x33
-        case "left", "leftarrow": return 0x5E
-        case "right", "rightarrow": return 0x5F
-        case "down", "downarrow": return 0x60
-        case "up", "uparrow": return 0x61
+        case "left", "leftarrow": return 0x7B
+        case "right", "rightarrow": return 0x7C
+        case "down", "downarrow": return 0x7D
+        case "up", "uparrow": return 0x7E
         case "leftalt", "rightalt", "alt", "option", "leftoption": return 0x3A
         case "leftshift", "rightshift", "shift": return 0x38
         case "leftcmd", "cmd", "command", "leftcommand": return 0x37
@@ -1037,10 +1058,10 @@ enum KeyCodeLabels {
         case 0x24: return "return"
         case 0x35: return "escape"
         case 0x33: return "delete"
-        case 0x5E: return "left"
-        case 0x5F: return "right"
-        case 0x60: return "down"
-        case 0x61: return "up"
+        case 0x7B: return "left"
+        case 0x7C: return "right"
+        case 0x7D: return "down"
+        case 0x7E: return "up"
         case 0x3A: return "leftalt"
         case 0x38: return "leftshift"
         case 0x37: return "leftcmd"

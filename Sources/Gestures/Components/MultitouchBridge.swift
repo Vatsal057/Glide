@@ -49,6 +49,9 @@ final class MultitouchBridge {
     private var deviceList: [AnyObject]               = []   // retains ARC refs to device objects
     private var currentCallback: MTContactCallback?
     private var handle: UnsafeMutableRawPointer?
+    /// Bumped on every stop() so a pending no-devices retry from a previous
+    /// start() can't resurrect input after the engine was switched off.
+    private var retryGeneration = 0
 
     private var fnCreateList: (@convention(c) () -> CFArray)?
     private var fnRegister:   (@convention(c) (UnsafeMutableRawPointer, MTContactCallback) -> Void)?
@@ -107,8 +110,9 @@ final class MultitouchBridge {
 
     private func retryStart(callback: MTContactCallback, attempt: Int) {
         guard attempt <= 5 else { print("[MT] Gave up after \(attempt - 1) retries"); return }
+        let generation = retryGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self, !self.isRunning,
+            guard let self, self.retryGeneration == generation, !self.isRunning,
                   let createList = self.fnCreateList,
                   let register   = self.fnRegister,
                   let startFn    = self.fnStart else { return }
@@ -133,6 +137,7 @@ final class MultitouchBridge {
     // MARK: Stop
 
     func stop() {
+        retryGeneration += 1   // cancel any pending no-devices retry
         guard isRunning, let stopFn = fnStop else { return }
 
         if let cb = currentCallback, let unregister = fnUnregister {
