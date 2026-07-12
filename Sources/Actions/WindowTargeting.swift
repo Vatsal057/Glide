@@ -414,8 +414,10 @@ final class WindowTargeting {
     // MARK: - App switching
 
     func activateAdjacentApp(forward: Bool) {
-        let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
-        guard let cur = NSWorkspace.shared.frontmostApplication,
+        // MRU order (same as the switcher) — raw runningApplications is launch order
+        // and shifts as apps come and go, making "next app" unpredictable.
+        let apps = AppSwitcherState.shared.getOrderedApps()
+        guard apps.count > 1, let cur = NSWorkspace.shared.frontmostApplication,
               let idx = apps.firstIndex(where: { $0.processIdentifier == cur.processIdentifier }) else { return }
         let next = forward
             ? apps[(idx + 1) % apps.count]

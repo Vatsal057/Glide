@@ -58,7 +58,14 @@ final class GestureInputManager {
                     return nil
                 }
                 if type == .leftMouseDown {
-                    if TouchTracker.glideActiveTouches >= 3 { TouchTracker.glideClickFingerCount = TouchTracker.glideActiveTouches }
+                    if TouchTracker.glideActiveTouches >= 3 {
+                        TouchTracker.glideClickFingerCount = TouchTracker.glideActiveTouches
+                    } else {
+                        // Button pressed with <3 fingers → a click-drag, not a click
+                        // gesture. Snapshot the resting finger(s) as drag anchors so a
+                        // swipe added mid-drag (e.g. open the app switcher) still works.
+                        TouchTracker.armDragAnchors()
+                    }
                     return Unmanaged.passUnretained(cgEvent)
                 }
                 if TouchTracker.glideActiveTouches >= 3 {
@@ -170,10 +177,12 @@ final class GestureInputManager {
     /// NSEvent pressure monitor; the cooldown dedupes if both ever see the same press.
     func handleDeepPress(stage: Int) {
         guard stage >= 2, let engine = engine, engine.isRunning else { return }
+        // A deep press during a click-drag is the drag pressure, not a force-click gesture.
+        guard !TouchTracker.dragAnchorsActive else { return }
         let count = TouchTracker.getThreeFingerCount()
         let peak = TouchTracker.getSessionPeakActiveTouches()
         guard TouchTracker.clickGestureMatchesFingerState(count: count, peak: peak) else { return }
-        let now = Date().timeIntervalSinceReferenceDate
+        let now = ProcessInfo.processInfo.systemUptime
         guard now - lastForceClickTime > forceCooldown else { return }
         lastForceClickTime = now
         DispatchQueue.main.async { engine.processForceClick(fingerCount: count) }

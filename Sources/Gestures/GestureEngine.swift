@@ -361,6 +361,11 @@ final class GestureEngine {
         let effectiveMin = (finderIndex == 0) ? 1 : 0
         let effectiveMax = (finderIndex == apps.count - 1) ? apps.count - 2 : apps.count - 1
 
+        // The Finder double-skip above can overshoot the bounds (e.g. only two apps,
+        // windowless Finder last). Keep the tracked index in sync with the app the
+        // switcher actually highlighted, or later left/right steps count from wrong.
+        currentIndex = min(max(currentIndex, effectiveMin), effectiveMax)
+
         lastStepTime = ProcessInfo.processInfo.systemUptime
         return SwitcherData(refX: refX, index: currentIndex, fingerCount: fingerCount, apps: apps,
                            finderIndex: finderIndex, effectiveMin: effectiveMin, effectiveMax: effectiveMax)

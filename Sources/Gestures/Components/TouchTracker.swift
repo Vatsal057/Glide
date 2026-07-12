@@ -1,5 +1,6 @@
 import Foundation
 import ApplicationServices
+import CoreGraphics
 
 enum TouchTracker {
     // ─────────────────────────────────────────────
@@ -25,6 +26,12 @@ enum TouchTracker {
     fileprivate static var _newestFingerAge: Double = 0
     fileprivate static var _lastFingerLiftTime: TimeInterval = 0
     fileprivate static var _prevFingerAngle: [Int32: Float] = [:]
+    /// Fingers that were on the pad when a left-button press started with <3
+    /// touches (i.e. a click-drag, not a click gesture). While the button stays
+    /// down they are excluded from gesture frames, so a swipe made with the
+    /// other fingers mid-drag still reads as 3/4/5 fingers and the stationary
+    /// drag finger can't corrupt the centroid/spread (pinch veto).
+    fileprivate static var _dragAnchorIDs: Set<Int32> = []
 
     /// Mean signed angular delta (degrees, + = counterclockwise) of the fingers
     /// around the centroid since the previous frame. Stateful per finger ID.
@@ -104,6 +111,40 @@ enum TouchTracker {
         return areClickTouchesSimultaneousLocked()
     }
 
+    /// Snapshot the fingers currently on the pad as drag anchors. Call when a
+    /// left mouse-down arrives with fewer than 3 fingers (a click/drag, not a
+    /// click gesture).
+    static func armDragAnchors() {
+        stateLock.lock()
+        _dragAnchorIDs = Set(_fingerFirstSeen.keys)
+        stateLock.unlock()
+    }
+
+    /// True while a click-drag is in progress (anchors armed, button still down).
+    static var dragAnchorsActive: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return !_dragAnchorIDs.isEmpty
+    }
+
+    /// Removes drag-anchor touches from a frame while the left button is held;
+    /// clears the anchors once the button is released. Called once per MT frame.
+    static func filterDragAnchors(_ touches: inout [MTTouch], leftButtonDown: Bool) {
+        stateLock.lock()
+        let anchors = _dragAnchorIDs
+        stateLock.unlock()
+        guard !anchors.isEmpty else { return }
+        if leftButtonDown {
+            // ponytail: anchor by finger identity; a drag re-grip (drag lock) gets
+            // a new touch ID and isn't filtered — acceptable, gesture just needs a retry.
+            touches.removeAll { anchors.contains($0.identifier) }
+        } else {
+            stateLock.lock()
+            _dragAnchorIDs.removeAll()
+            stateLock.unlock()
+        }
+    }
+
     static var glideActiveTouches: Int32 {
         get { stateLock.lock(); defer { stateLock.unlock() }; return _activeTouches }
         set { stateLock.lock(); defer { stateLock.unlock() }; _activeTouches = newValue }
@@ -128,6 +169,7 @@ enum TouchTracker {
         _newestFingerAge = 0
         _lastFingerLiftTime = 0
         _prevFingerAngle.removeAll(keepingCapacity: true)
+        _dragAnchorIDs.removeAll(keepingCapacity: true)
     }
 }
 let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
@@ -152,6 +194,12 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
             activeTouches.append(t)
         }
     }
+    // Drop the drag-anchor finger(s) while a click-drag's left button is held, so
+    // a swipe made with the other fingers still reads as N fingers and the
+    // stationary drag finger doesn't pollute centroid/spread. Thread-safe button read.
+    let leftButtonDown = CGEventSource.buttonState(.combinedSessionState, button: .left)
+    TouchTracker.filterDragAnchors(&activeTouches, leftButtonDown: leftButtonDown)
+
     if let dev = device {
         TouchTracker.updateDeviceFingerCount(device: dev, count: activeTouches.count)
     }

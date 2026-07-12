@@ -553,7 +553,7 @@ enum GlideConfigParser {
             case "haptics":     i += 1; parseHaptics(lines, from: &i, parentIndent: indent, into: &cfg.haptics)
             case "app_switcher": i += 1; parseAppSwitcher(lines, from: &i, parentIndent: indent, into: &cfg.appSwitcher)
             case "tuning":       i += 1; parseTuning(lines, from: &i, parentIndent: indent, into: &cfg.tuning)
-            case "gestures":    i += 1; parseGestures(lines, from: &i, parentIndent: indent, into: &cfg.gestures); return cfg
+            case "gestures":    i += 1; parseGestures(lines, from: &i, parentIndent: indent, into: &cfg.gestures)
             default:            i += 1
             }
         }
