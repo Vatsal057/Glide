@@ -160,12 +160,39 @@ fi
 
 echo "✅  Compile succeeded"
 
-# ── Ad-hoc code sign ─────────────────────────
+# ── Code sign ────────────────────────────────
+# Developer ID (notarizable, zero user friction) → ad-hoc. No Apple
+# Development rung: verified on macOS 26 that below Developer ID +
+# notarization, every signature gets the identical "Not Opened" dialog
+# and the same Settings → Open Anyway path — a dev cert buys nothing.
 echo "Signing…"
-codesign --force --sign - \
-    --entitlements "$SCRIPT_DIR/Glide.entitlements" \
-    "$APP_BUNDLE" 2>/dev/null || \
-codesign --force --sign - "$APP_BUNDLE"
+
+DEV_ID_CERT=$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)
+
+IDENTITY="${DEV_ID_CERT:--}"
+
+if [[ "$IDENTITY" == "-" ]]; then
+    echo "⚠️  No Developer ID certificate — ad-hoc signing."
+    echo "    Downloaded copies need Settings → Privacy & Security → Open Anyway (once)."
+    codesign --force --sign - \
+        --entitlements "$SCRIPT_DIR/Glide.entitlements" \
+        "$APP_BUNDLE"
+else
+    echo "Identity: $IDENTITY"
+    codesign --force --sign "$IDENTITY" \
+        --options runtime --timestamp \
+        --entitlements "$SCRIPT_DIR/Glide.entitlements" \
+        "$APP_BUNDLE"
+fi
+
+# Verify: signature valid AND entitlements survived signing.
+codesign --verify --strict "$APP_BUNDLE"
+if ! codesign -d --entitlements - --xml "$APP_BUNDLE" 2>/dev/null \
+    | grep -q "com.apple.security.automation.apple-events"; then
+    echo "❌  Entitlements missing after signing" >&2
+    exit 1
+fi
 
 echo "✅  Signed"
 
@@ -184,9 +211,19 @@ How to install Glide
 
 1. Drag Glide.app onto the Applications folder icon.
 
-2. Because Glide is a free open-source app (not notarized by Apple),
-   macOS may say the app is "damaged" on first launch. It is not.
-   Open Terminal and run this one line to fix it:
+2. Glide is a free open-source app and is not notarized by Apple,
+   so macOS blocks it on first launch. It is NOT damaged. To open it
+   (needed only once):
+
+   - Double-click Glide. macOS says it was "Not Opened" - click Done.
+   - Open System Settings -> Privacy & Security, scroll down to
+     "Glide.app was blocked", and click "Open Anyway".
+
+   On macOS 14 or older you can instead right-click (Control-click)
+   Glide in Applications, choose "Open", then click "Open".
+
+   If an older Mac claims the app is "damaged", run this one line
+   in Terminal:
 
        xattr -cr /Applications/Glide.app
 
@@ -197,6 +234,23 @@ How to install Glide
 EOF
     hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DMG_PATH"
     rm -rf "$DMG_STAGE"
+
+    # Notarize + staple when a Developer ID cert and stored
+    # notarytool credentials exist (paid Apple Developer account):
+    #   xcrun notarytool store-credentials glide-notary \
+    #     --apple-id <email> --team-id <TEAMID> --password <app-specific-pw>
+    if [[ -n "$DEV_ID_CERT" ]] && \
+       xcrun notarytool history --keychain-profile glide-notary >/dev/null 2>&1; then
+        echo "Notarizing…"
+        xcrun notarytool submit "$DMG_PATH" --keychain-profile glide-notary --wait
+        xcrun stapler staple "$DMG_PATH"
+        xcrun stapler validate "$DMG_PATH"
+        echo "✅  Notarized and stapled"
+    else
+        echo "ℹ️  Skipping notarization (needs a Developer ID cert +"
+        echo "    'xcrun notarytool store-credentials glide-notary' setup)."
+    fi
+
     echo "✅  DMG: $DMG_PATH"
 fi
 
