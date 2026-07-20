@@ -24,29 +24,6 @@ enum TouchTracker {
     fileprivate static var _oldestFingerAge: Double = 0
     fileprivate static var _newestFingerAge: Double = 0
     fileprivate static var _lastFingerLiftTime: TimeInterval = 0
-    fileprivate static var _prevFingerAngle: [Int32: Float] = [:]
-
-    /// Mean signed angular delta (degrees, + = counterclockwise) of the fingers
-    /// around the centroid since the previous frame. Stateful per finger ID.
-    static func computeTwist(_ touches: [MTTouch], cx: Float, cy: Float) -> Float {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        var sum: Float = 0
-        var matched = 0
-        var newAngles: [Int32: Float] = [:]
-        for t in touches {
-            let angle = atan2(t.normalizedPosition.y - cy, t.normalizedPosition.x - cx) * (180 / .pi)
-            newAngles[t.identifier] = angle
-            if let prev = _prevFingerAngle[t.identifier] {
-                var d = angle - prev
-                if d > 180 { d -= 360 } else if d < -180 { d += 360 }
-                sum += d
-                matched += 1
-            }
-        }
-        _prevFingerAngle = newAngles
-        return matched > 0 ? sum / Float(matched) : 0
-    }
 
     static func updateDeviceFingerCount(device: UnsafeMutableRawPointer, count: Int) {
         stateLock.lock()
@@ -127,7 +104,6 @@ enum TouchTracker {
         _oldestFingerAge = 0
         _newestFingerAge = 0
         _lastFingerLiftTime = 0
-        _prevFingerAngle.removeAll(keepingCapacity: true)
     }
 }
 let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
@@ -172,7 +148,6 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
             TouchTracker._fingerFirstSeen.removeAll(keepingCapacity: true)
             TouchTracker._oldestFingerAge = 0
             TouchTracker._newestFingerAge = 0
-            TouchTracker._prevFingerAngle.removeAll(keepingCapacity: true)
         }
         TouchTracker.stateLock.unlock()
         if hadTouches {
@@ -207,12 +182,6 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
     TouchTracker._activeTouches = activeCount
     if activeCount < prevActiveTouches {
         TouchTracker._lastFingerLiftTime = nowTs
-    }
-    // Twist is only computed at 3+ fingers. Drop per-finger angles as soon as the
-    // count dips below 3, or a later re-3 with the same finger IDs would diff
-    // against stale angles and produce a spurious rotation spike.
-    if activeCount < 3, !TouchTracker._prevFingerAngle.isEmpty {
-        TouchTracker._prevFingerAngle.removeAll(keepingCapacity: true)
     }
 
     let skipDispatch = activeCount < 3 && activeCount == TouchTracker._lastDispatchedCount
@@ -265,9 +234,7 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
         }
     }
 
-    let twist: Float = n >= 3 ? TouchTracker.computeTwist(activeTouches, cx: cx, cy: cy) : 0
-
-    let frameData = TouchFrameData(count: activeCount, cx: cx, cy: cy, spread: spread, coherence: coherence, twist: twist)
+    let frameData = TouchFrameData(count: activeCount, cx: cx, cy: cy, spread: spread, coherence: coherence)
     DispatchQueue.main.async { GestureEngine.shared.onTouches(frameData) }
     return 0
 }

@@ -195,6 +195,9 @@ struct RuleRow: View {
 
     private var subtitle: String {
         var parts: [String] = [rule.direction.rawValue]
+        if rule.direction == .forceClick && rule.zone != .any {
+            parts.append(rule.zone.rawValue)
+        }
         if rule.direction.hasSpeed && rule.speed != .any {
             parts.append(rule.speed.rawValue)
         }
@@ -408,6 +411,17 @@ struct RuleEditor: View {
                                 }
                                 .pickerStyle(.segmented)
                                 .frame(maxWidth: 240)
+                            }
+                        }
+
+                        if rule.direction == .forceClick {
+                            EditorRow(label: "Trackpad Zone") {
+                                Picker("", selection: $rule.zone) {
+                                    ForEach(TrackpadZone.allCases, id: \.self) { z in
+                                        Text(z.rawValue).tag(z)
+                                    }
+                                }
+                                .frame(maxWidth: 200)
                             }
                         }
                     }

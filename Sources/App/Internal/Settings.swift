@@ -14,17 +14,13 @@ enum GestureDirection: String, Codable, CaseIterable {
     case swipeRight      = "Swipe Right"
     case swipeUp         = "Swipe Up"
     case swipeDown       = "Swipe Down"
-    case rotateCW        = "Rotate Clockwise"
-    case rotateCCW       = "Rotate Counterclockwise"
 
     /// True for tap-style gestures (normal click, force click, tap & hold) that
     /// have no axis, speed, reciprocal or continuous behaviour.
     var isClickLike: Bool { self == .click || self == .forceClick || self == .tapHold }
 
-    var isRotation: Bool { self == .rotateCW || self == .rotateCCW }
-
     /// Directions with a movement axis — the only ones with speed tiers.
-    var hasSpeed: Bool { !isClickLike && !isRotation }
+    var hasSpeed: Bool { !isClickLike }
 }
 
 enum GestureSpeed: String, Codable, CaseIterable {
@@ -294,6 +290,7 @@ enum GestureAction: String, Codable, CaseIterable {
 struct GestureMatchSignature: Hashable {
     let fingers: Int
     let direction: GestureDirection
+    let zone: TrackpadZone
     let speed: GestureSpeed
     let appFilter: String?
     let windowStateFilter: WindowStateFilter
@@ -306,6 +303,9 @@ struct GestureRule: Codable, Identifiable, Equatable {
     var name:      String?
     var fingers:   Int              = 3
     var direction: GestureDirection = .click
+    /// Trackpad corner a force-click must land in. Only meaningful when
+    /// `direction == .forceClick`; `.any` for every other gesture.
+    var zone:      TrackpadZone     = .any
     var speed:     GestureSpeed     = .normal
     var action:    GestureAction    = .doNothing
     var appPath:   String?
@@ -408,6 +408,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
         GestureMatchSignature(
             fingers: fingers,
             direction: direction,
+            zone: direction == .forceClick ? zone : .any,
             speed: (speed == .any || !direction.hasSpeed) ? .normal : speed,
             appFilter: appFilter,
             windowStateFilter: windowStateFilter,
@@ -571,10 +572,11 @@ struct GestureTuning: Codable, Equatable {
     var pinchFrameSpreadThreshold:  Float        = 0.008
     var swipeCoherenceThreshold:    Float        = 0.30
     var swipeAngleTolerance:        Float        = 45
-    /// Total twist (degrees) around the centroid before a rotation gesture fires.
-    var rotationThresholdDegrees:   Float        = 30
     /// Motionless contact time (seconds) before a Tap & Hold gesture fires.
     var tapHoldDuration:            TimeInterval = 0.5
+    /// Each corner's reach (normalized) for zoned force-clicks. 0.35 → outer 35%
+    /// on each axis counts as that corner; the middle stays position-blind.
+    var forceClickCornerMargin:     Float        = 0.35
     var edgeMarginEnabled:          Bool         = true
     var edgeMargin:                 EdgeMargin   = EdgeMargin()
 
@@ -596,8 +598,8 @@ struct GestureTuning: Codable, Equatable {
         pinchFrameSpreadThreshold = try c.decodeIfPresent(Float.self,        forKey: .pinchFrameSpreadThreshold) ?? 0.008
         swipeCoherenceThreshold   = try c.decodeIfPresent(Float.self,        forKey: .swipeCoherenceThreshold)   ?? 0.30
         swipeAngleTolerance       = try c.decodeIfPresent(Float.self,        forKey: .swipeAngleTolerance)       ?? 45
-        rotationThresholdDegrees  = try c.decodeIfPresent(Float.self,        forKey: .rotationThresholdDegrees)  ?? 30
         tapHoldDuration           = try c.decodeIfPresent(TimeInterval.self, forKey: .tapHoldDuration)           ?? 0.5
+        forceClickCornerMargin    = try c.decodeIfPresent(Float.self,        forKey: .forceClickCornerMargin)    ?? 0.35
         edgeMarginEnabled         = try c.decodeIfPresent(Bool.self,         forKey: .edgeMarginEnabled)         ?? true
         edgeMargin                = try c.decodeIfPresent(EdgeMargin.self,   forKey: .edgeMargin)                ?? EdgeMargin()
     }
@@ -752,7 +754,6 @@ final class Settings {
         var r = GestureRule.migratingLegacyAppFilter(rule)
         r.fingers = min(max(r.fingers, 2), 5)
         r.speed   = (r.speed == .any || !r.direction.hasSpeed) ? .normal : r.speed
-        if r.direction.isRotation { r.reciprocalEnabled = false; r.reciprocalAction = nil }
         if r.direction.isClickLike {
             r.reciprocalEnabled = false
             r.continuous = false
@@ -808,8 +809,8 @@ final class Settings {
         n.pinchFrameSpreadThreshold = max(0.001, n.pinchFrameSpreadThreshold)
         n.swipeCoherenceThreshold  = max(0.0, min(n.swipeCoherenceThreshold, 0.95))
         n.swipeAngleTolerance      = max(20, min(n.swipeAngleTolerance, 45))
-        n.rotationThresholdDegrees = max(10, min(n.rotationThresholdDegrees, 180))
         n.tapHoldDuration          = max(0.3, min(n.tapHoldDuration, 3.0))
+        n.forceClickCornerMargin   = max(0.15, min(n.forceClickCornerMargin, 0.45))
         let clamp = { (v: Float) in max(EdgeMargin.range.lowerBound,
                                         min(v, EdgeMargin.range.upperBound)) }
         n.edgeMargin.left   = clamp(n.edgeMargin.left)

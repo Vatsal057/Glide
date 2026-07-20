@@ -46,10 +46,18 @@ final class GestureRuleResolver {
         return filter == bundleID
     }
 
-    static func hasRotationRule(fingers: Int) -> Bool {
-        Settings.shared.rules.contains {
-            $0.isActive && $0.fingers == fingers && $0.direction.isRotation
+    /// Resolves a force-click at a given centroid. A rule bound to the corner the
+    /// centroid falls in wins; otherwise the position-blind (`.any`) rule handles
+    /// the center and any corner without its own rule. Returns nil when neither
+    /// exists — the caller then treats the press as a plain click.
+    static func forceClickRule(fingers: Int, cx: Float, cy: Float, margin: Float,
+                               modifiers: CapturedModifiers) -> GestureRule? {
+        let matching = matchingRules(fingers: fingers, direction: .forceClick, modifiers: modifiers)
+        if let corner = TrackpadZone.at(cx: cx, cy: cy, margin: margin),
+           let zoned = matching.last(where: { $0.zone == corner }) {
+            return zoned
         }
+        return matching.last(where: { $0.zone == .any })
     }
 
     static func hasHoldRule(fingers: Int) -> Bool {

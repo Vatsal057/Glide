@@ -277,13 +277,20 @@ final class GestureEngine {
         if case .switchingApps = phase { return }
         guard TouchTracker.areClickTouchesSimultaneous() else { return }
 
-        // The deep press supersedes any pending normal click — discard it.
+        // Resolve against the corner the fingers rest in (centroid is fresh — the
+        // fingers are still down at the deep press). No match (e.g. a center press
+        // when only corner rules exist) → leave any pending normal click alone so
+        // the mouse-up flushes it as an ordinary click.
+        let modifiers = captureModifiers()
+        guard let rule = GestureRuleResolver.forceClickRule(
+                fingers: n, cx: currentCentroidX, cy: currentCentroidY,
+                margin: Settings.shared.tuning.forceClickCornerMargin, modifiers: modifiers) else { return }
+
+        // Matched — the deep press supersedes any pending normal click.
         pendingClickTimeout?.cancel()
         pendingClickTimeout = nil
         pendingClick = nil
 
-        let modifiers = captureModifiers()
-        guard let rule = GestureRuleResolver.bestRule(fingers: n, direction: .forceClick, modifiers: modifiers) else { return }
         Haptic.forRule(rule)   // at the deep press itself
         fireClickRule(rule, label: "Force Click", fingerCount: n)
     }

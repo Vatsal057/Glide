@@ -123,6 +123,12 @@ done
 echo "Compiling…"
 
 SDK_PATH="$(xcrun --show-sdk-path)"
+# xcrun can resolve to a CommandLineTools SDK whose Swift module was built by a
+# newer compiler than the installed swiftc (fails with "SDK is not supported by
+# the compiler"). The active Xcode always bundles an SDK matching its own swiftc,
+# so prefer it when present; fall back to xcrun on CLT-only machines (e.g. CI).
+XCODE_SDK="$(xcode-select -p 2>/dev/null)/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+[[ -d "$XCODE_SDK" ]] && SDK_PATH="$XCODE_SDK"
 ARCHS=(arm64 x86_64)
 BINARIES=()
 

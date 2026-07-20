@@ -48,8 +48,8 @@ struct GlideConfig {
         var pinchFrameSpreadThreshold: Float = 0.008
         var swipeCoherenceThreshold: Float = 0.30
         var swipeAngleTolerance: Float = 45.0
-        var rotationThresholdDegrees: Float = 30
         var tapHoldDuration: Double = 0.5
+        var forceClickCornerMargin: Float = 0.35
         var edgeMarginEnabled: Bool = true
         var edgeMarginLeft: Float = 0.05
         var edgeMarginRight: Float = 0.05
@@ -67,6 +67,7 @@ struct GlideConfig {
         var appFilter: String?
         var windowState: String?
         var modifierFilter: String?
+        var zone: String? = nil     // force-click corner: "top_left" … nil = anywhere
         var appPath: String?
         var menuPath: [String]?
         var shortcutKeyCode: Int?
@@ -143,8 +144,8 @@ extension GlideConfig {
         cfg.tuning.pinchFrameSpreadThreshold = t.pinchFrameSpreadThreshold
         cfg.tuning.swipeCoherenceThreshold   = t.swipeCoherenceThreshold
         cfg.tuning.swipeAngleTolerance       = t.swipeAngleTolerance
-        cfg.tuning.rotationThresholdDegrees  = t.rotationThresholdDegrees
         cfg.tuning.tapHoldDuration           = t.tapHoldDuration
+        cfg.tuning.forceClickCornerMargin    = t.forceClickCornerMargin
         cfg.tuning.edgeMarginEnabled         = t.edgeMarginEnabled
         cfg.tuning.edgeMarginLeft            = t.edgeMargin.left
         cfg.tuning.edgeMarginRight           = t.edgeMargin.right
@@ -157,7 +158,6 @@ extension GlideConfig {
             case .forceClick:           typeStr = "force_click"
             case .click:                typeStr = "click"
             case .tapHold:              typeStr = "hold"
-            case .rotateCW, .rotateCCW: typeStr = "rotate"
             default:                    typeStr = "swipe"
             }
             let hasDirection = !rule.direction.isClickLike
@@ -172,6 +172,7 @@ extension GlideConfig {
                 appFilter:      normalized.appFilter,
                 windowState:    normalized.windowStateFilter.yamlValue,
                 modifierFilter: normalized.modifierFilter.yamlValue,
+                zone:           rule.direction == .forceClick ? rule.zone.yamlValue : nil,
                 appPath:        rule.appPath,
                 menuPath:       rule.menuItemPath,
                 shortcutKeyCode: rule.customShortcut.map { Int($0.keyCode) },
@@ -228,8 +229,8 @@ extension GlideConfig {
         t.pinchFrameSpreadThreshold = tuning.pinchFrameSpreadThreshold
         t.swipeCoherenceThreshold   = tuning.swipeCoherenceThreshold
         t.swipeAngleTolerance       = tuning.swipeAngleTolerance
-        t.rotationThresholdDegrees  = tuning.rotationThresholdDegrees
         t.tapHoldDuration           = tuning.tapHoldDuration
+        t.forceClickCornerMargin    = tuning.forceClickCornerMargin
         t.edgeMarginEnabled         = tuning.edgeMarginEnabled
         t.edgeMargin.left           = tuning.edgeMarginLeft
         t.edgeMargin.right          = tuning.edgeMarginRight
@@ -249,11 +250,6 @@ extension GlideConfig {
                 direction = .forceClick
             } else if g.type == "hold" {
                 direction = .tapHold
-            } else if g.type == "rotate" {
-                switch g.direction?.lowercased() {
-                case "ccw", "counterclockwise": direction = .rotateCCW
-                default:                        direction = .rotateCW
-                }
             } else {
                 guard let d = swiftDirection(g.direction) else { return nil }
                 direction = d
@@ -302,6 +298,7 @@ extension GlideConfig {
                 isDraft:           g.draft
             )
             rule.hapticPattern = g.haptic.flatMap(HapticPattern.init(rawValue:))
+            if direction == .forceClick { rule.zone = TrackpadZone(yamlValue: g.zone) ?? .any }
             return GestureRule.migratingLegacyAppFilter(rule)
         }
     }
@@ -316,8 +313,6 @@ extension GlideConfig {
         case .swipeRight: return "right"
         case .swipeUp:    return "up"
         case .swipeDown:  return "down"
-        case .rotateCW:   return "cw"
-        case .rotateCCW:  return "ccw"
         case .click:      return "none"
         case .forceClick: return "none"
         case .tapHold:    return "none"
@@ -389,8 +384,8 @@ enum GlideConfigSerializer {
             "    pinch_frame_spread_threshold: \(fmt(config.tuning.pinchFrameSpreadThreshold))",
             "    swipe_coherence_threshold: \(fmt(config.tuning.swipeCoherenceThreshold))",
             "    swipe_angle_tolerance: \(String(format: "%.1f", config.tuning.swipeAngleTolerance))",
-            "    rotation_threshold_degrees: \(String(format: "%.1f", config.tuning.rotationThresholdDegrees))",
             "    tap_hold_duration: \(String(format: "%.2f", config.tuning.tapHoldDuration))",
+            "    force_click_corner_margin: \(String(format: "%.2f", config.tuning.forceClickCornerMargin))",
             "",
             "    edge_margin:",
             "      enabled: \(config.tuning.edgeMarginEnabled ? "true" : "false")",
@@ -434,6 +429,7 @@ enum GlideConfigSerializer {
         if let h = g.haptic { lines.append("      haptic: \"\(h)\"") }
         if let ws = g.windowState { lines.append("      window_state: \(ws)") }
         if let mf = g.modifierFilter { lines.append("      modifier_filter: \(mf)") }
+        if let z = g.zone { lines.append("      zone: \(z)") }
         lines.append("      app_filter: \(g.appFilter.map { "\"\($0)\"" } ?? "null")")
         if g.type == "swipe" || g.appPath != nil {
             lines.append("      app_path: \(g.appPath.map { "\"\(escape($0))\"" } ?? "null")")
@@ -648,8 +644,8 @@ enum GlideConfigParser {
             case "pinch_frame_spread_threshold": tuning.pinchFrameSpreadThreshold = floatVal(val)  ?? tuning.pinchFrameSpreadThreshold
             case "swipe_coherence_threshold":    tuning.swipeCoherenceThreshold   = floatVal(val)  ?? tuning.swipeCoherenceThreshold
             case "swipe_angle_tolerance":        tuning.swipeAngleTolerance       = floatVal(val)  ?? tuning.swipeAngleTolerance
-            case "rotation_threshold_degrees":   tuning.rotationThresholdDegrees  = floatVal(val)  ?? tuning.rotationThresholdDegrees
             case "tap_hold_duration":            tuning.tapHoldDuration           = doubleVal(val) ?? tuning.tapHoldDuration
+            case "force_click_corner_margin":    tuning.forceClickCornerMargin    = floatVal(val)  ?? tuning.forceClickCornerMargin
             case "edge_margin":
                 let marginIndent = ind
                 i += 1
@@ -763,6 +759,7 @@ enum GlideConfigParser {
             case "app_filter":    g.appFilter    = nullableStringVal(val)
             case "window_state":    g.windowState    = nullableStringVal(val)
             case "modifier_filter": g.modifierFilter = nullableStringVal(val)
+            case "zone":            g.zone           = nullableStringVal(val)
             case "app_path":        g.appPath        = nullableStringVal(val)
             case "menu_path":
                 let menuIndent = ind

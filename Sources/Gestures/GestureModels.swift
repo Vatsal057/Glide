@@ -11,9 +11,6 @@ struct TouchFrameData {
     let cy: Float
     let spread: Float
     let coherence: Float
-    /// Mean signed angular movement of the fingers around the centroid since the
-    /// previous frame, in degrees. Positive = counterclockwise.
-    var twist: Float = 0
 }
 
 // ─────────────────────────────────────────────
@@ -45,8 +42,6 @@ struct CandidateData {
     var lastFrameTime: TimeInterval
     var gestureKind: GestureKind = .unknown
     var classificationFrameDelay: Int = 0
-    /// Accumulated signed twist (degrees) — drives rotation gesture detection.
-    var cumulativeTwist: Float = 0
 }
 
 struct SwipeTrackData {
@@ -119,7 +114,7 @@ extension GestureDirection {
             return self == .swipeLeft || self == .swipeRight
         case .swipeUp, .swipeDown, .swipeUpDown:
             return self == .swipeUp || self == .swipeDown
-        case .click, .forceClick, .tapHold, .rotateCW, .rotateCCW:
+        case .click, .forceClick, .tapHold:
             return false
         }
     }
