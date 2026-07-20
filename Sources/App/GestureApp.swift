@@ -5,7 +5,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         EngineBridge.shared.startEngine()
         if OnboardingController.shouldShow {
-            OnboardingController.shared.show()
+            SplashOverlay.present { OnboardingController.shared.show() }
         } else {
             checkAccessibilityPermission()
         }

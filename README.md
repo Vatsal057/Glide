@@ -10,11 +10,15 @@ Glide works in the background and intercepts your trackpad movements, translatin
 
 1. Download the latest **Glide-vX.Y.Z.dmg** from the [Releases page](https://github.com/Vatsal057/Glide/releases/latest).
 2. Open the DMG and drag **Glide** into the **Applications** folder.
-3. Glide is free and open source, so it isn't notarized by Apple. If macOS says the app is *"damaged and can't be opened"*, it isn't — that's just Gatekeeper. Run this one line in Terminal to fix it:
+3. Glide is free and open source, so it isn't notarized by Apple, and macOS will warn you on first launch. To open it:
 
-   ```sh
-   xattr -cr /Applications/Glide.app
-   ```
+   - **Right-click** (or Control-click) Glide in Applications and choose **Open**, then click **Open** in the dialog.
+   - On **macOS 15 (Sequoia) or newer**, if there's no Open option: double-click Glide once, then go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**.
+   - If macOS instead says the app is *"damaged and can't be opened"*, it isn't — that's just Gatekeeper. Run this one line in Terminal to fix it:
+
+     ```sh
+     xattr -cr /Applications/Glide.app
+     ```
 
 4. Open Glide and grant Accessibility access when prompted (**System Settings → Privacy & Security → Accessibility**).
 5. The hand icon appears in your menu bar — you're ready to go.

@@ -26,21 +26,12 @@ jobs:
         run: |
           chmod +x build.sh
           ./build.sh --dmg
-
-      - name: Verify DMG Output
-        run: |
-          if [ ! -f build/Glide.dmg ]; then
-            echo "Error: expected regular file build/Glide.dmg was not found." >&2
-            exit 1
-          fi
-
-      - name: Stage DMG for Release
-        run: mv build/Glide.dmg "build/Glide-${GITHUB_REF_NAME}.dmg"
+          mv build/Glide.dmg "build/Glide-${GITHUB_REF_NAME}.dmg"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/Glide-${GITHUB_REF_NAME}.dmg
+          files: build/Glide-*.dmg
           name: Glide ${{ github.ref_name }}
           generate_release_notes: true
           body: |

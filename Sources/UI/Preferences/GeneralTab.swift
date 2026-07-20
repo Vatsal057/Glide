@@ -4,6 +4,7 @@ import ServiceManagement
 
 struct GeneralTab: View {
     @EnvironmentObject var store: PreferencesStore
+    @StateObject private var updater = UpdateChecker()
 
     var body: some View {
         ScrollView {
@@ -219,28 +220,77 @@ struct GeneralTab: View {
 
     // MARK: - About
 
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+    }
+
     private var aboutCard: some View {
         GroupBox(label: Label("About", systemImage: "info.circle")) {
-            HStack(spacing: 14) {
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable()
-                    .frame(width: 44, height: 44)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Glide \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
-                        .font(.headline)
-                    Text("Free and open source. Everything stays on your Mac.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+            VStack(spacing: 12) {
+                HStack(spacing: 14) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .frame(width: 44, height: 44)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text("Glide").font(.headline)
+                            Text("v\(appVersion)").font(.caption.weight(.medium)).materialPill()
+                        }
+                        Text("Free and open source. Everything stays on your Mac.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Welcome Tour") {
+                        OnboardingController.shared.show()
+                    }
+                    Button("GitHub") {
+                        NSWorkspace.shared.open(URL(string: "https://github.com/Vatsal057/Glide")!)
+                    }
                 }
-                Spacer()
-                Button("Welcome Tour") {
-                    OnboardingController.shared.show()
-                }
-                Button("GitHub") {
-                    NSWorkspace.shared.open(URL(string: "https://github.com/Vatsal057/Glide")!)
+
+                SquiggleDivider()
+
+                HStack(spacing: 10) {
+                    updateStatus
+                    Spacer()
+                    if case .available(_, let url) = updater.state {
+                        Button("Download") { NSWorkspace.shared.open(url) }
+                            .buttonStyle(.borderedProminent)
+                    } else {
+                        Button("Check for Updates") { updater.check() }
+                            .disabled(updater.state == .checking)
+                    }
                 }
             }
             .padding(8)
+        }
+    }
+
+    @ViewBuilder
+    private var updateStatus: some View {
+        switch updater.state {
+        case .idle:
+            EmptyView()
+        case .checking:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Checking…").font(.callout).foregroundStyle(.secondary)
+            }
+        case .upToDate:
+            Label("You're on the latest version", systemImage: "checkmark.circle.fill")
+                .font(.callout)
+                .foregroundStyle(.green)
+        case .available(let version, _):
+            Label("Update available — \(version)", systemImage: "arrow.down.circle.fill")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.blue)
+                .materialPill()
+                .shimmer()
+        case .failed:
+            Label("Couldn't check right now", systemImage: "exclamationmark.triangle")
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
     }
 
