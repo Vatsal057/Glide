@@ -23,7 +23,6 @@ final class GestureRuleResolver {
 
         return Settings.shared.rules.filter { rule in
             rule.isActive
-                && !rule.isKeyboardBinding
                 && rule.fingers == fingers
                 && ruleDirection(rule.direction, matchesActual: direction)
                 && matchesWindowState(rule, isFullscreen: isFullscreen, isMaximized: isMaximized)
@@ -35,11 +34,9 @@ final class GestureRuleResolver {
     /// Evaluates window-state and app-filter conditions without requiring a gesture
     /// context. Used by keyboard-triggered rules, which skip gesture matching.
     static func passesContextFilters(_ rule: GestureRule) -> Bool {
-        let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let isFullscreen = WindowTargeting.shared.isFrontmostWindowFullscreen()
-        let isMaximized  = WindowTargeting.shared.isFrontmostWindowMaximized()
+        let (isFullscreen, isMaximized, bundleID) = WindowTargeting.shared.frontmostContext()
         return matchesWindowState(rule, isFullscreen: isFullscreen, isMaximized: isMaximized)
-            && matchesAppFilter(rule, bundleID: bid)
+            && matchesAppFilter(rule, bundleID: bundleID)
     }
 
     private static func matchesWindowState(_ rule: GestureRule, isFullscreen: Bool, isMaximized: Bool) -> Bool {

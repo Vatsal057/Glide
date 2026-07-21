@@ -445,7 +445,6 @@ struct RuleEditor: View {
                                 .frame(maxWidth: 200)
                             }
                         }
-                      }
                     }
 
                     // Action section
@@ -517,6 +516,7 @@ struct RuleEditor: View {
 
                     // Conditions section
                     EditorSection(title: "Conditions") {
+                        if !rule.isKeyboardBinding {
                         EditorRow(label: "Modifier Key") {
                             VStack(alignment: .leading, spacing: 6) {
                                 Picker("", selection: $rule.modifierFilter) {
@@ -531,6 +531,7 @@ struct RuleEditor: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
+                        }
                         }
 
                         EditorRow(label: "Window State") {

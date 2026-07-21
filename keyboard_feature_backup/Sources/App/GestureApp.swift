@@ -99,10 +99,10 @@ final class EngineBridge: ObservableObject {
             engine.start()
         }
 
-        startAccessibilityMonitoring()
-
         // Global keyboard-shortcut bindings (independent of the trackpad event tap).
         HotkeyManager.shared.reload()
+
+        startAccessibilityMonitoring()
 
         // Stop/restart around sleep-wake cycle (trackpad hardware reinits after wake)
         let ws = NSWorkspace.shared.notificationCenter

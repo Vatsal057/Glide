@@ -336,17 +336,17 @@ struct GestureRule: Codable, Identifiable, Equatable {
     var shortcutName: String?
     /// Script text for `.runShellCommand` / `.runAppleScript`.
     var script: String?
-    /// Per-gesture haptic override. nil → automatic (pattern assigned to the
-    /// action's category in Preferences › General › Haptics).
-    var hapticPattern: HapticPattern?
-    /// New rules start as drafts until configured in the editor.
-    var isDraft: Bool               = false
     /// Marks this rule as triggered by a global keyboard shortcut instead of a
     /// trackpad gesture. When true, the gesture fields (fingers/direction/speed)
     /// are ignored and `triggerShortcut` fires the action from anywhere.
     var isKeyboardBinding: Bool     = false
     /// Global hotkey that fires this rule's action (only when `isKeyboardBinding`).
     var triggerShortcut: KeyboardShortcut?
+    /// Per-gesture haptic override. nil → automatic (pattern assigned to the
+    /// action's category in Preferences › General › Haptics).
+    var hapticPattern: HapticPattern?
+    /// New rules start as drafts until configured in the editor.
+    var isDraft: Bool               = false
 
     var menuItemLabel: String? {
         guard action == .customMenuItem, let menuItemPath, !menuItemPath.isEmpty else { return nil }
@@ -368,7 +368,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
     /// True when the trigger combo can be registered as a global hotkey.
     var triggerIsRegisterable: Bool {
         guard let sc = triggerShortcut else { return false }
-        return HotkeyTrigger.isRegisterable(keyCode: Int(sc.keyCode), command: sc.command,
+        return HotkeyTrigger.isRegisterable(keyCode: sc.keyCode, command: sc.command,
                                             shift: sc.shift, control: sc.control, option: sc.option)
     }
 
@@ -382,23 +382,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
                 || Self.actionIsConfigured(continuousEndAction, shortcut: continuousEndShortcut, keyboard: continuousEndKeyboard)
         }
         if action == .doNothing { return false }
-        if action == .customMenuItem {
-            return menuItemPath != nil && (menuItemPath?.count ?? 0) >= 2
-        }
-        if action == .customShortcut {
-            return customShortcut?.isValid == true
-        }
-        if action == .advancedKeyboard {
-            return !advancedKeyboard.isEmpty
-        }
-        if action == .openApp { return appPath != nil && !(appPath?.isEmpty ?? true) }
-        if action == .runShortcut {
-            return !(shortcutName ?? "").trimmingCharacters(in: .whitespaces).isEmpty
-        }
-        if action == .runShellCommand || action == .runAppleScript {
-            return !(script ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        return true
+        return Self.actionIsConfigured(action, shortcut: customShortcut, keyboard: advancedKeyboard)
     }
 
     var supportsContinuousGestures: Bool {
@@ -463,8 +447,8 @@ struct GestureRule: Codable, Identifiable, Equatable {
          continuousEndKeyboard: [KeyboardInputStep] = [],
          menuItemPath: [String]? = nil, customShortcut: KeyboardShortcut? = nil,
          shortcutName: String? = nil, script: String? = nil,
-         isDraft: Bool = false,
-         isKeyboardBinding: Bool = false, triggerShortcut: KeyboardShortcut? = nil) {
+         isKeyboardBinding: Bool = false, triggerShortcut: KeyboardShortcut? = nil,
+         isDraft: Bool = false) {
         self.name                = name
         self.fingers             = fingers
         self.direction           = direction
@@ -492,9 +476,9 @@ struct GestureRule: Codable, Identifiable, Equatable {
         self.customShortcut      = customShortcut
         self.shortcutName        = shortcutName
         self.script              = script
-        self.isDraft             = isDraft
         self.isKeyboardBinding   = isKeyboardBinding
         self.triggerShortcut     = triggerShortcut
+        self.isDraft             = isDraft
     }
 
     // Robust decoding — tolerates unknown future enum cases
@@ -528,9 +512,9 @@ struct GestureRule: Codable, Identifiable, Equatable {
         customShortcut    = try? c.decodeIfPresent(KeyboardShortcut.self, forKey: .customShortcut)
         shortcutName      = try? c.decodeIfPresent(String.self, forKey: .shortcutName)
         script            = try? c.decodeIfPresent(String.self, forKey: .script)
-        isDraft           = (try? c.decodeIfPresent(Bool.self,  forKey: .isDraft)) ?? false
         isKeyboardBinding = (try? c.decodeIfPresent(Bool.self,  forKey: .isKeyboardBinding)) ?? false
         triggerShortcut   = try? c.decodeIfPresent(KeyboardShortcut.self, forKey: .triggerShortcut)
+        isDraft           = (try? c.decodeIfPresent(Bool.self,  forKey: .isDraft)) ?? false
         self = Self.migratingLegacyAppFilter(self)
     }
 

@@ -89,8 +89,8 @@ final class PreferencesStore: ObservableObject {
 
     /// `true` when a newer rule in the list overrides this one (same gesture signature).
     func isRuleShadowed(_ rule: GestureRule) -> Bool {
-        guard rule.isActive, !rule.isKeyboardBinding else { return false }
-        guard let winner = rules.last(where: { $0.isActive && !$0.isKeyboardBinding && $0.matchSignature == rule.matchSignature }) else {
+        guard rule.isActive else { return false }
+        guard let winner = rules.last(where: { $0.isActive && $0.matchSignature == rule.matchSignature }) else {
             return false
         }
         return winner.id != rule.id
@@ -327,9 +327,9 @@ final class PreferencesStore: ObservableObject {
     private func persistRules() {
         Settings.shared.rules = rules.map(sanitizedRule)
         diagnostics = buildDiagnostics(for: rules)
+        HotkeyManager.shared.reload()
         SystemGestureManager.reconcileIfAutoEnabled()
         refreshNativeConflicts()
-        HotkeyManager.shared.reload()
     }
 
     // MARK: Native gesture conflicts
