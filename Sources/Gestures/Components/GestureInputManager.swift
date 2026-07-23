@@ -37,10 +37,14 @@ final class GestureInputManager {
     }
 
     func setupSuppressionTap() {
-        let mask = UInt64(NSEvent.EventTypeMask.gesture.rawValue)
+        let gestureEventTypeValues: [UInt32] = [18, 19, 20, 29, 30, 31, 32]
+        var mask = UInt64(NSEvent.EventTypeMask.gesture.rawValue)
                  | UInt64(NSEvent.EventTypeMask.pressure.rawValue)
                  | UInt64(1 << CGEventType.scrollWheel.rawValue)
                  | UInt64(1 << CGEventType.leftMouseDown.rawValue)
+        for type in gestureEventTypeValues {
+            mask |= (1 << type)
+        }
 
         suppressionTap = CGEvent.tapCreate(
             tap: .cghidEventTap,
@@ -62,6 +66,14 @@ final class GestureInputManager {
                     }
                     return Unmanaged.passUnretained(cgEvent)
                 }
+                let gestureEventTypeValues: Set<UInt32> = [18, 19, 20, 29, 30, 31, 32]
+                if gestureEventTypeValues.contains(type.rawValue) {
+                    if TouchTracker.glideActiveTouches >= 3 {
+                        return nil
+                    }
+                    return Unmanaged.passUnretained(cgEvent)
+                }
+
                 if TouchTracker.glideActiveTouches >= 3 {
                     let im = GestureEngine.shared.inputManager!
                     let isScroll = type.rawValue == CGEventType.scrollWheel.rawValue
