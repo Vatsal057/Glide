@@ -9,8 +9,8 @@ final class GestureInputManager {
     private(set) var suppressionEnabled = false
 
     /// During the zoom double-tap window the tap stays active, but gesture-class
-    /// events are passed through so macOS can recognize the tap. Scroll is always
-    /// swallowed at 3+ fingers regardless, so a moving swipe can't scrub video.
+    /// events are passed through so macOS can recognize the tap — even when the
+    /// per-gesture decision is `.block`.
     var tapWindowActive = false
 
     var clickObservationTap: CFMachPort?
@@ -70,21 +70,28 @@ final class GestureInputManager {
                     let im = GestureEngine.shared.inputManager!
                     let isScroll = type.rawValue == CGEventType.scrollWheel.rawValue
                     let isSystemGesture = [18, 19, 20, 29, 30, 31, 32].contains(type.rawValue)
-                    
+
                     // Deep-press events are gesture-class, so this tap swallows them
                     // while 3+ fingers are down — exactly when a force click can happen.
                     // The NSEvent pressure monitor would never see them; detect here first.
                     if !isScroll, let ns = NSEvent(cgEvent: cgEvent), ns.type == .pressure {
                         im.handleDeepPress(stage: ns.stage)
                     }
-                    
-                    // Always swallow scroll at 3+ fingers so a 3-finger swipe can't
-                    // reach apps (e.g. scrub a video).
-                    // Always swallow system gestures at 3+ fingers so Mission Control doesn't trigger.
-                    if isScroll || isSystemGesture { return nil }
-                    
-                    // In the zoom tap window, still pass gesture-class events so the double-tap is recognized.
-                    return im.tapWindowActive ? Unmanaged.passUnretained(cgEvent) : nil
+
+                    // Per-gesture suppression: events pass through until the processor
+                    // classifies the swipe direction. If a Glide rule covers that
+                    // direction the rest of the gesture is swallowed (the system only
+                    // saw a sub-threshold prefix, so Mission Control / Exposé won't
+                    // commit). If not, the native gesture keeps the full stream —
+                    // e.g. an unconfigured 4-finger left/right still switches desktops.
+                    switch TouchTracker.glideGestureDecision {
+                    case .undecided, .pass:
+                        return Unmanaged.passUnretained(cgEvent)
+                    case .block:
+                        if isScroll || isSystemGesture { return nil }
+                        // In the zoom tap window, still pass gesture-class events so the double-tap is recognized.
+                        return im.tapWindowActive ? Unmanaged.passUnretained(cgEvent) : nil
+                    }
                 }
                 return Unmanaged.passUnretained(cgEvent)
             },

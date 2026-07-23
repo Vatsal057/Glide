@@ -77,6 +77,23 @@ final class GestureRuleResolver {
         }
     }
 
+    /// True when every swipe direction at this finger count is claimed by a
+    /// Glide rule (or the app switcher). The suppression tap can then block from
+    /// the very first event — no native gesture could ever need the stream.
+    /// Blocking early matters: if the system sees even a gesture-begin prefix it
+    /// starts its own gesture session, which hides Dock UI (app-switcher HUD)
+    /// and can drop stray touches into pointer movement.
+    static func coversAllSwipeDirections(fingers: Int) -> Bool {
+        let switcherActive = Settings.shared.appSwitcher.enabled && fingers == Settings.shared.appSwitcher.fingers
+        return [GestureDirection.swipeLeft, .swipeRight, .swipeUp, .swipeDown].allSatisfy { dir in
+            if switcherActive, dir == .swipeLeft || dir == .swipeRight { return true }
+            return Settings.shared.rules.contains {
+                $0.isActive && !$0.isKeyboardBinding && $0.fingers == fingers
+                    && ruleDirection($0.direction, matchesActual: dir)
+            }
+        }
+    }
+
     static func hasAnySwipeRule(fingers: Int) -> Bool {
         if Settings.shared.appSwitcher.enabled, fingers == Settings.shared.appSwitcher.fingers {
             return true

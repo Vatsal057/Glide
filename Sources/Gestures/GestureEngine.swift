@@ -164,6 +164,7 @@ final class GestureEngine {
 
         if frame.count < 3 {
             TouchTracker.glideClickFingerCount = 0
+            TouchTracker.glideGestureDecision = .undecided
             finishIfNeeded()
             updateObservableState()
             return
@@ -318,7 +319,7 @@ final class GestureEngine {
         if case .switchingApps = phase { return }
         // Don't clear the reciprocal token while idle — mouse movement between
         // two gestures is normal and would otherwise kill a pending reciprocal.
-        // The token already has a TTL (1.5s) so it expires on its own.
+        // The token already has a TTL (3s) so it expires on its own.
         if case .idle = phase { return }
         clearReciprocalToken()
     }
@@ -462,7 +463,7 @@ final class GestureEngine {
         let inverse = rule.reciprocalAction ?? rule.action.inverseAction ?? .doNothing
         return ReciprocalToken(inverseAction: inverse,
                                fingers: rule.fingers, direction: rev, sourceRuleID: rule.id,
-                               expiresAt: ProcessInfo.processInfo.systemUptime + 1.5)
+                               expiresAt: ProcessInfo.processInfo.systemUptime + 3.0)
     }
 
     func clearReciprocalToken() { reciprocalToken = nil; isReciprocalActive = false }

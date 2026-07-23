@@ -1,6 +1,15 @@
 import Foundation
 import ApplicationServices
 
+/// Per-gesture verdict for the suppression tap. Starts `undecided` (events pass
+/// through so native recognition isn't starved). The moment the processor
+/// resolves a swipe direction it becomes `block` (a Glide rule covers it — the
+/// system saw only a sub-threshold prefix) or `pass` (no rule — the native
+/// gesture keeps the full event stream). Reset when fingers drop below 3.
+enum GestureSuppressionDecision: Int32 {
+    case undecided = 0, block = 1, pass = 2
+}
+
 enum TouchTracker {
     // ─────────────────────────────────────────────
     // MARK: - Global MT state
@@ -24,6 +33,7 @@ enum TouchTracker {
     fileprivate static var _oldestFingerAge: Double = 0
     fileprivate static var _newestFingerAge: Double = 0
     fileprivate static var _lastFingerLiftTime: TimeInterval = 0
+    fileprivate static var _gestureDecision: Int32 = 0
 
     static func updateDeviceFingerCount(device: UnsafeMutableRawPointer, count: Int) {
         stateLock.lock()
@@ -86,6 +96,11 @@ enum TouchTracker {
         set { stateLock.lock(); defer { stateLock.unlock() }; _activeTouches = newValue }
     }
 
+    static var glideGestureDecision: GestureSuppressionDecision {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return GestureSuppressionDecision(rawValue: _gestureDecision) ?? .undecided }
+        set { stateLock.lock(); defer { stateLock.unlock() }; _gestureDecision = newValue.rawValue }
+    }
+
     static var glideClickFingerCount: Int32 {
         get { stateLock.lock(); defer { stateLock.unlock() }; return _clickFingerCount }
         set { stateLock.lock(); defer { stateLock.unlock() }; _clickFingerCount = newValue }
@@ -104,6 +119,7 @@ enum TouchTracker {
         _oldestFingerAge = 0
         _newestFingerAge = 0
         _lastFingerLiftTime = 0
+        _gestureDecision = 0
     }
 }
 let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
@@ -144,6 +160,7 @@ let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
             TouchTracker._fingerFirstSeen.removeAll(keepingCapacity: true)
             TouchTracker._oldestFingerAge = 0
             TouchTracker._newestFingerAge = 0
+            TouchTracker._gestureDecision = 0
         }
         TouchTracker.stateLock.unlock()
         if hadTouches {
