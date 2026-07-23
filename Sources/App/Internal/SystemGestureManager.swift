@@ -97,11 +97,11 @@ enum SystemGestureManager {
     }
 
     /// Native gestures that are enabled in System Settings but whose events the
-    /// suppression tap swallows because a Glide gesture claims the same trigger.
-    /// Mirrors the tap's actual blocking rules: swipes block per axis once the
-    /// direction resolves, pinches block per finger count (thumb counts as a
-    /// finger, so a "4-finger" native pinch is 4 contacts). Native taps are
-    /// never blocked, so 3-finger tap isn't listed.
+    /// suppression tap swallows. Mirrors the tap's actual blocking: per finger
+    /// count AND per axis — a count's unconfigured axis stays native. Pinches
+    /// block per finger count via their own set (thumb counts as a finger, so
+    /// a "4-finger" native pinch is 4 contacts). Native taps are never
+    /// blocked, so 3-finger tap isn't listed.
     static func overriddenGestures(rules: [GestureRule], appSwitcher: AppSwitcherSettings) -> [GestureOverride] {
         var triggers: [String: [String]] = [:]   // native key → glide gesture names
 
@@ -110,7 +110,9 @@ enum SystemGestureManager {
         }
 
         if appSwitcher.enabled {
-            add(threeFingerHoriz, "App Switcher (3-finger swipe)")
+            let label = "App Switcher (\(appSwitcher.fingers)-finger swipe)"
+            if appSwitcher.fingers == 3 { add(threeFingerHoriz, label) }
+            if appSwitcher.fingers == 4 { add(fourFingerHoriz, label) }
         }
         for rule in rules where rule.isActive && !rule.isKeyboardBinding {
             let label = rule.displayName

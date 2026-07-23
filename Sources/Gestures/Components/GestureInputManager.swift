@@ -66,7 +66,11 @@ final class GestureInputManager {
                     }
                     return Unmanaged.passUnretained(cgEvent)
                 }
-                if TouchTracker.glideActiveTouches >= 3 {
+                // Latched count: the max seen this touch session, reset only when
+                // every finger lifts — a momentary contact dropout can't flip
+                // suppression off mid-gesture.
+                let latched = Int(TouchTracker.glideGestureFingerCount)
+                if latched >= 3 {
                     let im = GestureEngine.shared.inputManager!
                     let isScroll = type.rawValue == CGEventType.scrollWheel.rawValue
                     let isSystemGesture = [18, 19, 20, 29, 30, 31, 32].contains(type.rawValue)
@@ -78,26 +82,36 @@ final class GestureInputManager {
                         im.handleDeepPress(stage: ns.stage)
                     }
 
-                    // Per-gesture suppression: events pass through until the processor
-                    // classifies the swipe direction. If a Glide rule covers that
-                    // direction the rest of the gesture is swallowed (the system only
-                    // saw a sub-threshold prefix, so Mission Control / Exposé won't
-                    // commit). If not, the native gesture keeps the full stream —
-                    // e.g. an unconfigured 4-finger left/right still switches desktops.
-                    switch TouchTracker.glideGestureDecision {
-                    case .undecided, .pass:
-                        return Unmanaged.passUnretained(cgEvent)
-                    case .block:
-                        // Magnify events drive native pinch (Launchpad / Show
-                        // Desktop). Swallow them only when a Glide pinch rule
-                        // exists at this finger count; otherwise they pass even
-                        // while swipes are blocked.
-                        let isMagnify = type.rawValue == 30 || type.rawValue == 32
-                        if isMagnify && !TouchTracker.glidePinchRuleActive {
-                            return Unmanaged.passUnretained(cgEvent)
+                    // Per-count, per-axis suppression. Blocked counts per axis are
+                    // precomputed from the rules; the session's axis comes from the
+                    // raw MT stream (classified on the MT thread — no race).
+                    // • Magnify events → blocked only when a pinch rule claims
+                    //   this count (native Launchpad / Show Desktop otherwise).
+                    // • Both axes claimed → block everything from event #1 (no
+                    //   prefix leak; keeps Dock UI like the switcher HUD alive).
+                    // • One axis claimed → wait for the MT axis (locks after
+                    //   ~0.8% trackpad movement, far below any native commit
+                    //   point) and block only if the moved axis is claimed. The
+                    //   unconfigured axis reaches the system untouched.
+                    let horizB = TouchTracker.isHorizBlocked(count: latched)
+                    let vertB = TouchTracker.isVertBlocked(count: latched)
+                    if type.rawValue == 30 || type.rawValue == 32 {
+                        return TouchTracker.isPinchBlocked(count: latched) ? nil : Unmanaged.passUnretained(cgEvent)
+                    }
+                    let blocked: Bool
+                    if horizB && vertB {
+                        blocked = true
+                    } else {
+                        switch TouchTracker.glideGestureAxis {
+                        case .horizontal: blocked = horizB
+                        case .vertical:   blocked = vertB
+                        case .pinch, .none: blocked = false
                         }
+                    }
+                    if blocked {
                         if isScroll || isSystemGesture { return nil }
-                        // In the zoom tap window, still pass gesture-class events so the double-tap is recognized.
+                        // In the zoom tap window, still pass gesture-class events
+                        // so the double-tap is recognized.
                         return im.tapWindowActive ? Unmanaged.passUnretained(cgEvent) : nil
                     }
                 }

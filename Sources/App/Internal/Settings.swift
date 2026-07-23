@@ -575,7 +575,7 @@ struct AppSwitcherSettings: Codable, Equatable {
 
     static func normalized(_ s: AppSwitcherSettings) -> AppSwitcherSettings {
         var n = s
-        n.fingers = 3
+        n.fingers = max(3, min(n.fingers, 5))
         return n
     }
 }
@@ -668,12 +668,20 @@ final class Settings {
 
     var rules: [GestureRule] {
         get { _rules }
-        set { _rules = Self.normalizeRules(newValue, appSwitcher: _appSwitcher); GlideConfigStore.shared.scheduleSave() }
+        set {
+            _rules = Self.normalizeRules(newValue, appSwitcher: _appSwitcher)
+            GlideConfigStore.shared.scheduleSave()
+            GestureRuleResolver.recomputeSuppressedCounts()
+        }
     }
 
     var appSwitcher: AppSwitcherSettings {
         get { _appSwitcher }
-        set { _appSwitcher = AppSwitcherSettings.normalized(newValue); GlideConfigStore.shared.scheduleSave() }
+        set {
+            _appSwitcher = AppSwitcherSettings.normalized(newValue)
+            GlideConfigStore.shared.scheduleSave()
+            GestureRuleResolver.recomputeSuppressedCounts()
+        }
     }
 
     var tuning: GestureTuning {
@@ -737,6 +745,10 @@ final class Settings {
         )
         _debugLogging    = config.preferences.debugLogging
         _launchAtLogin   = config.preferences.launchAtLogin
+        // apply() bypasses the rules/appSwitcher setters, so republish the
+        // tap's suppression sets — otherwise it keeps blocking based on the
+        // defaults that existed before the config loaded.
+        GestureRuleResolver.recomputeSuppressedCounts()
     }
 
     // MARK: App Switcher ↔ gesture rules

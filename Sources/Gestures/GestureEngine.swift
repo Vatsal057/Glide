@@ -75,6 +75,7 @@ final class GestureEngine {
         guard !isRunning else { return }
 
         TouchTracker.resetGlobalMTState()
+        GestureRuleResolver.recomputeSuppressedCounts()
         phase = .idle
         reciprocalToken = nil
         lastFiredSwipe = nil
@@ -152,10 +153,9 @@ final class GestureEngine {
         // (tapWindowActive) so the zoom double-tap is still recognized — while
         // scroll stays suppressed, so a swipe can't scrub video at gesture onset.
         inputManager.tapWindowActive = couldBeTap
-        inputManager.setSuppressionActive(frame.count >= 3 && !isSystemZoomSession)
-        if frame.count >= 3, Int(frame.count) != currentFingerCount {
-            TouchTracker.glidePinchRuleActive = GestureRuleResolver.hasPinchRule(fingers: Int(frame.count))
-        }
+        // Keyed to the latched count so a momentary finger dip mid-gesture
+        // can't disable the tap and leak events.
+        inputManager.setSuppressionActive(TouchTracker.glideGestureFingerCount >= 3 && !isSystemZoomSession)
         currentFingerCount = Int(frame.count)
 
         // Tap & Hold: (re)arm whenever the resting finger count changes, cancel on lift.
@@ -167,7 +167,6 @@ final class GestureEngine {
 
         if frame.count < 3 {
             TouchTracker.glideClickFingerCount = 0
-            TouchTracker.glideGestureDecision = .undecided
             finishIfNeeded()
             updateObservableState()
             return

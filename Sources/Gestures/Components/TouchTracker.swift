@@ -1,15 +1,6 @@
 import Foundation
 import ApplicationServices
 
-/// Per-gesture verdict for the suppression tap. Starts `undecided` (events pass
-/// through so native recognition isn't starved). The moment the processor
-/// resolves a swipe direction it becomes `block` (a Glide rule covers it — the
-/// system saw only a sub-threshold prefix) or `pass` (no rule — the native
-/// gesture keeps the full event stream). Reset when fingers drop below 3.
-enum GestureSuppressionDecision: Int32 {
-    case undecided = 0, block = 1, pass = 2
-}
-
 enum TouchTracker {
     // ─────────────────────────────────────────────
     // MARK: - Global MT state
@@ -33,8 +24,15 @@ enum TouchTracker {
     fileprivate static var _oldestFingerAge: Double = 0
     fileprivate static var _newestFingerAge: Double = 0
     fileprivate static var _lastFingerLiftTime: TimeInterval = 0
-    fileprivate static var _gestureDecision: Int32 = 0
-    fileprivate static var _pinchRuleActive: Bool = false
+    fileprivate static var _latchedGestureCount: Int32 = 0
+    fileprivate static var _horizBlockedCounts: Set<Int> = []
+    fileprivate static var _vertBlockedCounts: Set<Int> = []
+    fileprivate static var _pinchBlockedCounts: Set<Int> = []
+    fileprivate static var _gestureAxis: Int32 = 0          // GestureAxis raw
+    fileprivate static var _axisStartValid = false
+    fileprivate static var _axisStartCx: Float = 0
+    fileprivate static var _axisStartCy: Float = 0
+    fileprivate static var _axisStartSpread: Float = 0
 
     static func updateDeviceFingerCount(device: UnsafeMutableRawPointer, count: Int) {
         stateLock.lock()
@@ -97,18 +95,69 @@ enum TouchTracker {
         set { stateLock.lock(); defer { stateLock.unlock() }; _activeTouches = newValue }
     }
 
-    /// True while the current finger count has a configured Glide pinch rule.
-    /// Read by the suppression tap: magnify events are only swallowed when a
-    /// pinch rule could consume them — otherwise native pinch/spread
-    /// (Launchpad, Show Desktop) keeps its full event stream even mid-block.
-    static var glidePinchRuleActive: Bool {
-        get { stateLock.lock(); defer { stateLock.unlock() }; return _pinchRuleActive }
-        set { stateLock.lock(); defer { stateLock.unlock() }; _pinchRuleActive = newValue }
+    /// Finger count latched for the whole touch session: once 3+ contacts are
+    /// down it holds the MAXIMUM seen and only resets when every finger lifts.
+    /// A momentary contact dropout (thumb re-registering, finger dip to 2) can
+    /// therefore never flip suppression off mid-gesture.
+    static var glideGestureFingerCount: Int32 {
+        stateLock.lock(); defer { stateLock.unlock() }; return _latchedGestureCount
     }
 
-    static var glideGestureDecision: GestureSuppressionDecision {
-        get { stateLock.lock(); defer { stateLock.unlock() }; return GestureSuppressionDecision(rawValue: _gestureDecision) ?? .undecided }
-        set { stateLock.lock(); defer { stateLock.unlock() }; _gestureDecision = newValue.rawValue }
+    /// Finger counts whose events the suppression tap swallows, split by what
+    /// Glide actually claims: horizontal swipes (rules or app switcher),
+    /// vertical swipes, and pinches (magnify events). Precomputed on the main
+    /// thread whenever rules change — the tap thread only ever does a set
+    /// lookup, so blocking is race-free from event #1 and an unconfigured
+    /// axis/pinch reaches the system untouched.
+    static func setSuppressedCounts(horiz: Set<Int>, vert: Set<Int>, pinch: Set<Int>) {
+        stateLock.lock(); defer { stateLock.unlock() }
+        _horizBlockedCounts = horiz
+        _vertBlockedCounts = vert
+        _pinchBlockedCounts = pinch
+    }
+
+    static func isHorizBlocked(count: Int) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }; return _horizBlockedCounts.contains(count)
+    }
+
+    static func isVertBlocked(count: Int) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }; return _vertBlockedCounts.contains(count)
+    }
+
+    static func isPinchBlocked(count: Int) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }; return _pinchBlockedCounts.contains(count)
+    }
+
+    /// Dominant motion of the current touch session, classified straight from
+    /// the raw MT stream on its own thread (no main-thread hop, so the tap
+    /// never races it). Latched once per session; reset when all fingers lift.
+    enum GestureAxis: Int32 { case none = 0, horizontal = 1, vertical = 2, pinch = 3 }
+
+    static var glideGestureAxis: GestureAxis {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return GestureAxis(rawValue: _gestureAxis) ?? .none
+    }
+
+    /// Movement needed before the session's axis locks. Well below Glide's own
+    /// swipe threshold and far below any native gesture's commit point.
+    private static let axisLockDistance: Float = 0.008
+
+    static func updateGestureAxis(cx: Float, cy: Float, spread: Float) {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard _axisStartValid else {
+            _axisStartValid = true
+            _axisStartCx = cx; _axisStartCy = cy; _axisStartSpread = spread
+            return
+        }
+        guard _gestureAxis == GestureAxis.none.rawValue else { return }
+        let dx = abs(cx - _axisStartCx)
+        let dy = abs(cy - _axisStartCy)
+        let ds = abs(spread - _axisStartSpread)
+        if ds >= axisLockDistance, ds > max(dx, dy) * 0.8 {
+            _gestureAxis = GestureAxis.pinch.rawValue
+        } else if max(dx, dy) >= axisLockDistance {
+            _gestureAxis = (dx > dy ? GestureAxis.horizontal : GestureAxis.vertical).rawValue
+        }
     }
 
     static var glideClickFingerCount: Int32 {
@@ -129,7 +178,9 @@ enum TouchTracker {
         _oldestFingerAge = 0
         _newestFingerAge = 0
         _lastFingerLiftTime = 0
-        _gestureDecision = 0
+        _latchedGestureCount = 0
+        _gestureAxis = 0
+        _axisStartValid = false
     }
 }
 let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
@@ -170,7 +221,9 @@ let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
             TouchTracker._fingerFirstSeen.removeAll(keepingCapacity: true)
             TouchTracker._oldestFingerAge = 0
             TouchTracker._newestFingerAge = 0
-            TouchTracker._gestureDecision = 0
+            TouchTracker._latchedGestureCount = 0
+            TouchTracker._gestureAxis = 0
+            TouchTracker._axisStartValid = false
         }
         TouchTracker.stateLock.unlock()
         if hadTouches {
@@ -204,6 +257,9 @@ let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
     TouchTracker._activeTouches = activeCount
     if activeCount < prevActiveTouches {
         TouchTracker._lastFingerLiftTime = nowTs
+    }
+    if activeCount >= 3, activeCount > TouchTracker._latchedGestureCount {
+        TouchTracker._latchedGestureCount = activeCount
     }
 
     let skipDispatch = activeCount < 3 && activeCount == TouchTracker._lastDispatchedCount
@@ -254,6 +310,10 @@ let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
         if meanOfMags > 0.001 {
             coherence = meanMag / meanOfMags
         }
+    }
+
+    if activeCount >= 3 {
+        TouchTracker.updateGestureAxis(cx: cx, cy: cy, spread: spread)
     }
 
     let frameData = TouchFrameData(count: activeCount, cx: cx, cy: cy, spread: spread, coherence: coherence)

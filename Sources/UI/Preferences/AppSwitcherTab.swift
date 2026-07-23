@@ -16,7 +16,16 @@ struct AppSwitcherTab: View {
                             .padding(.top, 8)
 
                         if store.appSwitcher.enabled {
-                            Text("3-finger swipe left → previous app · 3-finger swipe right → next app. Hold Shift (or another modifier) while swiping to run a different gesture instead — configure those under Gestures.")
+                            Picker("Fingers", selection: switcherBinding(\.fingers)) {
+                                Text("3 Fingers").tag(3)
+                                Text("4 Fingers").tag(4)
+                                Text("5 Fingers").tag(5)
+                            }
+                            .pickerStyle(.segmented)
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 4)
+
+                            Text("\(store.appSwitcher.fingers)-finger swipe left → previous app · \(store.appSwitcher.fingers)-finger swipe right → next app. Hold Shift (or another modifier) while swiping to run a different gesture instead — configure those under Gestures.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 12)
@@ -74,7 +83,7 @@ struct AppSwitcherTab: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("App Switcher")
                     .font(.title2.bold())
-                Text("Hold a three-finger horizontal swipe to browse open apps in the macOS switcher, then release to confirm. Swipe up and down with three fingers can still be assigned under Gestures.")
+                Text("Hold a horizontal swipe with the configured number of fingers to browse open apps in the macOS switcher, then release to confirm. Swipe up and down with the same number of fingers can still be assigned under Gestures.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

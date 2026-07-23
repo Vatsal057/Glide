@@ -14,7 +14,6 @@ final class GestureProcessor {
         switch phase {
         case .idle:
             guard GestureRuleResolver.hasAnySwipeRule(fingers: n) else { return nil }
-            preBlockIfFullyCovered(fingers: n)
             if tuning.edgeMarginEnabled {
                 let m = tuning.edgeMargin
                 if frame.cx < m.left || frame.cx > (1.0 - m.right) || frame.cy < m.bottom || frame.cy > (1.0 - m.top) { return nil }
@@ -33,7 +32,6 @@ final class GestureProcessor {
         case .candidate(var data):
             if n > data.fingers {
                 guard GestureRuleResolver.hasAnySwipeRule(fingers: n) else { return .ignored }
-                preBlockIfFullyCovered(fingers: n)
                 return .candidate(CandidateData(
                     startX: frame.cx, startY: frame.cy,
                     fingers: n, startTime: now,
@@ -135,17 +133,15 @@ final class GestureProcessor {
     }
 
     /// Pinch-shaped input. With no Glide pinch rule at this finger count the
-    /// gesture is handed to the system whole (decision → pass; magnify events
-    /// were never swallowed thanks to glidePinchRuleActive). With a rule, track
+    /// gesture belongs to the system (its magnify events were never swallowed —
+    /// the tap's pinch set doesn't contain this count). With a rule, track
     /// spread until it crosses the pinch threshold, then fire pinch-in/out.
     private func pinchPhase(_ d: CandidateData, frame: TouchFrameData, tuning: GestureTuning, now: TimeInterval) -> GesturePhase {
         var data = d
         data.gestureKind = .pinch
         guard GestureRuleResolver.hasPinchRule(fingers: data.fingers) else {
-            TouchTracker.glideGestureDecision = .pass
             return .ignored
         }
-        TouchTracker.glideGestureDecision = .block
         let delta = frame.spread - data.initialSpread
         guard abs(delta) >= tuning.pinchSpreadThreshold else { return .candidate(data) }
         let direction: GestureDirection = delta > 0 ? .pinchOut : .pinchIn
@@ -160,16 +156,6 @@ final class GestureProcessor {
         // Pinch rule exists at this count but not for this in/out direction —
         // keep tracking in case the pinch reverses before the fingers lift.
         return .candidate(data)
-    }
-
-    /// When Glide claims every direction at this finger count, block from the
-    /// first event instead of waiting for direction classification — the native
-    /// system could never legitimately receive this gesture anyway.
-    private func preBlockIfFullyCovered(fingers: Int) {
-        if TouchTracker.glideGestureDecision == .undecided,
-           GestureRuleResolver.coversAllSwipeDirections(fingers: fingers) {
-            TouchTracker.glideGestureDecision = .block
-        }
     }
 
     private func processSwipeFrame(_ frame: TouchFrameData, data: SwipeTrackData, tuning: GestureTuning) -> GesturePhase {
@@ -211,21 +197,10 @@ final class GestureProcessor {
         guard let direction = GestureDirection.fromAngle(angle360, tolerance: tuning.swipeAngleTolerance) else { return .lockedSwipe(updated) }
 
         if engine?.consumeReciprocalToken(fingers: data.fingers, direction: direction, now: now) == true {
-            TouchTracker.glideGestureDecision = .block
             return .fired
         }
 
         let candidateRules = GestureRuleResolver.matchingRules(fingers: data.fingers, direction: direction, modifiers: updated.modifiersAtStart)
-
-        // Direction is now known — decide, once per touch session, whether the
-        // suppression tap should swallow this gesture's events. Block only when
-        // Glide itself will act on this direction; otherwise leave the native
-        // system gesture (desktop switch, Mission Control, …) fully intact.
-        if TouchTracker.glideGestureDecision == .undecided {
-            let glideHandles = !candidateRules.isEmpty
-                || GestureRuleResolver.appSwitcherAction(fingers: data.fingers, direction: direction, modifiers: updated.modifiersAtStart) != nil
-            TouchTracker.glideGestureDecision = glideHandles ? .block : .pass
-        }
         if updated.lockedSpeed == nil {
             let configuredSpeeds = Set(candidateRules.map { $0.speed == .any ? GestureSpeed.normal : $0.speed })
             let elapsed = max(now - (updated.movementStartTime ?? updated.startTime), 0.001)
