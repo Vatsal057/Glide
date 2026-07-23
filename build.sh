@@ -134,10 +134,18 @@ BINARIES=()
 
 for arch in "${ARCHS[@]}"; do
     out="$BUILD_DIR/$APP_NAME-$arch"
+    
+    c_out="$BUILD_DIR/GlideMultitouchBridge-$arch.o"
+    clang -O3 -target "$arch-apple-macosx13.0" -isysroot "$SDK_PATH" -c "$SCRIPT_DIR/Sources/Gestures/Components/GlideMultitouchBridge.c" -o "$c_out"
+
+    c2_out="$BUILD_DIR/GlideWindowServerBridge-$arch.o"
+    clang -O3 -target "$arch-apple-macosx13.0" -isysroot "$SDK_PATH" -c "$SCRIPT_DIR/Sources/Actions/Components/GlideWindowServerBridge.c" -o "$c2_out"
+
     if swiftc \
         -O \
         -target "$arch-apple-macosx13.0" \
         -sdk "$SDK_PATH" \
+        -import-objc-header "$SCRIPT_DIR/Sources/App/Internal/Glide-Bridging-Header.h" \
         -framework Cocoa \
         -framework SwiftUI \
         -framework IOKit \
@@ -145,6 +153,8 @@ for arch in "${ARCHS[@]}"; do
         -framework UniformTypeIdentifiers \
         -o "$out" \
         "${SOURCES[@]}" \
+        "$c_out" \
+        "$c2_out" \
         2>&1; then
         BINARIES+=("$out")
     elif [[ "$arch" == "$(uname -m)" ]]; then

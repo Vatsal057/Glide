@@ -3,6 +3,9 @@ import CoreGraphics
 import Darwin
 import IOKit.pwr_mgt
 
+@_silgen_name("_AXUIElementGetWindow")
+func _AXUIElementGetWindow(_ element: AXUIElement, _ idOut: inout UInt32) -> AXError
+
 // ─────────────────────────────────────────────
 // MARK: - ActionExecutor
 // ─────────────────────────────────────────────
@@ -422,7 +425,31 @@ final class WindowTargeting {
         let next = forward
             ? apps[(idx + 1) % apps.count]
             : apps[(idx + apps.count - 1) % apps.count]
-        next.activate(options: .activateIgnoringOtherApps)
+            
+        if let window = windows(for: next.processIdentifier).first {
+            focus(window: window)
+        } else {
+            next.activate(options: .activateIgnoringOtherApps)
+        }
+    }
+
+    func focus(window: AXUIElement) {
+        var pid: pid_t = 0
+        AXUIElementGetPid(window, &pid)
+        guard pid > 0 else { return }
+
+        var windowID: UInt32 = 0
+        if _AXUIElementGetWindow(window, &windowID) == .success && windowID > 0 {
+            if GLDWFocusWindow(pid, windowID) {
+                return
+            }
+        }
+        
+        // Fallback if C-bridge fails or private API is unavailable
+        if let app = NSRunningApplication(processIdentifier: pid) {
+            app.activate(options: .activateIgnoringOtherApps)
+            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        }
     }
 
     // MARK: - AX helpers

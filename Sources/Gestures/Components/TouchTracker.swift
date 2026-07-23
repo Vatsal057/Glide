@@ -106,37 +106,33 @@ enum TouchTracker {
         _lastFingerLiftTime = 0
     }
 }
-let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
-    // Runs up to 120×/s per device — single pass, one array, capacity reserved
-    // up front so steady-state frames make no heap allocations.
-    var activeTouches: [MTTouch] = []
-    if let data, count > 0 {
+let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
+    var activeTouches: [GLDTouchPoint] = []
+    if let points = points, count > 0 {
         let n = Int(count)
         activeTouches.reserveCapacity(n)
-        let raw = data.assumingMemoryBound(to: MTTouch.self)
         let tuning = Settings.shared.tuning
         let edge = tuning.edgeMarginEnabled
         let m = tuning.edgeMargin
 
         for i in 0..<n {
-            let t = raw[i]
+            let t = points[i]
             guard t.state >= 3 && t.state <= 4 else { continue }
             if edge {
-                let x = t.normalizedPosition.x; let y = t.normalizedPosition.y
-                if x < m.left || x > 1.0 - m.right || y < m.bottom || y > 1.0 - m.top { continue }
+                if t.x < m.left || t.x > 1.0 - m.right || t.y < m.bottom || t.y > 1.0 - m.top { continue }
             }
             activeTouches.append(t)
         }
     }
 
-    if let dev = device {
-        TouchTracker.updateDeviceFingerCount(device: dev, count: activeTouches.count)
-    }
+    // Since the C-bridge abstracts devices and only opens the default one,
+    // we use a dummy pointer to track its finger count.
+    let dummyDevice = UnsafeMutableRawPointer(bitPattern: 1)!
+    TouchTracker.updateDeviceFingerCount(device: dummyDevice, count: activeTouches.count)
 
     let activeCount = Int32(activeTouches.count)
     let nowTs = ProcessInfo.processInfo.systemUptime
 
-    // One lock acquisition per frame — all shared bookkeeping happens inside.
     TouchTracker.stateLock.lock()
     TouchTracker._lastMTTimestamp = nowTs
 
@@ -156,7 +152,7 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
                 GestureEngine.shared.onTouches(TouchFrameData(count: 0, cx: 0, cy: 0, spread: 0, coherence: 1))
             }
         }
-        return 0
+        return
     }
 
     let n = Int(activeCount)
@@ -167,7 +163,6 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
         }
     }
     if TouchTracker._fingerFirstSeen.count != activeTouches.count {
-        // ≤11 touches — linear scan beats building a Set every frame.
         for key in TouchTracker._fingerFirstSeen.keys where !activeTouches.contains(where: { $0.identifier == key }) {
             TouchTracker._fingerFirstSeen.removeValue(forKey: key)
         }
@@ -190,10 +185,10 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
     }
     TouchTracker.stateLock.unlock()
 
-    if skipDispatch { return 0 }
+    if skipDispatch { return }
 
     var sumX: Float = 0, sumY: Float = 0
-    for i in 0..<n { sumX += activeTouches[i].normalizedPosition.x; sumY += activeTouches[i].normalizedPosition.y }
+    for i in 0..<n { sumX += activeTouches[i].x; sumY += activeTouches[i].y }
     let cx = sumX / Float(n)
     let cy = sumY / Float(n)
 
@@ -201,8 +196,8 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
     if n >= 3 {
         var s: Float = 0
         for i in 0..<n {
-            let dx = activeTouches[i].normalizedPosition.x - cx
-            let dy = activeTouches[i].normalizedPosition.y - cy
+            let dx = activeTouches[i].x - cx
+            let dy = activeTouches[i].y - cy
             s += (dx * dx + dy * dy).squareRoot()
         }
         spread = s / Float(n)
@@ -214,8 +209,8 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
         var sumVx: Float = 0
         var sumVy: Float = 0
         for i in 0..<n {
-            sumVx += activeTouches[i].velocity.x
-            sumVy += activeTouches[i].velocity.y
+            sumVx += activeTouches[i].vx
+            sumVy += activeTouches[i].vy
         }
         let meanVx = sumVx / countFloat
         let meanVy = sumVy / countFloat
@@ -223,8 +218,8 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
 
         var sumMag: Float = 0
         for i in 0..<n {
-            let vx = activeTouches[i].velocity.x
-            let vy = activeTouches[i].velocity.y
+            let vx = activeTouches[i].vx
+            let vy = activeTouches[i].vy
             sumMag += (vx * vx + vy * vy).squareRoot()
         }
         let meanOfMags = sumMag / countFloat
@@ -236,5 +231,4 @@ let glideMTCallback: MTContactCallback = { device, data, count, _, _ in
 
     let frameData = TouchFrameData(count: activeCount, cx: cx, cy: cy, spread: spread, coherence: coherence)
     DispatchQueue.main.async { GestureEngine.shared.onTouches(frameData) }
-    return 0
 }
