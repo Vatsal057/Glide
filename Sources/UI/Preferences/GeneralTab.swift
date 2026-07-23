@@ -124,45 +124,94 @@ struct GeneralTab: View {
         }
     }
 
-    // MARK: - Overridden System Gestures
+    // MARK: - Native Gesture Conflicts
 
     private var nativeGesturesCard: some View {
-        GroupBox(label: Label("Overridden System Gestures", systemImage: "hand.raised.slash")) {
+        GroupBox(label: Label("macOS Gesture Conflicts", systemImage: "exclamationmark.arrow.triangle.2.circlepath")) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Glide blocks a macOS gesture only while one of your Glide gestures claims the same trigger. Everything else reaches the system untouched — nothing is changed in System Settings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(12)
+                SettingsRow(label: "Auto-Disable") {
+                    Toggle("Turn off macOS gestures that collide with Glide gestures",
+                           isOn: Binding(get: { store.autoDisableNativeGestures },
+                                         set: store.updateAutoDisableNativeGestures))
+                }
 
-                if store.nativeOverrides.isEmpty {
+                if store.nativeConflicts.isEmpty {
                     Divider().padding(.leading, 12)
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
-                        Text("No overrides — no active macOS gesture shares a trigger with your Glide gestures.")
+                        Text("No conflicts — no active macOS gesture shares a trigger with your Glide gestures.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
                     .padding(12)
                 } else {
-                    ForEach(store.nativeOverrides) { override in
+                    ForEach(store.nativeConflicts) { conflict in
                         Divider().padding(.leading, 12)
                         HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "hand.raised.fill")
-                                .foregroundStyle(.secondary)
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
                                 .padding(.top, 2)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(override.native.title)
+                                Text(conflict.native.title)
                                     .font(.callout.weight(.medium))
-                                Text("Overridden by: \(override.glideTriggers.joined(separator: ", "))")
+                                Text("Collides with: \(conflict.glideTriggers.joined(separator: ", "))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
+                                if !conflict.native.appliesWithoutLogout {
+                                    Text("May need a log out & back in to fully take effect.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
                             }
                             Spacer()
+                            Button("Disable") { store.disableNativeConflict(conflict) }
+                                .help("Turns the native macOS gesture off (restarts the Dock)")
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
+                    }
+
+                    if store.nativeConflicts.count > 1 {
+                        Divider().padding(.leading, 12)
+                        HStack {
+                            Spacer()
+                            Button("Disable All Native Conflicts") { store.disableAllNativeConflicts() }
+                        }
+                        .padding(12)
+                    }
+                }
+
+                // ── Re-enable anything Glide turned off ──
+                if !store.disabledNativeGestures.isEmpty {
+                    Divider().padding(.leading, 12)
+                    HStack {
+                        Text("Disabled by Glide")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if store.disabledNativeGestures.count > 1 {
+                            Button("Re-enable All") { store.reEnableAllNativeGestures() }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+
+                    ForEach(store.disabledNativeGestures) { gesture in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "slash.circle")
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 2)
+                            Text(gesture.title)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Re-enable") { store.reEnableNativeGesture(gesture) }
+                                .help("Restores the native macOS gesture to how it was before Glide disabled it")
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
                     }
                 }
             }

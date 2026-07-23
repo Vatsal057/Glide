@@ -283,7 +283,7 @@ struct RuleEditor: View {
 
     private var reservedBanner: String? {
         guard store.appSwitcher.enabled else { return nil }
-        return "Plain \(store.appSwitcher.fingers)-finger swipes left/right are reserved for App Switcher. Use a modifier key (e.g. Shift) here to assign a different action on the same swipe."
+        return "Plain 3-finger swipes left/right are reserved for App Switcher. Use a modifier key (e.g. Shift) here to assign a different action on the same swipe."
     }
 
     var body: some View {

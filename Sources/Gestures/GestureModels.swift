@@ -114,8 +114,6 @@ extension GestureDirection {
             return self == .swipeLeft || self == .swipeRight
         case .swipeUp, .swipeDown, .swipeUpDown:
             return self == .swipeUp || self == .swipeDown
-        case .pinchIn, .pinchOut:
-            return self == .pinchIn || self == .pinchOut
         case .click, .forceClick, .tapHold:
             return false
         }

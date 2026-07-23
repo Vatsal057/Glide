@@ -75,7 +75,6 @@ final class GestureEngine {
         guard !isRunning else { return }
 
         TouchTracker.resetGlobalMTState()
-        GestureRuleResolver.recomputeSuppressedCounts()
         phase = .idle
         reciprocalToken = nil
         lastFiredSwipe = nil
@@ -153,9 +152,7 @@ final class GestureEngine {
         // (tapWindowActive) so the zoom double-tap is still recognized — while
         // scroll stays suppressed, so a swipe can't scrub video at gesture onset.
         inputManager.tapWindowActive = couldBeTap
-        // Keyed to the latched count so a momentary finger dip mid-gesture
-        // can't disable the tap and leak events.
-        inputManager.setSuppressionActive(TouchTracker.glideGestureFingerCount >= 3 && !isSystemZoomSession)
+        inputManager.setSuppressionActive(frame.count >= 3 && !isSystemZoomSession)
         currentFingerCount = Int(frame.count)
 
         // Tap & Hold: (re)arm whenever the resting finger count changes, cancel on lift.
@@ -321,7 +318,7 @@ final class GestureEngine {
         if case .switchingApps = phase { return }
         // Don't clear the reciprocal token while idle — mouse movement between
         // two gestures is normal and would otherwise kill a pending reciprocal.
-        // The token already has a TTL (3s) so it expires on its own.
+        // The token already has a TTL (1.5s) so it expires on its own.
         if case .idle = phase { return }
         clearReciprocalToken()
     }
@@ -460,13 +457,12 @@ final class GestureEngine {
         switch direction {
         case .swipeLeft: rev = .swipeRight; case .swipeRight: rev = .swipeLeft
         case .swipeUp:   rev = .swipeDown;  case .swipeDown:  rev = .swipeUp
-        case .pinchIn:   rev = .pinchOut;   case .pinchOut:   rev = .pinchIn
         default: return nil
         }
         let inverse = rule.reciprocalAction ?? rule.action.inverseAction ?? .doNothing
         return ReciprocalToken(inverseAction: inverse,
                                fingers: rule.fingers, direction: rev, sourceRuleID: rule.id,
-                               expiresAt: ProcessInfo.processInfo.systemUptime + 3.0)
+                               expiresAt: ProcessInfo.processInfo.systemUptime + 1.5)
     }
 
     func clearReciprocalToken() { reciprocalToken = nil; isReciprocalActive = false }

@@ -71,36 +71,10 @@ final class GestureRuleResolver {
         return matching.last(where: { $0.zone == .any })
     }
 
-    static func hasPinchRule(fingers: Int) -> Bool {
-        Settings.shared.rules.contains {
-            $0.isActive && !$0.isKeyboardBinding && $0.fingers == fingers && $0.direction.isPinch
-        }
-    }
-
     static func hasHoldRule(fingers: Int) -> Bool {
         Settings.shared.rules.contains {
             $0.isActive && $0.fingers == fingers && $0.direction == .tapHold
         }
-    }
-
-    /// Recomputes which finger counts the suppression tap blocks — split by
-    /// axis and pinch — and publishes them to TouchTracker. Call on the main
-    /// thread whenever rules or the app switcher change; the tap thread then
-    /// only does set lookups. An axis with no Glide gesture at a count stays
-    /// unblocked, so the matching native gesture keeps working.
-    static func recomputeSuppressedCounts() {
-        var horiz = Set<Int>(), vert = Set<Int>(), pinch = Set<Int>()
-        let s = Settings.shared
-        if s.appSwitcher.enabled { horiz.insert(s.appSwitcher.fingers) }
-        for rule in s.rules where rule.isActive && !rule.isKeyboardBinding {
-            switch rule.direction {
-            case .swipeLeft, .swipeRight, .swipeLeftRight: horiz.insert(rule.fingers)
-            case .swipeUp, .swipeDown, .swipeUpDown:       vert.insert(rule.fingers)
-            case .pinchIn, .pinchOut:                      pinch.insert(rule.fingers)
-            default: break
-            }
-        }
-        TouchTracker.setSuppressedCounts(horiz: horiz, vert: vert, pinch: pinch)
     }
 
     static func hasAnySwipeRule(fingers: Int) -> Bool {

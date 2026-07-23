@@ -14,17 +14,13 @@ enum GestureDirection: String, Codable, CaseIterable {
     case swipeRight      = "Swipe Right"
     case swipeUp         = "Swipe Up"
     case swipeDown       = "Swipe Down"
-    case pinchIn         = "Pinch In"
-    case pinchOut        = "Pinch Out"
 
     /// True for tap-style gestures (normal click, force click, tap & hold) that
     /// have no axis, speed, reciprocal or continuous behaviour.
     var isClickLike: Bool { self == .click || self == .forceClick || self == .tapHold }
 
-    var isPinch: Bool { self == .pinchIn || self == .pinchOut }
-
     /// Directions with a movement axis — the only ones with speed tiers.
-    var hasSpeed: Bool { !isClickLike && !isPinch }
+    var hasSpeed: Bool { !isClickLike }
 }
 
 enum GestureSpeed: String, Codable, CaseIterable {
@@ -575,7 +571,7 @@ struct AppSwitcherSettings: Codable, Equatable {
 
     static func normalized(_ s: AppSwitcherSettings) -> AppSwitcherSettings {
         var n = s
-        n.fingers = max(3, min(n.fingers, 5))
+        n.fingers = 3
         return n
     }
 }
@@ -663,25 +659,18 @@ final class Settings {
     private var _hapticAssignments: [HapticEvent: HapticPattern] = HapticEvent.defaultAssignments
     private var _debugLogging:    Bool                = false
     private var _launchAtLogin:   Bool                = false
+    private var _autoDisableNativeGestures: Bool      = false
 
     // MARK: Public interface
 
     var rules: [GestureRule] {
         get { _rules }
-        set {
-            _rules = Self.normalizeRules(newValue, appSwitcher: _appSwitcher)
-            GlideConfigStore.shared.scheduleSave()
-            GestureRuleResolver.recomputeSuppressedCounts()
-        }
+        set { _rules = Self.normalizeRules(newValue, appSwitcher: _appSwitcher); GlideConfigStore.shared.scheduleSave() }
     }
 
     var appSwitcher: AppSwitcherSettings {
         get { _appSwitcher }
-        set {
-            _appSwitcher = AppSwitcherSettings.normalized(newValue)
-            GlideConfigStore.shared.scheduleSave()
-            GestureRuleResolver.recomputeSuppressedCounts()
-        }
+        set { _appSwitcher = AppSwitcherSettings.normalized(newValue); GlideConfigStore.shared.scheduleSave() }
     }
 
     var tuning: GestureTuning {
@@ -722,6 +711,11 @@ final class Settings {
         set { _launchAtLogin = newValue; GlideConfigStore.shared.scheduleSave() }
     }
 
+    var autoDisableNativeGestures: Bool {
+        get { _autoDisableNativeGestures }
+        set { _autoDisableNativeGestures = newValue; GlideConfigStore.shared.scheduleSave() }
+    }
+
     func resetTuning() { tuning = GestureTuning() }
 
     // MARK: Batch load — bypasses per-field saves (called by GlideConfigStore.load)
@@ -745,10 +739,7 @@ final class Settings {
         )
         _debugLogging    = config.preferences.debugLogging
         _launchAtLogin   = config.preferences.launchAtLogin
-        // apply() bypasses the rules/appSwitcher setters, so republish the
-        // tap's suppression sets — otherwise it keeps blocking based on the
-        // defaults that existed before the config loaded.
-        GestureRuleResolver.recomputeSuppressedCounts()
+        _autoDisableNativeGestures = config.preferences.autoDisableNativeGestures
     }
 
     // MARK: App Switcher ↔ gesture rules

@@ -62,9 +62,9 @@ final class GestureProcessor {
             data.prevSpread = frame.spread
             if frame.coherence < data.minCoherence { data.minCoherence = frame.coherence }
 
-            if frameDelta > tuning.pinchFrameSpreadThreshold * 1.5 { return pinchPhase(data, frame: frame, tuning: tuning, now: now) }
+            if frameDelta > tuning.pinchFrameSpreadThreshold * 1.5 { return .ignored }
             let totalSpreadChange = abs(frame.spread - data.initialSpread)
-            if totalSpreadChange > 0.002 && totalSpreadChange > movedFromStart * 0.8 && data.frameCount >= 2 { return pinchPhase(data, frame: frame, tuning: tuning, now: now) }
+            if totalSpreadChange > 0.002 && totalSpreadChange > movedFromStart * 0.8 && data.frameCount >= 2 { return .ignored }
 
             let minFrames = max(Int(tuning.candidateFrames), 3)
             guard data.frameCount >= minFrames else { return .candidate(data) }
@@ -75,9 +75,9 @@ final class GestureProcessor {
                     data.gestureKind = totalSpreadChange > movedFromStart * 0.8 ? .pinch : .swipe
                 }
             }
-            if data.gestureKind == .pinch { return pinchPhase(data, frame: frame, tuning: tuning, now: now) }
-            if totalSpreadChange > 0.002 && totalSpreadChange > movedFromStart * 0.5 { return pinchPhase(data, frame: frame, tuning: tuning, now: now) }
-            if data.cumulativeSpreadDelta > tuning.pinchSpreadThreshold { return pinchPhase(data, frame: frame, tuning: tuning, now: now) }
+            if data.gestureKind == .pinch { return .ignored }
+            if totalSpreadChange > 0.002 && totalSpreadChange > movedFromStart * 0.5 { return .ignored }
+            if data.cumulativeSpreadDelta > tuning.pinchSpreadThreshold { return .ignored }
             if data.minCoherence < tuning.swipeCoherenceThreshold { return .ignored }
 
             if data.cumulativeSpreadDelta < tuning.pinchSpreadThreshold && movedFromStart > totalSpreadChange && data.minCoherence >= tuning.swipeCoherenceThreshold {
@@ -132,32 +132,6 @@ final class GestureProcessor {
         }
     }
 
-    /// Pinch-shaped input. With no Glide pinch rule at this finger count the
-    /// gesture belongs to the system (its magnify events were never swallowed —
-    /// the tap's pinch set doesn't contain this count). With a rule, track
-    /// spread until it crosses the pinch threshold, then fire pinch-in/out.
-    private func pinchPhase(_ d: CandidateData, frame: TouchFrameData, tuning: GestureTuning, now: TimeInterval) -> GesturePhase {
-        var data = d
-        data.gestureKind = .pinch
-        guard GestureRuleResolver.hasPinchRule(fingers: data.fingers) else {
-            return .ignored
-        }
-        let delta = frame.spread - data.initialSpread
-        guard abs(delta) >= tuning.pinchSpreadThreshold else { return .candidate(data) }
-        let direction: GestureDirection = delta > 0 ? .pinchOut : .pinchIn
-        if engine?.consumeReciprocalToken(fingers: data.fingers, direction: direction, now: now) == true {
-            return .fired
-        }
-        if let rule = GestureRuleResolver.bestRule(fingers: data.fingers, direction: direction,
-                                                   modifiers: data.modifiersAtStart) {
-            engine?.executeSwipeRule(rule, fingers: data.fingers, direction: direction)
-            return .fired
-        }
-        // Pinch rule exists at this count but not for this in/out direction —
-        // keep tracking in case the pinch reverses before the fingers lift.
-        return .candidate(data)
-    }
-
     private func processSwipeFrame(_ frame: TouchFrameData, data: SwipeTrackData, tuning: GestureTuning) -> GesturePhase {
         var updated = data
         let now = ProcessInfo.processInfo.systemUptime
@@ -196,9 +170,7 @@ final class GestureProcessor {
         let angle360 = angleDeg < 0 ? angleDeg + 360 : angleDeg
         guard let direction = GestureDirection.fromAngle(angle360, tolerance: tuning.swipeAngleTolerance) else { return .lockedSwipe(updated) }
 
-        if engine?.consumeReciprocalToken(fingers: data.fingers, direction: direction, now: now) == true {
-            return .fired
-        }
+        if engine?.consumeReciprocalToken(fingers: data.fingers, direction: direction, now: now) == true { return .fired }
 
         let candidateRules = GestureRuleResolver.matchingRules(fingers: data.fingers, direction: direction, modifiers: updated.modifiersAtStart)
         if updated.lockedSpeed == nil {

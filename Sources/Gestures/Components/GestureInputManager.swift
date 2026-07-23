@@ -9,8 +9,8 @@ final class GestureInputManager {
     private(set) var suppressionEnabled = false
 
     /// During the zoom double-tap window the tap stays active, but gesture-class
-    /// events are passed through so macOS can recognize the tap — even when the
-    /// per-gesture decision is `.block`.
+    /// events are passed through so macOS can recognize the tap. Scroll is always
+    /// swallowed at 3+ fingers regardless, so a moving swipe can't scrub video.
     var tapWindowActive = false
 
     var clickObservationTap: CFMachPort?
@@ -37,14 +37,10 @@ final class GestureInputManager {
     }
 
     func setupSuppressionTap() {
-        let gestureEventTypeValues: [UInt32] = [18, 19, 20, 29, 30, 31, 32]
-        var mask = UInt64(NSEvent.EventTypeMask.gesture.rawValue)
+        let mask = UInt64(NSEvent.EventTypeMask.gesture.rawValue)
                  | UInt64(NSEvent.EventTypeMask.pressure.rawValue)
                  | UInt64(1 << CGEventType.scrollWheel.rawValue)
                  | UInt64(1 << CGEventType.leftMouseDown.rawValue)
-        for type in gestureEventTypeValues {
-            mask |= (1 << type)
-        }
 
         suppressionTap = CGEvent.tapCreate(
             tap: .cghidEventTap,
@@ -66,54 +62,20 @@ final class GestureInputManager {
                     }
                     return Unmanaged.passUnretained(cgEvent)
                 }
-                // Latched count: the max seen this touch session, reset only when
-                // every finger lifts — a momentary contact dropout can't flip
-                // suppression off mid-gesture.
-                let latched = Int(TouchTracker.glideGestureFingerCount)
-                if latched >= 3 {
+                if TouchTracker.glideActiveTouches >= 3 {
                     let im = GestureEngine.shared.inputManager!
                     let isScroll = type.rawValue == CGEventType.scrollWheel.rawValue
-                    let isSystemGesture = [18, 19, 20, 29, 30, 31, 32].contains(type.rawValue)
-
                     // Deep-press events are gesture-class, so this tap swallows them
                     // while 3+ fingers are down — exactly when a force click can happen.
                     // The NSEvent pressure monitor would never see them; detect here first.
                     if !isScroll, let ns = NSEvent(cgEvent: cgEvent), ns.type == .pressure {
                         im.handleDeepPress(stage: ns.stage)
                     }
-
-                    // Per-count, per-axis suppression. Blocked counts per axis are
-                    // precomputed from the rules; the session's axis comes from the
-                    // raw MT stream (classified on the MT thread — no race).
-                    // • Magnify events → blocked only when a pinch rule claims
-                    //   this count (native Launchpad / Show Desktop otherwise).
-                    // • Both axes claimed → block everything from event #1 (no
-                    //   prefix leak; keeps Dock UI like the switcher HUD alive).
-                    // • One axis claimed → wait for the MT axis (locks after
-                    //   ~0.8% trackpad movement, far below any native commit
-                    //   point) and block only if the moved axis is claimed. The
-                    //   unconfigured axis reaches the system untouched.
-                    let horizB = TouchTracker.isHorizBlocked(count: latched)
-                    let vertB = TouchTracker.isVertBlocked(count: latched)
-                    if type.rawValue == 30 || type.rawValue == 32 {
-                        return TouchTracker.isPinchBlocked(count: latched) ? nil : Unmanaged.passUnretained(cgEvent)
-                    }
-                    let blocked: Bool
-                    if horizB && vertB {
-                        blocked = true
-                    } else {
-                        switch TouchTracker.glideGestureAxis {
-                        case .horizontal: blocked = horizB
-                        case .vertical:   blocked = vertB
-                        case .pinch, .none: blocked = false
-                        }
-                    }
-                    if blocked {
-                        if isScroll || isSystemGesture { return nil }
-                        // In the zoom tap window, still pass gesture-class events
-                        // so the double-tap is recognized.
-                        return im.tapWindowActive ? Unmanaged.passUnretained(cgEvent) : nil
-                    }
+                    // Always swallow scroll at 3+ fingers so a 3-finger swipe can't
+                    // reach apps (e.g. scrub a video). In the zoom tap window, still
+                    // pass gesture-class events so the double-tap is recognized.
+                    if isScroll { return nil }
+                    return im.tapWindowActive ? Unmanaged.passUnretained(cgEvent) : nil
                 }
                 return Unmanaged.passUnretained(cgEvent)
             },

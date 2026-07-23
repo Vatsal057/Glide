@@ -9,9 +9,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             checkAccessibilityPermission()
         }
-        // One-shot migration: earlier builds disabled native gestures via
-        // defaults writes; restore anything still zeroed and drop the backup.
-        SystemGestureManager.restoreLingeringBackups()
+        // Re-assert on launch — System Settings may have re-enabled native gestures.
+        SystemGestureManager.reconcileIfAutoEnabled()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -28,6 +28,7 @@ struct GlideConfig {
         var hapticFeedback: Bool = true
         var debugLogging: Bool = false
         var launchAtLogin: Bool = false
+        var autoDisableNativeGestures: Bool = false
     }
 
     struct AppSwitcher {
@@ -132,6 +133,7 @@ extension GlideConfig {
         cfg.haptics = Dictionary(uniqueKeysWithValues: s.hapticAssignments.map { ($0.key.rawValue, $0.value.rawValue) })
         cfg.preferences.debugLogging     = s.debugLoggingEnabled
         cfg.preferences.launchAtLogin    = s.launchAtLoginEnabled
+        cfg.preferences.autoDisableNativeGestures = s.autoDisableNativeGestures
 
         cfg.appSwitcher.enabled = s.appSwitcher.enabled
         cfg.appSwitcher.fingers = s.appSwitcher.fingers
@@ -325,8 +327,6 @@ extension GlideConfig {
         case .swipeRight: return "right"
         case .swipeUp:    return "up"
         case .swipeDown:  return "down"
-        case .pinchIn:    return "pinch_in"
-        case .pinchOut:   return "pinch_out"
         case .click:      return "none"
         case .forceClick: return "none"
         case .tapHold:    return "none"
@@ -341,8 +341,6 @@ extension GlideConfig {
         case "right": return .swipeRight
         case "up":    return .swipeUp
         case "down":  return .swipeDown
-        case "pinch_in", "pinchin", "pinch":   return .pinchIn
-        case "pinch_out", "pinchout", "spread": return .pinchOut
         default:      return nil
         }
     }
@@ -374,6 +372,7 @@ enum GlideConfigSerializer {
             "    haptic_feedback: \(config.preferences.hapticFeedback ? "true" : "false")",
             "    debug_logging: \(config.preferences.debugLogging ? "true" : "false")",
             "    launch_at_login: \(config.preferences.launchAtLogin ? "true" : "false")",
+            "    auto_disable_native_gestures: \(config.preferences.autoDisableNativeGestures ? "true" : "false")",
             "",
             "  # ── Haptic patterns (per event) ────────────────────",
             "  haptics:",
@@ -615,6 +614,7 @@ enum GlideConfigParser {
             case "haptic_feedback":  prefs.hapticFeedback  = boolVal(val)   ?? prefs.hapticFeedback
             case "debug_logging":    prefs.debugLogging    = boolVal(val)   ?? prefs.debugLogging
             case "launch_at_login":  prefs.launchAtLogin   = boolVal(val)   ?? prefs.launchAtLogin
+            case "auto_disable_native_gestures": prefs.autoDisableNativeGestures = boolVal(val) ?? prefs.autoDisableNativeGestures
             default: break
             }
             i += 1
