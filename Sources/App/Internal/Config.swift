@@ -94,6 +94,11 @@ struct GlideConfig {
         var continuousPositiveKeyboard: [String]?
         var continuousEndKeyboard: [String]?
         var draft: Bool = false
+        /// True when this rule is triggered by a global keyboard shortcut, not a trackpad gesture.
+        var keyboardBinding: Bool = false
+        /// Carbon key code for the global hotkey (only when `keyboardBinding` is true).
+        var triggerShortcutKeyCode: Int? = nil
+        var triggerShortcutModifiers: [String]? = nil
     }
 
     var speed: Speed = Speed()
@@ -162,7 +167,7 @@ extension GlideConfig {
             }
             let hasDirection = !rule.direction.isClickLike
             let normalized = GestureRule.migratingLegacyAppFilter(rule)
-            return GlideConfig.Gesture(
+            var gesture = GlideConfig.Gesture(
                 name:        rule.name,
                 type:        typeStr,
                 direction:   hasDirection ? yamlDirection(rule.direction) : nil,
@@ -199,6 +204,12 @@ extension GlideConfig {
                 continuousEndKeyboard: rule.continuousEndAction == .advancedKeyboard ? rule.continuousEndKeyboard.map(\.token).nilIfEmpty : nil,
                 draft:       rule.isDraft
             )
+            if rule.isKeyboardBinding {
+                gesture.keyboardBinding = true
+                gesture.triggerShortcutKeyCode = rule.triggerShortcut.map { Int($0.keyCode) }
+                gesture.triggerShortcutModifiers = rule.triggerShortcut?.yamlModifiers
+            }
+            return gesture
         }
         return cfg
     }
@@ -295,7 +306,10 @@ extension GlideConfig {
                                                      modifiers: g.shortcutModifiers),
                 shortcutName:      g.shortcutName,
                 script:            g.script,
-                isDraft:           g.draft
+                isDraft:           g.draft,
+                isKeyboardBinding: g.keyboardBinding,
+                triggerShortcut:   KeyboardShortcut(yamlKeyCode: g.triggerShortcutKeyCode,
+                                                    modifiers: g.triggerShortcutModifiers)
             )
             rule.hapticPattern = g.haptic.flatMap(HapticPattern.init(rawValue:))
             if direction == .forceClick { rule.zone = TrackpadZone(yamlValue: g.zone) ?? .any }
@@ -425,6 +439,16 @@ enum GlideConfigSerializer {
         lines.append("      fingers: \(g.fingers)")
         if let s = g.speed { lines.append("      speed: \(s)") }
         if g.draft { lines.append("      draft: true") }
+        if g.keyboardBinding {
+            lines.append("      keyboard_binding: true")
+            if let code = g.triggerShortcutKeyCode {
+                lines.append("      trigger_shortcut_key_code: \(code)")
+                if let mods = g.triggerShortcutModifiers, !mods.isEmpty {
+                    lines.append("      trigger_shortcut_modifiers:")
+                    for mod in mods { lines.append("        - \(mod)") }
+                }
+            }
+        }
         lines.append("      action: \"\(escape(g.action))\"")
         if let h = g.haptic { lines.append("      haptic: \"\(h)\"") }
         if let ws = g.windowState { lines.append("      window_state: \(ws)") }
@@ -824,7 +848,14 @@ enum GlideConfigParser {
                 i += 1
                 g.continuousEndKeyboard = parseStringList(lines, from: &i, parentIndent: listIndent)
                 continue
-            case "draft":      g.draft      = boolVal(val) ?? g.draft
+            case "draft":           g.draft           = boolVal(val) ?? g.draft
+            case "keyboard_binding": g.keyboardBinding = boolVal(val) ?? g.keyboardBinding
+            case "trigger_shortcut_key_code": g.triggerShortcutKeyCode = intVal(val)
+            case "trigger_shortcut_modifiers":
+                let modIndent = ind
+                i += 1
+                g.triggerShortcutModifiers = parseStringList(lines, from: &i, parentIndent: modIndent)
+                continue
             default: break
             }
             i += 1
