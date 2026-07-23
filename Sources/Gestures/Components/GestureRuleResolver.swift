@@ -71,6 +71,12 @@ final class GestureRuleResolver {
         return matching.last(where: { $0.zone == .any })
     }
 
+    static func hasPinchRule(fingers: Int) -> Bool {
+        Settings.shared.rules.contains {
+            $0.isActive && !$0.isKeyboardBinding && $0.fingers == fingers && $0.direction.isPinch
+        }
+    }
+
     static func hasHoldRule(fingers: Int) -> Bool {
         Settings.shared.rules.contains {
             $0.isActive && $0.fingers == fingers && $0.direction == .tapHold

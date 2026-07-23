@@ -37,9 +37,7 @@ final class PreferencesStore: ObservableObject {
     @Published private(set) var launchAtLoginEnabled = false
     @Published private(set) var accessibilityGranted = false
     @Published private(set) var diagnostics = RuleDiagnostics()
-    @Published private(set) var autoDisableNativeGestures = false
-    @Published private(set) var nativeConflicts: [SystemGestureManager.Conflict] = []
-    @Published private(set) var disabledNativeGestures: [SystemGestureManager.NativeGesture] = []
+    @Published private(set) var nativeOverrides: [SystemGestureManager.GestureOverride] = []
 
 
     private init() { reload() }
@@ -62,8 +60,7 @@ final class PreferencesStore: ObservableObject {
         }
         refreshAccessibilityStatus()
         diagnostics = buildDiagnostics(for: rules)
-        autoDisableNativeGestures = s.autoDisableNativeGestures
-        refreshNativeConflicts()
+        refreshNativeOverrides()
     }
 
     func refreshAccessibilityStatus() {
@@ -113,8 +110,7 @@ final class PreferencesStore: ObservableObject {
         }
         Settings.shared.appSwitcher = copy
         appSwitcher = Settings.shared.appSwitcher
-        SystemGestureManager.reconcileIfAutoEnabled()
-        refreshNativeConflicts()
+        refreshNativeOverrides()
     }
 
     /// Horizontal swipes reserved for app switcher on this finger count (when enabled).
@@ -327,51 +323,15 @@ final class PreferencesStore: ObservableObject {
     private func persistRules() {
         Settings.shared.rules = rules.map(sanitizedRule)
         diagnostics = buildDiagnostics(for: rules)
-        SystemGestureManager.reconcileIfAutoEnabled()
-        refreshNativeConflicts()
+        refreshNativeOverrides()
         HotkeyManager.shared.reload()
     }
 
-    // MARK: Native gesture conflicts
+    // MARK: Native gesture overrides
 
-    func refreshNativeConflicts() {
-        nativeConflicts = SystemGestureManager.currentConflicts(rules: Settings.shared.rules,
-                                                                appSwitcher: Settings.shared.appSwitcher)
-        disabledNativeGestures = SystemGestureManager.disabledByGlide()
-    }
-
-    func reEnableNativeGesture(_ gesture: SystemGestureManager.NativeGesture) {
-        SystemGestureManager.reEnableNativeGestures([gesture])
-        scheduleConflictRefresh()
-    }
-
-    func reEnableAllNativeGestures() {
-        SystemGestureManager.reEnableNativeGestures(disabledNativeGestures)
-        scheduleConflictRefresh()
-    }
-
-    func updateAutoDisableNativeGestures(_ v: Bool) {
-        autoDisableNativeGestures = v
-        Settings.shared.autoDisableNativeGestures = v
-        if v { SystemGestureManager.reconcileIfAutoEnabled() }
-        scheduleConflictRefresh()
-    }
-
-    func disableNativeConflict(_ conflict: SystemGestureManager.Conflict) {
-        SystemGestureManager.disableNativeGestures([conflict.native])
-        scheduleConflictRefresh()
-    }
-
-    func disableAllNativeConflicts() {
-        SystemGestureManager.disableNativeGestures(nativeConflicts.map(\.native))
-        scheduleConflictRefresh()
-    }
-
-    /// The defaults writes run off-main; re-read after they had a moment to land.
-    private func scheduleConflictRefresh() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.refreshNativeConflicts()
-        }
+    func refreshNativeOverrides() {
+        nativeOverrides = SystemGestureManager.overriddenGestures(rules: Settings.shared.rules,
+                                                                  appSwitcher: Settings.shared.appSwitcher)
     }
 
     /// Same normalization the engine applies, plus: any rule with an action set stops being a draft.

@@ -34,6 +34,7 @@ enum TouchTracker {
     fileprivate static var _newestFingerAge: Double = 0
     fileprivate static var _lastFingerLiftTime: TimeInterval = 0
     fileprivate static var _gestureDecision: Int32 = 0
+    fileprivate static var _pinchRuleActive: Bool = false
 
     static func updateDeviceFingerCount(device: UnsafeMutableRawPointer, count: Int) {
         stateLock.lock()
@@ -94,6 +95,15 @@ enum TouchTracker {
     static var glideActiveTouches: Int32 {
         get { stateLock.lock(); defer { stateLock.unlock() }; return _activeTouches }
         set { stateLock.lock(); defer { stateLock.unlock() }; _activeTouches = newValue }
+    }
+
+    /// True while the current finger count has a configured Glide pinch rule.
+    /// Read by the suppression tap: magnify events are only swallowed when a
+    /// pinch rule could consume them — otherwise native pinch/spread
+    /// (Launchpad, Show Desktop) keeps its full event stream even mid-block.
+    static var glidePinchRuleActive: Bool {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _pinchRuleActive }
+        set { stateLock.lock(); defer { stateLock.unlock() }; _pinchRuleActive = newValue }
     }
 
     static var glideGestureDecision: GestureSuppressionDecision {

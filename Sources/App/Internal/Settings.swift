@@ -14,13 +14,17 @@ enum GestureDirection: String, Codable, CaseIterable {
     case swipeRight      = "Swipe Right"
     case swipeUp         = "Swipe Up"
     case swipeDown       = "Swipe Down"
+    case pinchIn         = "Pinch In"
+    case pinchOut        = "Pinch Out"
 
     /// True for tap-style gestures (normal click, force click, tap & hold) that
     /// have no axis, speed, reciprocal or continuous behaviour.
     var isClickLike: Bool { self == .click || self == .forceClick || self == .tapHold }
 
+    var isPinch: Bool { self == .pinchIn || self == .pinchOut }
+
     /// Directions with a movement axis — the only ones with speed tiers.
-    var hasSpeed: Bool { !isClickLike }
+    var hasSpeed: Bool { !isClickLike && !isPinch }
 }
 
 enum GestureSpeed: String, Codable, CaseIterable {
@@ -659,7 +663,6 @@ final class Settings {
     private var _hapticAssignments: [HapticEvent: HapticPattern] = HapticEvent.defaultAssignments
     private var _debugLogging:    Bool                = false
     private var _launchAtLogin:   Bool                = false
-    private var _autoDisableNativeGestures: Bool      = false
 
     // MARK: Public interface
 
@@ -711,11 +714,6 @@ final class Settings {
         set { _launchAtLogin = newValue; GlideConfigStore.shared.scheduleSave() }
     }
 
-    var autoDisableNativeGestures: Bool {
-        get { _autoDisableNativeGestures }
-        set { _autoDisableNativeGestures = newValue; GlideConfigStore.shared.scheduleSave() }
-    }
-
     func resetTuning() { tuning = GestureTuning() }
 
     // MARK: Batch load — bypasses per-field saves (called by GlideConfigStore.load)
@@ -739,7 +737,6 @@ final class Settings {
         )
         _debugLogging    = config.preferences.debugLogging
         _launchAtLogin   = config.preferences.launchAtLogin
-        _autoDisableNativeGestures = config.preferences.autoDisableNativeGestures
     }
 
     // MARK: App Switcher ↔ gesture rules

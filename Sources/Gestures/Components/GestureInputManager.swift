@@ -88,6 +88,14 @@ final class GestureInputManager {
                     case .undecided, .pass:
                         return Unmanaged.passUnretained(cgEvent)
                     case .block:
+                        // Magnify events drive native pinch (Launchpad / Show
+                        // Desktop). Swallow them only when a Glide pinch rule
+                        // exists at this finger count; otherwise they pass even
+                        // while swipes are blocked.
+                        let isMagnify = type.rawValue == 30 || type.rawValue == 32
+                        if isMagnify && !TouchTracker.glidePinchRuleActive {
+                            return Unmanaged.passUnretained(cgEvent)
+                        }
                         if isScroll || isSystemGesture { return nil }
                         // In the zoom tap window, still pass gesture-class events so the double-tap is recognized.
                         return im.tapWindowActive ? Unmanaged.passUnretained(cgEvent) : nil

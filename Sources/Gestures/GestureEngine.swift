@@ -153,6 +153,9 @@ final class GestureEngine {
         // scroll stays suppressed, so a swipe can't scrub video at gesture onset.
         inputManager.tapWindowActive = couldBeTap
         inputManager.setSuppressionActive(frame.count >= 3 && !isSystemZoomSession)
+        if frame.count >= 3, Int(frame.count) != currentFingerCount {
+            TouchTracker.glidePinchRuleActive = GestureRuleResolver.hasPinchRule(fingers: Int(frame.count))
+        }
         currentFingerCount = Int(frame.count)
 
         // Tap & Hold: (re)arm whenever the resting finger count changes, cancel on lift.
@@ -458,6 +461,7 @@ final class GestureEngine {
         switch direction {
         case .swipeLeft: rev = .swipeRight; case .swipeRight: rev = .swipeLeft
         case .swipeUp:   rev = .swipeDown;  case .swipeDown:  rev = .swipeUp
+        case .pinchIn:   rev = .pinchOut;   case .pinchOut:   rev = .pinchIn
         default: return nil
         }
         let inverse = rule.reciprocalAction ?? rule.action.inverseAction ?? .doNothing
