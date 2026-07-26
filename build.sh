@@ -42,29 +42,13 @@ restart_app() {
         exit 1
     fi
 
-    echo "==> Resetting Accessibility permission for $BUNDLE_ID"
-    tccutil reset Accessibility "$BUNDLE_ID" >/dev/null 2>&1 || true
-
-    echo "==> Resetting Automation permission for $BUNDLE_ID"
-    tccutil reset AppleEvents "$BUNDLE_ID" >/dev/null 2>&1 || true
-
     echo "==> Opening built $APP_NAME"
     open "$APP_BUNDLE"
 
-    sleep 2
-
-    echo "==> Opening Accessibility settings"
-    open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" >/dev/null 2>&1 || true
 
     cat <<EOF
 
 Done.
-
-Accessibility permission has been reset for:
-  $BUNDLE_ID
-
-If Glide still appears in the list, remove it manually and then
-enable the newly launched instance when prompted.
 
 App bundle:
   $APP_BUNDLE
@@ -186,10 +170,15 @@ echo "Signing…"
 DEV_ID_CERT=$(security find-identity -v -p codesigning 2>/dev/null \
     | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)
 
+if [[ -z "$DEV_ID_CERT" ]]; then
+    DEV_ID_CERT=$(security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)
+fi
+
 IDENTITY="${DEV_ID_CERT:--}"
 
 if [[ "$IDENTITY" == "-" ]]; then
-    echo "⚠️  No Developer ID certificate — ad-hoc signing."
+    echo "⚠️  No Developer ID or Apple Development cert — ad-hoc signing."
     echo "    Downloaded copies need Settings → Privacy & Security → Open Anyway (once)."
     codesign --force --sign - \
         --entitlements "$SCRIPT_DIR/Glide.entitlements" \

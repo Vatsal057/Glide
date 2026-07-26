@@ -202,11 +202,13 @@ final class PreferencesStore: ObservableObject {
         mutate(&copy)
         Settings.shared.tuning = copy          // Settings.normalizedTuning runs here + saves
         tuning = Settings.shared.tuning        // read back the clamped value
+        TouchTracker.updateTuningCache(edgeMarginEnabled: tuning.edgeMarginEnabled, edgeMargin: tuning.edgeMargin)
     }
 
     func resetTuning() {
         Settings.shared.resetTuning()
         tuning = Settings.shared.tuning
+        TouchTracker.updateTuningCache(edgeMarginEnabled: tuning.edgeMarginEnabled, edgeMargin: tuning.edgeMargin)
     }
 
     // ── YAML Config Export — copies live file to user-chosen location ──

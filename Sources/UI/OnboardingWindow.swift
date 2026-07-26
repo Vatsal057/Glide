@@ -290,6 +290,7 @@ private struct PermissionStepView: View {
         }
         .padding(.horizontal, 40)
         .onReceive(poll) { _ in
+            guard !granted else { return }
             let now = AXIsProcessTrusted()
             if now != granted {
                 withAnimation { granted = now }

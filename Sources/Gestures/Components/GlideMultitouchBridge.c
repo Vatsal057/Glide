@@ -173,7 +173,7 @@ static int contact_frame_callback(
                 active_count
             );
         }
-    } else if (active_count == 0 && forwarding_gesture) {
+    } else if (active_count < 3 && forwarding_gesture) {
         forwarding_gesture = false;
         should_forward = true;
         last_forwarded_timestamp = 0;

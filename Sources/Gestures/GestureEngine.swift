@@ -83,6 +83,8 @@ final class GestureEngine {
         touchSessionStart = nil; touchSessionMovement = 0
         lastThreeFingerTapEnd = 0; isSystemZoomSession = false
 
+        TouchTracker.updateTuningCache(edgeMarginEnabled: Settings.shared.tuning.edgeMarginEnabled,
+                                        edgeMargin: Settings.shared.tuning.edgeMargin)
         inputManager.setupTaps()
         MultitouchBridge.shared.start(callback: glideMTCallback)
         inputManager.installMonitors()
@@ -492,14 +494,20 @@ final class GestureEngine {
     func captureModifiers() -> CapturedModifiers { CapturedModifiers(NSEvent.modifierFlags) }
 
     private func updateObservableState() {
+        let newPhaseName: String
         switch phase {
-        case .idle: currentPhaseName = "Idle"; case .candidate: currentPhaseName = "Candidate"
-        case .lockedSwipe: currentPhaseName = "Locked (Swipe)"; case .ignored: currentPhaseName = "Ignored"
-        case .fired: currentPhaseName = "Fired"; case .continuousSwipe: currentPhaseName = "Continuous"
-        case .switchingApps: currentPhaseName = "App Switcher"
+        case .idle: newPhaseName = "Idle"; case .candidate: newPhaseName = "Candidate"
+        case .lockedSwipe: newPhaseName = "Locked (Swipe)"; case .ignored: newPhaseName = "Ignored"
+        case .fired: newPhaseName = "Fired"; case .continuousSwipe: newPhaseName = "Continuous"
+        case .switchingApps: newPhaseName = "App Switcher"
         }
-        isReciprocalActive = (reciprocalToken != nil)
-        onStateChange?()
+        let newReciprocal = (reciprocalToken != nil)
+        let stateChanged = (newPhaseName != currentPhaseName) || (newReciprocal != isReciprocalActive)
+        currentPhaseName = newPhaseName
+        isReciprocalActive = newReciprocal
+        if stateChanged {
+            onStateChange?()
+        }
     }
 
     func sendCmdTab() { sendKeyEvent(0x30, down: true, flags: .maskCommand); sendKeyEvent(0x30, down: false, flags: .maskCommand) }

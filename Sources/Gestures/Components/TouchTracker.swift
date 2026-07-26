@@ -25,6 +25,16 @@ enum TouchTracker {
     fileprivate static var _newestFingerAge: Double = 0
     fileprivate static var _lastFingerLiftTime: TimeInterval = 0
 
+    fileprivate static var _edgeMarginEnabled: Bool = false
+    fileprivate static var _edgeMargin: EdgeMargin = EdgeMargin(left: 0, right: 0, top: 0, bottom: 0)
+
+    static func updateTuningCache(edgeMarginEnabled: Bool, edgeMargin: EdgeMargin) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        _edgeMarginEnabled = edgeMarginEnabled
+        _edgeMargin = edgeMargin
+    }
+
     static func updateDeviceFingerCount(device: UnsafeMutableRawPointer, count: Int) {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -111,9 +121,10 @@ let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
     if let points = points, count > 0 {
         let n = Int(count)
         activeTouches.reserveCapacity(n)
-        let tuning = Settings.shared.tuning
-        let edge = tuning.edgeMarginEnabled
-        let m = tuning.edgeMargin
+        TouchTracker.stateLock.lock()
+        let edge = TouchTracker._edgeMarginEnabled
+        let m = TouchTracker._edgeMargin
+        TouchTracker.stateLock.unlock()
 
         for i in 0..<n {
             let t = points[i]
