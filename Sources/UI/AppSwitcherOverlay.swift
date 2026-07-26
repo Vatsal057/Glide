@@ -372,19 +372,18 @@ private struct AppRailCard: View {
     let reduceMotion: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
+            RoundedRectangle(cornerRadius: 34, style: .continuous)
+                .fill(isSelected ? Color.primary.opacity(0.15) : Color.clear)
+                .frame(width: 118, height: 118)
+
             Image(nsImage: item.icon)
                 .resizable()
                 .interpolation(.high)
                 .frame(width: 128, height: 128)
                 .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
         }
-        .padding(0)
-        .frame(width: 128, height: 128)
-        .background(
-            RoundedRectangle(cornerRadius: 29, style: .continuous)
-                .fill(isSelected ? Color.primary.opacity(0.15) : Color.clear)
-        )
+        .frame(width: 128, height: 118)
         .overlay(alignment: .bottom) {
             if isSelected {
                 Text(item.name)
@@ -392,7 +391,7 @@ private struct AppRailCard: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .fixedSize()
-                    .offset(y: 16)
+                    .offset(y: 18)
             }
         }
         .overlay(alignment: .topTrailing) {
