@@ -252,7 +252,7 @@ private struct AppSwitcherOverlayView: View {
                 if let app = model.selectedApp {
                     Image(nsImage: app.icon)
                         .resizable()
-                        .interpolation(.high)
+                        .interpolation(.medium)
                         .frame(width: 22, height: 22)
                     Text(app.name)
                         .font(.headline)
@@ -316,7 +316,7 @@ private struct AppSwitcherOverlayView: View {
         if reduceTransparency {
             shape.fill(Color(nsColor: .windowBackgroundColor))
         } else {
-            shape.fill(.ultraThickMaterial)
+            shape.fill(.thickMaterial)
         }
     }
 
@@ -362,8 +362,9 @@ private struct AppRailCard: View {
         VStack(spacing: 5) {
             Image(nsImage: item.icon)
                 .resizable()
-                .interpolation(.high)
+                .interpolation(.medium)
                 .frame(width: 38, height: 38)
+                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
             Text(item.name)
                 .font(.caption.weight(isSelected ? .semibold : .medium))
                 .lineLimit(1)
@@ -393,7 +394,7 @@ private struct AppRailCard: View {
             }
         }
         .scaleEffect(isSelected ? 1.03 : 1)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isSelected)
+        .animation(reduceMotion ? nil : .interactiveSpring(response: 0.25, dampingFraction: 0.7), value: isSelected)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(item.name), \(item.windows.count) windows")
         .accessibilityValue(isSelected ? "Selected application" : "")
@@ -411,14 +412,14 @@ private struct WindowSelectionRow: View {
                 if let thumbnail = item.thumbnail {
                     Image(nsImage: thumbnail)
                         .resizable()
-                        .interpolation(.high)
+                        .interpolation(.medium)
                         .scaledToFill()
                 } else {
                     ZStack {
                         Color.primary.opacity(0.045)
                         Image(nsImage: appIcon)
                             .resizable()
-                            .interpolation(.high)
+                            .interpolation(.medium)
                             .frame(width: 34, height: 34)
                     }
                 }
@@ -460,7 +461,7 @@ private struct WindowSelectionRow: View {
                         lineWidth: isSelected ? 2.5 : 1)
         }
         .scaleEffect(isSelected ? 1.008 : 1)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isSelected)
+        .animation(reduceMotion ? nil : .interactiveSpring(response: 0.25, dampingFraction: 0.7), value: isSelected)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.title)
         .accessibilityValue(isSelected ? "Selected window" : (item.status?.label ?? "Current Space"))
@@ -521,7 +522,7 @@ private enum AppSwitcherPreviewProvider {
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
-        context.interpolationQuality = .high
+        context.interpolationQuality = .medium
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         return context.makeImage()
     }
