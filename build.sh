@@ -113,7 +113,24 @@ SDK_PATH="$(xcrun --show-sdk-path)"
 # so prefer it when present; fall back to xcrun on CLT-only machines (e.g. CI).
 XCODE_SDK="$(xcode-select -p 2>/dev/null)/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 [[ -d "$XCODE_SDK" ]] && SDK_PATH="$XCODE_SDK"
-ARCHS=(arm64 x86_64)
+
+IS_RELEASE=0
+for arg in "$@"; do
+    if [[ "$arg" == "--release" || "$arg" == "--dmg" ]]; then
+        IS_RELEASE=1
+    fi
+done
+
+if [[ "$IS_RELEASE" == 1 ]]; then
+    ARCHS=(arm64 x86_64)
+    SWIFT_OPT="-O"
+    echo "Mode: Release (Universal, Optimized)"
+else
+    ARCHS=($(uname -m))
+    SWIFT_OPT="-Onone"
+    echo "Mode: Debug (Native arch only, Fast build)"
+fi
+
 BINARIES=()
 
 for arch in "${ARCHS[@]}"; do
@@ -126,7 +143,7 @@ for arch in "${ARCHS[@]}"; do
     clang -O3 -target "$arch-apple-macosx13.0" -isysroot "$SDK_PATH" -c "$SCRIPT_DIR/Sources/Actions/Components/GlideWindowServerBridge.c" -o "$c2_out"
 
     if swiftc \
-        -O \
+        $SWIFT_OPT \
         -target "$arch-apple-macosx13.0" \
         -sdk "$SDK_PATH" \
         -import-objc-header "$SCRIPT_DIR/Sources/App/Internal/Glide-Bridging-Header.h" \

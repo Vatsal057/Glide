@@ -252,19 +252,14 @@ private struct AppSwitcherOverlayView: View {
                 .alignmentGuide(.appSwitcherRailCenter) { d in d[VerticalAlignment.center] }
 
             VStack(spacing: 0) {
-                VStack(spacing: 16) {
+                VStack(spacing: 0) {
                     if isMask {
                         appRail.hidden()
-                        Text(model.selectedApp?.name ?? "").hidden()
                     } else {
                         appRail
-                        Text(model.selectedApp?.name ?? "")
-                            .font(.title.weight(.medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 20)
                 .background {
                     if isMask {
@@ -293,14 +288,14 @@ private struct AppSwitcherOverlayView: View {
                             }
                         }
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)).combined(with: .scale(scale: 0.95, anchor: .top)))
+                    .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .top)))
                 }
             }
         }
     }
 
     private var appRail: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 4) {
             appOverflowBadge(model.hiddenAppsBefore, symbol: "chevron.left")
             ForEach(model.visibleAppIndices, id: \.self) { index in
                 AppRailCard(
@@ -381,15 +376,25 @@ private struct AppRailCard: View {
             Image(nsImage: item.icon)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 108, height: 108)
+                .frame(width: 128, height: 128)
                 .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
         }
-        .padding(14)
-        .frame(width: 136, height: 136)
+        .padding(0)
+        .frame(width: 128, height: 128)
         .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 29, style: .continuous)
                 .fill(isSelected ? Color.primary.opacity(0.15) : Color.clear)
         )
+        .overlay(alignment: .bottom) {
+            if isSelected {
+                Text(item.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .offset(y: 16)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if item.windows.count > 1 {
                 Text("\(item.windows.count)")
@@ -428,39 +433,39 @@ private struct TeardropWindowGrid: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             if visibleIndices.count == 2 {
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     card(for: visibleIndices[0])
                     card(for: visibleIndices[1])
                 }
             } else if visibleIndices.count == 3 {
                 card(for: visibleIndices[0])
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     card(for: visibleIndices[1])
                     card(for: visibleIndices[2])
                 }
             } else if visibleIndices.count == 4 {
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     card(for: visibleIndices[0])
                     card(for: visibleIndices[1])
                 }
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     card(for: visibleIndices[2])
                     card(for: visibleIndices[3])
                 }
             } else if visibleIndices.count == 5 {
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     card(for: visibleIndices[0])
                     card(for: visibleIndices[1])
                 }
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     card(for: visibleIndices[2])
                     card(for: visibleIndices[3])
                     card(for: visibleIndices[4])
                 }
             } else {
-                let columns = Array(repeating: GridItem(.fixed(318), spacing: 16), count: 3)
+                let columns = Array(repeating: GridItem(.fixed(212), spacing: 12), count: 3)
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(visibleIndices, id: \.self) { i in
                         card(for: i)
@@ -478,7 +483,7 @@ private struct WindowSelectionCard: View {
     let reduceMotion: Bool
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             Group {
                 if let thumbnail = item.thumbnail {
                     Image(nsImage: thumbnail)
@@ -491,36 +496,36 @@ private struct WindowSelectionCard: View {
                         Image(nsImage: appIcon)
                             .resizable()
                             .interpolation(.medium)
-                            .frame(width: 72, height: 72)
+                            .frame(width: 48, height: 48)
                     }
                 }
             }
-            .frame(width: 294, height: 165)
-            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .frame(width: 192, height: 108)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
 
-            VStack(spacing: 4) {
+            VStack(spacing: 2) {
                 Text(item.title)
-                    .font(.title3.weight(isSelected ? .semibold : .medium))
+                    .font(.subheadline.weight(isSelected ? .semibold : .medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 if let status = item.status {
                     Label(status.label, systemImage: status.symbol)
-                        .font(.headline.weight(.medium))
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 4)
         }
-        .padding(12)
-        .frame(width: 318)
+        .padding(10)
+        .frame(width: 212)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(isSelected ? GlideSwitcherPalette.touchLilac.opacity(0.18) : Color.primary.opacity(0.035))
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(isSelected ? GlideSwitcherPalette.motionViolet : Color.primary.opacity(0.08),
-                        lineWidth: isSelected ? 3.75 : 1.5)
+                        lineWidth: isSelected ? 2.5 : 1)
         }
         .scaleEffect(isSelected ? 1.02 : 1)
         .animation(reduceMotion ? nil : .interactiveSpring(response: 0.25, dampingFraction: 0.7), value: isSelected)
