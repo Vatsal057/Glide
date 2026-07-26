@@ -15,8 +15,8 @@ struct AppSwitcherTab: View {
                     presentationSection
 
                     TuningSection(title: "Behavior", icon: "gearshape") {
-                        Toggle("Restore minimized windows after switching", isOn: switcherBinding(\.restoreMinimizedOnCommit))
-                        Text("Brings the selected app’s minimized windows back when you release. Apps with minimized windows remain available in the switcher.")
+                        Toggle("Restore minimized windows in native fallback", isOn: switcherBinding(\.restoreMinimizedOnCommit))
+                        Text("The custom switcher always restores only the minimized window you select. This option applies when Glide falls back to macOS’s native switcher.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -59,7 +59,7 @@ struct AppSwitcherTab: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("App Switcher")
                     .font(.title2.weight(.semibold))
-                Text("Browse running apps with a three-finger horizontal swipe, then release to switch.")
+                Text("Swipe left or right to choose an app, then up or down to choose one of its windows. Release to open it.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -95,7 +95,7 @@ struct AppSwitcherTab: View {
                 Text("Custom overlay preview")
                     .font(.callout.weight(.semibold))
                 Spacer()
-                Text("Release to confirm")
+                Text("← → apps · ↑ ↓ windows")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

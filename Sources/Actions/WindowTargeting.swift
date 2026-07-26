@@ -527,15 +527,96 @@ final class WindowTargeting {
     func windowSummary(for pid: pid_t) -> AppWindowSummary {
         let realWindows = windows(for: pid).filter(isRealWindow)
         let minimized = realWindows.reduce(into: 0) { count, window in
-            if axBool(window, attribute: kAXMinimizedAttribute as CFString) == true {
-                count += 1
-            }
+            if axBool(window, attribute: kAXMinimizedAttribute as CFString) == true { count += 1 }
         }
         return AppWindowSummary(totalCount: realWindows.count, minimizedCount: minimized)
     }
 
     func hasRealWindow(for pid: pid_t) -> Bool {
         windows(for: pid).contains(where: isRealWindow)
+    }
+
+    func switcherWindows(for apps: [NSRunningApplication]) -> [[AppSwitcherWindow]] {
+        let onScreenIDs: Set<CGWindowID> = {
+            guard let info = CGWindowListCopyWindowInfo(
+                [.optionOnScreenOnly, .excludeDesktopElements],
+                kCGNullWindowID
+            ) as? [[String: Any]] else { return [] }
+            return Set(info.compactMap { row in
+                guard let layer = row[kCGWindowLayer as String] as? NSNumber,
+                      layer.intValue == 0,
+                      let number = row[kCGWindowNumber as String] as? NSNumber else { return nil }
+                return CGWindowID(number.uint32Value)
+            })
+        }()
+
+        return apps.map { app in
+            let appElement = AXUIElementCreateApplication(app.processIdentifier)
+            var focusedRef: CFTypeRef?
+            let focusedWindow: AXUIElement? = {
+                guard AXUIElementCopyAttributeValue(
+                    appElement,
+                    kAXFocusedWindowAttribute as CFString,
+                    &focusedRef
+                ) == .success else { return nil }
+                return axElement(from: focusedRef)
+            }()
+            let focusedID = focusedWindow.flatMap(cgWindowID)
+
+            var result = windows(for: app.processIdentifier).filter(isRealWindow).map { window in
+                let windowID = cgWindowID(for: window)
+                let rawTitle = axString(window, attribute: kAXTitleAttribute as CFString)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return AppSwitcherWindow(
+                    id: windowID.map(Int.init) ?? Int(CFHash(window)),
+                    processIdentifier: app.processIdentifier,
+                    windowID: windowID,
+                    element: window,
+                    title: (rawTitle?.isEmpty == false ? rawTitle! : "Untitled Window"),
+                    isMinimized: axBool(window, attribute: kAXMinimizedAttribute as CFString) == true,
+                    isOnCurrentSpace: windowID.map(onScreenIDs.contains) ?? false,
+                    isApplicationHidden: app.isHidden
+                )
+            }
+
+            if let focusedID,
+               let index = result.firstIndex(where: { $0.windowID == focusedID }),
+               index != 0 {
+                let focused = result.remove(at: index)
+                result.insert(focused, at: 0)
+            }
+            return result
+        }
+    }
+
+    func activateSwitcherWindow(_ window: AppSwitcherWindow, in app: NSRunningApplication) {
+        app.unhide()
+        if window.isMinimized {
+            _ = setAXBool(window.element, attribute: kAXMinimizedAttribute as CFString, value: false)
+        }
+
+        // Ask for the exact AX window before and after activating the application.
+        // The second raise wins after macOS completes any Space transition.
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window.element)
+        AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+        app.activate(options: .activateIgnoringOtherApps)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window.element)
+            AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+        }
+    }
+
+    private func cgWindowID(for window: AXUIElement) -> CGWindowID? {
+        var windowID: UInt32 = 0
+        return _AXUIElementGetWindow(window, &windowID) == .success ? windowID : nil
+    }
+
+    private func axString(_ element: AXUIElement, attribute: CFString) -> String? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &ref) == .success else { return nil }
+        return ref as? String
     }
 
     private func isRealWindow(_ window: AXUIElement) -> Bool {

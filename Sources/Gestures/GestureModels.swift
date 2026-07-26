@@ -63,10 +63,23 @@ struct SwipeTrackData {
     var lockedSpeed: GestureSpeed?
 }
 
+struct AppSwitcherWindow {
+    let id: Int
+    let processIdentifier: pid_t
+    let windowID: CGWindowID?
+    let element: AXUIElement
+    let title: String
+    let isMinimized: Bool
+    let isOnCurrentSpace: Bool
+    let isApplicationHidden: Bool
+}
+
 struct SwitcherData {
-    var refX: Float; var index: Int
+    var refX: Float; var refY: Float
+    var index: Int; var windowIndex: Int
     let fingerCount: Int
     let apps: [NSRunningApplication]
+    let windowsByApp: [[AppSwitcherWindow]]
     let finderIndex: Int?   // position of windowless Finder, nil if Finder has windows
     let effectiveMin: Int   // left boundary (tightened if Finder is at left edge)
     let effectiveMax: Int   // right boundary (tightened if Finder is at right edge)

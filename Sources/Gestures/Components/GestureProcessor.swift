@@ -108,30 +108,59 @@ final class GestureProcessor {
 
         case .switchingApps(var data):
             guard n == data.fingerCount else { return nil }
-            let delta = frame.cx - data.refX
-            if abs(delta) > tuning.appSwitcherStepThreshold, now - (engine?.lastStepTime ?? 0) >= tuning.appSwitcherDebounce {
-                if delta > 0, data.index < data.effectiveMax {
+            let deltaX = frame.cx - data.refX
+            let deltaY = frame.cy - data.refY
+            let canStep = now - (engine?.lastStepTime ?? 0) >= tuning.appSwitcherDebounce
+
+            if data.usesCustomOverlay,
+               data.windowsByApp.indices.contains(data.index),
+               data.windowsByApp[data.index].count > 1 {
+                let verticalThreshold = max(tuning.appSwitcherStepThreshold * 2.5, 0.008)
+                let verticalIntent = abs(deltaY) > verticalThreshold && abs(deltaY) > abs(deltaX) * 1.15
+                if verticalIntent, canStep {
+                    let windowCount = data.windowsByApp[data.index].count
+                    let nextWindowIndex = deltaY < 0
+                        ? min(data.windowIndex + 1, windowCount - 1)
+                        : max(data.windowIndex - 1, 0)
+                    if nextWindowIndex != data.windowIndex {
+                        Haptic.switcherStep()
+                        data.windowIndex = nextWindowIndex
+                        data.refX = frame.cx
+                        data.refY = frame.cy
+                        engine?.lastStepTime = now
+                        engine?.updateAppSwitcherSelection(data)
+                        return .switchingApps(data)
+                    }
+                }
+            }
+
+            if abs(deltaX) > tuning.appSwitcherStepThreshold, canStep {
+                if deltaX > 0, data.index < data.effectiveMax {
                     Haptic.switcherStep()
                     if !data.usesCustomOverlay { engine?.sendCmdTab() }
-                    engine?.lastStepTime = now
-                    data.refX = frame.cx
                     data.index += 1
                     if let fi = data.finderIndex, data.index == fi, data.index < data.effectiveMax {
                         if !data.usesCustomOverlay { engine?.sendCmdTab() }
                         data.index += 1
                     }
+                    data.windowIndex = 0
+                    data.refX = frame.cx
+                    data.refY = frame.cy
+                    engine?.lastStepTime = now
                     engine?.updateAppSwitcherSelection(data)
                     return .switchingApps(data)
-                } else if delta < 0, data.index > data.effectiveMin {
+                } else if deltaX < 0, data.index > data.effectiveMin {
                     Haptic.switcherStep()
                     if !data.usesCustomOverlay { engine?.sendCmdShiftTab() }
-                    engine?.lastStepTime = now
-                    data.refX = frame.cx
                     data.index -= 1
                     if let fi = data.finderIndex, data.index == fi, data.index > data.effectiveMin {
                         if !data.usesCustomOverlay { engine?.sendCmdShiftTab() }
                         data.index -= 1
                     }
+                    data.windowIndex = 0
+                    data.refX = frame.cx
+                    data.refY = frame.cy
+                    engine?.lastStepTime = now
                     engine?.updateAppSwitcherSelection(data)
                     return .switchingApps(data)
                 }
@@ -229,7 +258,12 @@ final class GestureProcessor {
                 return .fired
             }
         } else if let switcherAction = GestureRuleResolver.appSwitcherAction(fingers: data.fingers, direction: direction, modifiers: updated.modifiersAtStart) {
-            if let switcherData = engine?.beginAppSwitcher(for: switcherAction, refX: frame.cx, fingerCount: data.fingers) {
+            if let switcherData = engine?.beginAppSwitcher(
+                for: switcherAction,
+                refX: frame.cx,
+                refY: frame.cy,
+                fingerCount: data.fingers
+            ) {
                 return .switchingApps(switcherData)
             } else {
                 return .fired
