@@ -259,8 +259,8 @@ private struct AppSwitcherOverlayView: View {
                         appRail
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 20)
+                .padding(.horizontal, 26)
+                .padding(.vertical, 28)
                 .background {
                     if isMask {
                         Color.black.clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
@@ -373,9 +373,9 @@ private struct AppRailCard: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 34, style: .continuous)
-                .fill(isSelected ? Color.primary.opacity(0.15) : Color.clear)
-                .frame(width: 118, height: 118)
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .fill(isSelected ? Color.primary.opacity(0.60) : Color.clear)
+                .frame(width: 118, height: 117)
 
             Image(nsImage: item.icon)
                 .resizable()
@@ -383,7 +383,7 @@ private struct AppRailCard: View {
                 .frame(width: 128, height: 128)
                 .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
         }
-        .frame(width: 128, height: 118)
+        .frame(width: 128, height: 117)
         .overlay(alignment: .bottom) {
             if isSelected {
                 Text(item.name)
