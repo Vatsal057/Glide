@@ -15,6 +15,8 @@ final class GestureEngine {
     // MARK: - State
     private(set) var phase: GesturePhase = .idle
     private var reciprocalToken: ReciprocalToken?
+    private var escapeMonitorLocal: Any?
+    private var escapeMonitorGlobal: Any?
     /// Direction + finger count of the most recently fired swipe rule.
     /// Used to detect back-to-back same-direction gestures (toggles) so we don't
     /// leave a stale reciprocal token pointing the other way.
@@ -77,6 +79,7 @@ final class GestureEngine {
         TouchTracker.resetGlobalMTState()
         phase = .idle
         reciprocalToken = nil
+        removeEscapeMonitors()
         lastFiredSwipe = nil
         pendingClickTimeout?.cancel(); pendingClickTimeout = nil; pendingClick = nil
         cancelHoldTimer()
@@ -108,6 +111,7 @@ final class GestureEngine {
 
         TouchTracker.resetGlobalMTState()
         reciprocalToken = nil
+        removeEscapeMonitors()
         lastStepTime = 0
         pendingClickTimeout?.cancel(); pendingClickTimeout = nil; pendingClick = nil
         cancelHoldTimer()
@@ -376,6 +380,7 @@ final class GestureEngine {
             selectedAppIndex: customIndex,
             selectedWindowIndex: 0
         ) {
+            installEscapeMonitors()
             lastStepTime = ProcessInfo.processInfo.systemUptime
             return SwitcherData(
                 refX: refX,
@@ -411,6 +416,7 @@ final class GestureEngine {
             if movingForward { sendCmdTab() } else { sendCmdShiftTab() }
         }
 
+        installEscapeMonitors()
         lastStepTime = ProcessInfo.processInfo.systemUptime
         return SwitcherData(
             refX: refX,
@@ -436,6 +442,7 @@ final class GestureEngine {
     }
 
     private func commitAppSwitcher(data: SwitcherData) {
+        removeEscapeMonitors()
         Haptic.switcherCommit()
         let selectedApp = data.apps.indices.contains(data.index) ? data.apps[data.index] : nil
 
@@ -466,6 +473,40 @@ final class GestureEngine {
                 }
             }
         }
+    }
+
+    private func installEscapeMonitors() {
+        guard escapeMonitorLocal == nil else { return }
+        escapeMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 {
+                self?.cancelAppSwitcher()
+                return nil
+            }
+            return event
+        }
+        escapeMonitorGlobal = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 {
+                self?.cancelAppSwitcher()
+            }
+        }
+    }
+
+    private func removeEscapeMonitors() {
+        if let monitor = escapeMonitorLocal { NSEvent.removeMonitor(monitor); escapeMonitorLocal = nil }
+        if let monitor = escapeMonitorGlobal { NSEvent.removeMonitor(monitor); escapeMonitorGlobal = nil }
+    }
+
+    func cancelAppSwitcher() {
+        guard case .switchingApps(let data) = phase else { return }
+        removeEscapeMonitors()
+        if data.usesCustomOverlay {
+            AppSwitcherOverlayController.shared.hide()
+        } else {
+            sendKeyEvent(0x37, down: false, flags: []) // kCmd
+        }
+        phase = .idle
+        lastStepTime = 0
+        updateObservableState()
     }
 
     // MARK: - Reciprocal & Continuous

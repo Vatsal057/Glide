@@ -59,7 +59,7 @@ private final class AppSwitcherOverlayModel: ObservableObject {
 
     var visibleWindowIndices: [Int] {
         guard let windows = selectedApp?.windows, !windows.isEmpty else { return [] }
-        let count = min(3, windows.count)
+        let count = min(6, windows.count)
         let start = min(max(0, selectedWindowIndex - count / 2), windows.count - count)
         return Array(start..<(start + count))
     }
@@ -164,9 +164,9 @@ final class AppSwitcherOverlayController {
         let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
         guard let screen else { return false }
 
-        let width = min(720, max(440, screen.visibleFrame.width - 96))
-        let height = min(408, max(340, screen.visibleFrame.height - 56))
-        let appCapacity = min(apps.count, max(3, Int((width - 100) / 92)))
+        let itemWidth: CGFloat = 148
+        let appCapacity = min(apps.count, max(3, Int((screen.frame.width - 240) / itemWidth)))
+        
         model.configure(
             apps: apps,
             windowsByApp: windowsByApp,
@@ -174,15 +174,7 @@ final class AppSwitcherOverlayController {
             selectedWindowIndex: selectedWindowIndex,
             visibleAppCapacity: appCapacity
         )
-        panel.setFrame(
-            CGRect(
-                x: screen.visibleFrame.midX - width / 2,
-                y: screen.visibleFrame.midY - height / 2,
-                width: width,
-                height: height
-            ),
-            display: true
-        )
+        panel.setFrame(screen.frame, display: true)
         panel.orderFrontRegardless()
 
         let generation = UUID()
@@ -210,29 +202,105 @@ final class AppSwitcherOverlayController {
         model.clear()
     }
 }
+
+private extension VerticalAlignment {
+    struct AppSwitcherRailCenter: AlignmentID {
+        static func defaultValue(in d: ViewDimensions) -> CGFloat {
+            return d[VerticalAlignment.center]
+        }
+    }
+    static let appSwitcherRailCenter = VerticalAlignment(AppSwitcherRailCenter.self)
+}
 private struct AppSwitcherOverlayView: View {
     @ObservedObject var model: AppSwitcherOverlayModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        VStack(spacing: 10) {
-            appRail
-            Divider()
-            windowSection
-            footer
+        GeometryReader { geo in
+            ZStack {
+                panelBackground
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .mask {
+                        Canvas { context, size in
+                            context.addFilter(.alphaThreshold(min: 0.5, color: .black))
+                            context.addFilter(.blur(radius: 24))
+                            context.drawLayer { ctx in
+                                if let resolved = context.resolveSymbol(id: "layout") {
+                                    ctx.draw(resolved, at: CGPoint(x: size.width / 2, y: size.height / 2))
+                                }
+                            }
+                        } symbols: {
+                            layoutStructure(isMask: true)
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .tag("layout")
+                        }
+                    }
+
+                layoutStructure(isMask: false)
+                    .frame(width: geo.size.width, height: geo.size.height)
+            }
         }
-        .padding(14)
-        .background(panelBackground)
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.primary.opacity(0.14), lineWidth: 1)
+        .animation(.interactiveSpring(response: 0.4, dampingFraction: 0.7), value: model.selectedApp?.windows.count)
+    }
+
+    @ViewBuilder
+    private func layoutStructure(isMask: Bool) -> some View {
+        ZStack(alignment: Alignment(horizontal: .center, vertical: .appSwitcherRailCenter)) {
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .alignmentGuide(.appSwitcherRailCenter) { d in d[VerticalAlignment.center] }
+
+            VStack(spacing: 0) {
+                VStack(spacing: 16) {
+                    if isMask {
+                        appRail.hidden()
+                        Text(model.selectedApp?.name ?? "").hidden()
+                    } else {
+                        appRail
+                        Text(model.selectedApp?.name ?? "")
+                            .font(.title.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
+                .background {
+                    if isMask {
+                        Color.black.clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+                    }
+                }
+                .alignmentGuide(.appSwitcherRailCenter) { d in d[VerticalAlignment.center] }
+
+                if (model.selectedApp?.windows.count ?? 0) > 1 {
+                    VStack(spacing: 0) {
+                        Rectangle()
+                            .fill(isMask ? Color.clear : Color.primary.opacity(0.2))
+                            .frame(width: 4, height: 32)
+                        
+                        Group {
+                            if isMask {
+                                windowSection.hidden()
+                            } else {
+                                windowSection
+                            }
+                        }
+                        .padding(20)
+                        .background {
+                            if isMask {
+                                Color.black.clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+                            }
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)).combined(with: .scale(scale: 0.95, anchor: .top)))
+                }
+            }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private var appRail: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 12) {
             appOverflowBadge(model.hiddenAppsBefore, symbol: "chevron.left")
             ForEach(model.visibleAppIndices, id: \.self) { index in
                 AppRailCard(
@@ -243,93 +311,43 @@ private struct AppSwitcherOverlayView: View {
             }
             appOverflowBadge(model.hiddenAppsAfter, symbol: "chevron.right")
         }
-        .frame(maxWidth: .infinity, minHeight: 78)
     }
 
     private var windowSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
-                if let app = model.selectedApp {
-                    Image(nsImage: app.icon)
-                        .resizable()
-                        .interpolation(.medium)
-                        .frame(width: 22, height: 22)
-                    Text(app.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(windowCountLabel(app.windows.count))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                windowOverflowSummary
+        VStack(spacing: 16) {
+            if let app = model.selectedApp {
+                TeardropWindowGrid(
+                    windows: app.windows,
+                    visibleIndices: model.visibleWindowIndices,
+                    appIcon: app.icon,
+                    selectedIndex: model.selectedWindowIndex,
+                    reduceMotion: reduceMotion
+                )
             }
-
-            if let app = model.selectedApp, !app.windows.isEmpty {
-                ForEach(model.visibleWindowIndices, id: \.self) { index in
-                    WindowSelectionRow(
-                        item: app.windows[index],
-                        appIcon: app.icon,
-                        isSelected: index == model.selectedWindowIndex,
-                        reduceMotion: reduceMotion
-                    )
-                }
-            } else {
-                HStack(spacing: 10) {
-                    Image(systemName: "macwindow.badge.plus")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("No open windows")
-                            .font(.subheadline.weight(.semibold))
-                        Text("Release to activate the application.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 84, alignment: .leading)
-                .padding(.horizontal, 12)
-                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
-            }
+            windowOverflowSummary
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private var footer: some View {
-        HStack(spacing: 12) {
-            Label("Apps", systemImage: "arrow.left.and.right")
-            if (model.selectedApp?.windows.count ?? 0) > 1 {
-                Label("Windows", systemImage: "arrow.up.and.down")
-            }
-            Spacer()
-            Text("Release to open \(model.selectedWindow?.title ?? model.selectedApp?.name ?? "application")")
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .font(.caption.weight(.medium))
-        .foregroundStyle(.secondary)
-        .accessibilityElement(children: .combine)
-    }
+    // footer removed to match native macOS UI
     @ViewBuilder
     private var panelBackground: some View {
-        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
         if reduceTransparency {
-            shape.fill(Color(nsColor: .windowBackgroundColor))
+            Color(nsColor: .windowBackgroundColor)
         } else {
-            shape.fill(.thickMaterial)
+            Rectangle().fill(.thickMaterial)
         }
     }
 
     @ViewBuilder
     private func appOverflowBadge(_ count: Int, symbol: String) -> some View {
         if count > 0 {
-            VStack(spacing: 2) {
+            VStack(spacing: 3) {
                 Image(systemName: symbol)
                 Text("+\(count)").monospacedDigit()
             }
-            .font(.caption2.weight(.semibold))
+            .font(.title3.weight(.semibold))
             .foregroundStyle(.secondary)
-            .frame(width: 28)
+            .frame(width: 42)
             .accessibilityLabel("\(count) more applications")
         }
     }
@@ -339,11 +357,11 @@ private struct AppSwitcherOverlayView: View {
         let before = model.hiddenWindowsBefore
         let after = model.hiddenWindowsAfter
         if before > 0 || after > 0 {
-            HStack(spacing: 7) {
+            HStack(spacing: 10) {
                 if before > 0 { Label("+\(before)", systemImage: "chevron.up") }
                 if after > 0 { Label("+\(after)", systemImage: "chevron.down") }
             }
-            .font(.caption2.weight(.semibold))
+            .font(.title3.weight(.semibold))
             .foregroundStyle(.secondary)
         }
     }
@@ -359,55 +377,108 @@ private struct AppRailCard: View {
     let reduceMotion: Bool
 
     var body: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 0) {
             Image(nsImage: item.icon)
                 .resizable()
-                .interpolation(.medium)
-                .frame(width: 38, height: 38)
-                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
-            Text(item.name)
-                .font(.caption.weight(isSelected ? .semibold : .medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: 72)
+                .interpolation(.high)
+                .frame(width: 108, height: 108)
+                .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
         }
-        .padding(7)
-        .frame(width: 82, height: 74)
+        .padding(14)
+        .frame(width: 136, height: 136)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isSelected ? GlideSwitcherPalette.touchLilac.opacity(0.20) : Color.primary.opacity(0.045))
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(isSelected ? Color.primary.opacity(0.15) : Color.clear)
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isSelected ? GlideSwitcherPalette.motionViolet : Color.primary.opacity(0.09),
-                        lineWidth: isSelected ? 3 : 1)
-        }
         .overlay(alignment: .topTrailing) {
             if item.windows.count > 1 {
                 Text("\(item.windows.count)")
-                    .font(.caption2.bold().monospacedDigit())
-                    .foregroundStyle(isSelected ? GlideSwitcherPalette.motionViolet : Color.secondary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
+                    .font(.headline.bold().monospacedDigit())
+                    .foregroundStyle(Color.primary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3)
                     .background(Color(nsColor: .windowBackgroundColor).opacity(0.94), in: Capsule())
-                    .padding(4)
+                    .padding(3)
             }
         }
-        .scaleEffect(isSelected ? 1.03 : 1)
+        .scaleEffect(isSelected ? 1.05 : 1)
         .animation(reduceMotion ? nil : .interactiveSpring(response: 0.25, dampingFraction: 0.7), value: isSelected)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(item.name), \(item.windows.count) windows")
         .accessibilityValue(isSelected ? "Selected application" : "")
     }
 }
-private struct WindowSelectionRow: View {
+private struct TeardropWindowGrid: View {
+    let windows: [AppSwitcherWindowItem]
+    let visibleIndices: [Int]
+    let appIcon: NSImage
+    let selectedIndex: Int
+    let reduceMotion: Bool
+
+    @ViewBuilder
+    private func card(for index: Int) -> some View {
+        if windows.indices.contains(index) {
+            WindowSelectionCard(
+                item: windows[index],
+                appIcon: appIcon,
+                isSelected: index == selectedIndex,
+                reduceMotion: reduceMotion
+            )
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            if visibleIndices.count == 2 {
+                HStack(spacing: 16) {
+                    card(for: visibleIndices[0])
+                    card(for: visibleIndices[1])
+                }
+            } else if visibleIndices.count == 3 {
+                card(for: visibleIndices[0])
+                HStack(spacing: 16) {
+                    card(for: visibleIndices[1])
+                    card(for: visibleIndices[2])
+                }
+            } else if visibleIndices.count == 4 {
+                HStack(spacing: 16) {
+                    card(for: visibleIndices[0])
+                    card(for: visibleIndices[1])
+                }
+                HStack(spacing: 16) {
+                    card(for: visibleIndices[2])
+                    card(for: visibleIndices[3])
+                }
+            } else if visibleIndices.count == 5 {
+                HStack(spacing: 16) {
+                    card(for: visibleIndices[0])
+                    card(for: visibleIndices[1])
+                }
+                HStack(spacing: 16) {
+                    card(for: visibleIndices[2])
+                    card(for: visibleIndices[3])
+                    card(for: visibleIndices[4])
+                }
+            } else {
+                let columns = Array(repeating: GridItem(.fixed(318), spacing: 16), count: 3)
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(visibleIndices, id: \.self) { i in
+                        card(for: i)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct WindowSelectionCard: View {
     let item: AppSwitcherWindowItem
     let appIcon: NSImage
     let isSelected: Bool
     let reduceMotion: Bool
 
     var body: some View {
-        HStack(spacing: 11) {
+        VStack(spacing: 12) {
             Group {
                 if let thumbnail = item.thumbnail {
                     Image(nsImage: thumbnail)
@@ -420,47 +491,38 @@ private struct WindowSelectionRow: View {
                         Image(nsImage: appIcon)
                             .resizable()
                             .interpolation(.medium)
-                            .frame(width: 34, height: 34)
+                            .frame(width: 72, height: 72)
                     }
                 }
             }
-            .frame(width: 104, height: 58)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(width: 294, height: 165)
+            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(spacing: 4) {
                 Text(item.title)
-                    .font(.callout.weight(isSelected ? .semibold : .medium))
+                    .font(.title3.weight(isSelected ? .semibold : .medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 if let status = item.status {
                     Label(status.label, systemImage: status.symbol)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Current Space")
-                        .font(.caption2)
+                        .font(.headline.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
             }
-            Spacer(minLength: 8)
-            if isSelected {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(GlideSwitcherPalette.motionViolet)
-            }
+            .padding(.horizontal, 6)
         }
-        .padding(.horizontal, 9)
-        .frame(maxWidth: .infinity, minHeight: 66, maxHeight: 66)
+        .padding(12)
+        .frame(width: 318)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(isSelected ? GlideSwitcherPalette.touchLilac.opacity(0.18) : Color.primary.opacity(0.035))
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(isSelected ? GlideSwitcherPalette.motionViolet : Color.primary.opacity(0.08),
-                        lineWidth: isSelected ? 2.5 : 1)
+                        lineWidth: isSelected ? 3.75 : 1.5)
         }
-        .scaleEffect(isSelected ? 1.008 : 1)
+        .scaleEffect(isSelected ? 1.02 : 1)
         .animation(reduceMotion ? nil : .interactiveSpring(response: 0.25, dampingFraction: 0.7), value: isSelected)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.title)
