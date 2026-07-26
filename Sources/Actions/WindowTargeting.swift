@@ -517,17 +517,36 @@ final class WindowTargeting {
         return wins
     }
 
-    func hasRealWindow(for pid: pid_t) -> Bool {
-        windows(for: pid).contains { window in
-            guard axRole(window) == (kAXWindowRole as String) else { return false }
-            if let subrole = axSubrole(window) {
-                return subrole == (kAXStandardWindowSubrole as String)
-                    || subrole == (kAXDialogSubrole as String)
-                    || subrole == (kAXSystemDialogSubrole as String)
+    struct AppWindowSummary {
+        let totalCount: Int
+        let minimizedCount: Int
+
+        var allMinimized: Bool { totalCount > 0 && minimizedCount == totalCount }
+    }
+
+    func windowSummary(for pid: pid_t) -> AppWindowSummary {
+        let realWindows = windows(for: pid).filter(isRealWindow)
+        let minimized = realWindows.reduce(into: 0) { count, window in
+            if axBool(window, attribute: kAXMinimizedAttribute as CFString) == true {
+                count += 1
             }
-            guard let frame = axFrame(window), frame.width >= 40, frame.height >= 40 else { return false }
-            return true
         }
+        return AppWindowSummary(totalCount: realWindows.count, minimizedCount: minimized)
+    }
+
+    func hasRealWindow(for pid: pid_t) -> Bool {
+        windows(for: pid).contains(where: isRealWindow)
+    }
+
+    private func isRealWindow(_ window: AXUIElement) -> Bool {
+        guard axRole(window) == (kAXWindowRole as String) else { return false }
+        if let subrole = axSubrole(window) {
+            return subrole == (kAXStandardWindowSubrole as String)
+                || subrole == (kAXDialogSubrole as String)
+                || subrole == (kAXSystemDialogSubrole as String)
+        }
+        guard let frame = axFrame(window), frame.width >= 40, frame.height >= 40 else { return false }
+        return true
     }
 
     // ── Finder window cache ──

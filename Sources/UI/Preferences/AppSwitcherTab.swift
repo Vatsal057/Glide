@@ -1,100 +1,184 @@
 import SwiftUI
+import CoreGraphics
 
 struct AppSwitcherTab: View {
     @EnvironmentObject var store: PreferencesStore
+    @State private var screenCaptureGranted = CGPreflightScreenCaptureAccess()
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-
+            VStack(alignment: .leading, spacing: 20) {
                 headerCard
 
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Toggle("Enable App Switcher", isOn: enabledBinding)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 8)
-
-                        if store.appSwitcher.enabled {
-                            Text("3-finger swipe left → previous app · 3-finger swipe right → next app. Hold Shift (or another modifier) while swiping to run a different gesture instead — configure those under Gestures.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 12)
-                                .padding(.bottom, 4)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-
                 if store.appSwitcher.enabled {
-                    TuningSection(title: "Behavior", icon: "gearshape") {
-                        Toggle("Skip Finder when it has no windows", isOn: switcherBinding(\.skipWindowlessFinder))
-                        Text("Avoids landing on an empty Finder desktop while browsing.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    overlayPreview
+                    presentationSection
 
+                    TuningSection(title: "Behavior", icon: "gearshape") {
                         Toggle("Restore minimized windows after switching", isOn: switcherBinding(\.restoreMinimizedOnCommit))
-                        Text("When you release the gesture, unminimizes windows of the app you selected.")
+                        Text("Brings the selected app’s minimized windows back when you release. Apps with minimized windows remain available in the switcher.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
 
-                    TuningSection(title: "Sensitivity", icon: "slider.horizontal.3") {
+                    TuningSection(title: "Movement", icon: "slider.horizontal.3") {
                         SliderRow(
-                            label: "Step Threshold",
+                            label: "Step Distance",
                             value: tuningBinding(\.appSwitcherStepThreshold),
                             range: 0.001...0.01,
                             format: "%.3f",
-                            hint: "How far to swipe while holding to move to the next or previous app."
+                            hint: "How far your fingers travel before the selection moves one app."
                         )
                         SliderRow(
-                            label: "Debounce",
+                            label: "Step Delay",
                             value: tuningBinding(\.appSwitcherDebounce),
                             range: 0.05...0.5,
                             format: "%.2f s",
-                            hint: "Minimum time between steps so apps are not skipped too quickly."
+                            hint: "The shortest pause between selection changes."
                         )
                     }
-
-                    comparisonCard
                 }
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .onAppear { screenCaptureGranted = CGPreflightScreenCaptureAccess() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            screenCaptureGranted = CGPreflightScreenCaptureAccess()
+        }
     }
 
     private var headerCard: some View {
-        HStack(alignment: .top, spacing: 16) {
-            Image(systemName: "rectangle.2.swap")
-                .font(.system(size: 36))
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: "rectangle.3.group.fill")
+                .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
-                .frame(width: 44)
+                .frame(width: 44, height: 44)
+                .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text("App Switcher")
-                    .font(.title2.bold())
-                Text("Hold a three-finger horizontal swipe to browse open apps in the macOS switcher, then release to confirm. Swipe up and down with three fingers can still be assigned under Gestures.")
+                    .font(.title2.weight(.semibold))
+                Text("Browse running apps with a three-finger horizontal swipe, then release to switch.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Spacer(minLength: 12)
+
+            Text(store.appSwitcher.enabled ? "On" : "Off")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(store.appSwitcher.enabled ? .green : .secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(.quaternary, in: Capsule(style: .continuous))
+
+            Toggle("Enable App Switcher", isOn: enabledBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .accessibilityLabel("Enable App Switcher")
         }
-        .padding()
-        .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+        .padding(16)
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.10), lineWidth: 1)
+        }
     }
 
-    private var comparisonCard: some View {
+    private var overlayPreview: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "hand.draw.fill")
+                    .foregroundStyle(Color(red: 148 / 255, green: 129 / 255, blue: 201 / 255))
+                Text("Custom overlay preview")
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                Text("Release to confirm")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            HStack(spacing: 10) {
+                previewCard(name: "Finder", symbol: "face.smiling", selected: false)
+                previewCard(name: "Notes", symbol: "note.text", selected: true)
+                previewCard(name: "Safari", symbol: "safari", selected: false)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
+        }
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+        }
+    }
+
+    private func previewCard(name: String, symbol: String, selected: Bool) -> some View {
+        let violet = Color(red: 148 / 255, green: 129 / 255, blue: 201 / 255)
+        return VStack(spacing: 7) {
+            Image(systemName: symbol)
+                .font(.system(size: 28, weight: .medium))
+                .frame(width: 42, height: 42)
+                .foregroundStyle(selected ? violet : Color.secondary)
+            Text(name)
+                .font(.caption.weight(selected ? .semibold : .medium))
+                .lineLimit(1)
+        }
+        .frame(width: 104, height: 82)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(selected ? violet.opacity(0.16) : Color.primary.opacity(0.05))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(selected ? violet : Color.primary.opacity(0.10), lineWidth: selected ? 3 : 1)
+        }
+    }
+    private var presentationSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Not the same as “Activate Next/Previous App”", systemImage: "info.circle")
-                    .font(.subheadline.bold())
-                Text("Activate Next/Previous App switches instantly with no overlay. App Switcher opens the Cmd+Tab overlay so you can browse before releasing.")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: screenCaptureGranted ? "macwindow.on.rectangle" : "app.dashed")
+                        .foregroundStyle(screenCaptureGranted ? Color.accentColor : Color.secondary)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(screenCaptureGranted ? "Window previews are ready" : "Using app icons")
+                            .font(.subheadline.weight(.semibold))
+                        Text(screenCaptureGranted
+                             ? "Glide shows each app’s largest visible window when the switcher opens."
+                             : "The switcher works without Screen Recording. Grant access if you also want window previews.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    if !screenCaptureGranted {
+                        Button("Open Privacy Settings") { openScreenRecordingSettings() }
+                            .controlSize(.small)
+                    }
+                }
+
+                Divider()
+
+                Label("If the custom panel cannot open, Glide falls back to the native macOS switcher.", systemImage: "checkmark.shield")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .padding(8)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Presentation", systemImage: "rectangle.on.rectangle.angled")
         }
+    }
+
+    private func openScreenRecordingSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private var enabledBinding: Binding<Bool> {

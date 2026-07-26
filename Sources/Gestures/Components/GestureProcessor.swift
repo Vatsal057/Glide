@@ -111,18 +111,28 @@ final class GestureProcessor {
             let delta = frame.cx - data.refX
             if abs(delta) > tuning.appSwitcherStepThreshold, now - (engine?.lastStepTime ?? 0) >= tuning.appSwitcherDebounce {
                 if delta > 0, data.index < data.effectiveMax {
-                    Haptic.switcherStep(); engine?.sendCmdTab()
-                    engine?.lastStepTime = now; data.refX = frame.cx; data.index += 1
+                    Haptic.switcherStep()
+                    if !data.usesCustomOverlay { engine?.sendCmdTab() }
+                    engine?.lastStepTime = now
+                    data.refX = frame.cx
+                    data.index += 1
                     if let fi = data.finderIndex, data.index == fi, data.index < data.effectiveMax {
-                        engine?.sendCmdTab(); data.index += 1
+                        if !data.usesCustomOverlay { engine?.sendCmdTab() }
+                        data.index += 1
                     }
+                    engine?.updateAppSwitcherSelection(data)
                     return .switchingApps(data)
                 } else if delta < 0, data.index > data.effectiveMin {
-                    Haptic.switcherStep(); engine?.sendCmdShiftTab()
-                    engine?.lastStepTime = now; data.refX = frame.cx; data.index -= 1
+                    Haptic.switcherStep()
+                    if !data.usesCustomOverlay { engine?.sendCmdShiftTab() }
+                    engine?.lastStepTime = now
+                    data.refX = frame.cx
+                    data.index -= 1
                     if let fi = data.finderIndex, data.index == fi, data.index > data.effectiveMin {
-                        engine?.sendCmdShiftTab(); data.index -= 1
+                        if !data.usesCustomOverlay { engine?.sendCmdShiftTab() }
+                        data.index -= 1
                     }
+                    engine?.updateAppSwitcherSelection(data)
                     return .switchingApps(data)
                 }
             }

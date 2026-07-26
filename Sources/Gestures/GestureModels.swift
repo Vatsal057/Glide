@@ -70,6 +70,7 @@ struct SwitcherData {
     let finderIndex: Int?   // position of windowless Finder, nil if Finder has windows
     let effectiveMin: Int   // left boundary (tightened if Finder is at left edge)
     let effectiveMax: Int   // right boundary (tightened if Finder is at right edge)
+    let usesCustomOverlay: Bool
 }
 
 enum GesturePhase {

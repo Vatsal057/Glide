@@ -78,7 +78,7 @@ Below is the complete list of actions you can assign to your trackpad gestures, 
 *   **Hide App Under Cursor:** Minimizes/hides the application under your mouse pointer from view without closing it.
 *   **Hide Other Apps:** Hides all other running apps except for the one under your mouse cursor, letting you focus on a single task.
 *   **Open App...:** Launches an application of your choice. When setting up this gesture, Glide opens a file picker so you can select any app in your Applications folder.
-*   **Next App (App Switcher) / Previous App (App Switcher):** Activates the macOS application switcher (equivalent to Command + Tab). Sliding your fingers left or right lets you cycle through your open apps.
+*   **Next App (App Switcher) / Previous App (App Switcher):** Opens Glide’s custom application switcher. Slide horizontally to browse running apps, then release to switch. Window previews appear when Screen Recording access is already granted; otherwise Glide uses app icons.
 *   **Activate Next App / Activate Previous App:** Instantly cycles and switches focus to the next or previous running app on your system directly, without opening the app switcher screen.
 
 ### Windows (Window Management)

@@ -335,67 +335,110 @@ final class GestureEngine {
     // MARK: - App Switcher logic
 
     func beginAppSwitcher(for action: GestureAction, refX: Float, fingerCount: Int) -> SwitcherData? {
-        let apps = AppSwitcherState.shared.getOrderedApps()
-        guard apps.count > 1 else { return nil }
+        let systemApps = AppSwitcherState.shared.getOrderedApps()
+        guard systemApps.count > 1 else { return nil }
+
+        let movingForward = action == .appSwitcherNext
+        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+
+        // Finder's desktop process is always running, but it is not useful as an app
+        // destination unless Accessibility reports a real standard/dialog window.
+        let customApps = systemApps.filter { app in
+            app.bundleIdentifier != "com.apple.finder"
+                || WindowTargeting.shared.hasRealWindow(for: app.processIdentifier)
+        }
+        guard !customApps.isEmpty else { return nil }
+
+        let customIndex: Int = {
+            guard let frontmostPID,
+                  let frontIndex = customApps.firstIndex(where: { $0.processIdentifier == frontmostPID }) else {
+                return movingForward ? 0 : customApps.count - 1
+            }
+            if movingForward {
+                return frontIndex + 1 < customApps.count ? frontIndex + 1 : 0
+            }
+            return frontIndex > 0 ? frontIndex - 1 : customApps.count - 1
+        }()
+        guard customApps[customIndex].processIdentifier != frontmostPID else { return nil }
 
         clearReciprocalToken()
-        sendKeyEvent(0x37, down: true, flags: .maskCommand) // kCmd
         Haptic.switcherOpen()
 
-        var currentIndex = 0
-        if action == .appSwitcherNext {
-            sendCmdTab()
-            currentIndex = 1
-        } else {
-            sendCmdShiftTab()
-            currentIndex = apps.count - 1
+        // The custom panel uses its own filtered catalog, so windowless Finder is
+        // absent rather than merely skipped. If the panel cannot be placed, preserve
+        // system Cmd+Tab ordering in the fallback path below.
+        if AppSwitcherOverlayController.shared.show(apps: customApps, selectedIndex: customIndex) {
+            lastStepTime = ProcessInfo.processInfo.systemUptime
+            return SwitcherData(
+                refX: refX,
+                index: customIndex,
+                fingerCount: fingerCount,
+                apps: customApps,
+                finderIndex: nil,
+                effectiveMin: 0,
+                effectiveMax: customApps.count - 1,
+                usesCustomOverlay: true
+            )
         }
 
         var finderIndex: Int? = nil
-        if Settings.shared.appSwitcher.skipWindowlessFinder {
-            if let idx = apps.firstIndex(where: { $0.bundleIdentifier == "com.apple.finder" }) {
-                // Cached answer — never a synchronous Apple Event mid-gesture
-                // (Finder can't reply while it's busy, e.g. servicing a drag).
-                if !WindowTargeting.shared.finderLikelyHasWindows {
-                    finderIndex = idx
-                }
-            }
-            WindowTargeting.shared.refreshFinderWindowCache()   // fresh for the next open
+        if let idx = systemApps.firstIndex(where: { $0.bundleIdentifier == "com.apple.finder" }),
+           !WindowTargeting.shared.hasRealWindow(for: systemApps[idx].processIdentifier) {
+            finderIndex = idx
         }
+        WindowTargeting.shared.refreshFinderWindowCache()
 
-        if let fi = finderIndex, currentIndex == fi {
-            if action == .appSwitcherNext {
-                sendCmdTab()
-                currentIndex += 1
-            } else {
-                sendCmdShiftTab()
-                currentIndex -= 1
-            }
-        }
-
+        let firstIndex = movingForward ? 1 : systemApps.count - 1
+        var nativeIndex = firstIndex
+        if finderIndex == nativeIndex { nativeIndex += movingForward ? 1 : -1 }
         let effectiveMin = (finderIndex == 0) ? 1 : 0
-        let effectiveMax = (finderIndex == apps.count - 1) ? apps.count - 2 : apps.count - 1
+        let effectiveMax = (finderIndex == systemApps.count - 1) ? systemApps.count - 2 : systemApps.count - 1
+        nativeIndex = min(max(nativeIndex, effectiveMin), effectiveMax)
 
-        // The Finder double-skip above can overshoot the bounds (e.g. only two apps,
-        // windowless Finder last). Keep the tracked index in sync with the app the
-        // switcher actually highlighted, or later left/right steps count from wrong.
-        currentIndex = min(max(currentIndex, effectiveMin), effectiveMax)
+        sendKeyEvent(0x37, down: true, flags: .maskCommand) // kCmd
+        if movingForward { sendCmdTab() } else { sendCmdShiftTab() }
+        if finderIndex == firstIndex {
+            if movingForward { sendCmdTab() } else { sendCmdShiftTab() }
+        }
 
         lastStepTime = ProcessInfo.processInfo.systemUptime
-        return SwitcherData(refX: refX, index: currentIndex, fingerCount: fingerCount, apps: apps,
-                           finderIndex: finderIndex, effectiveMin: effectiveMin, effectiveMax: effectiveMax)
+        return SwitcherData(
+            refX: refX,
+            index: nativeIndex,
+            fingerCount: fingerCount,
+            apps: systemApps,
+            finderIndex: finderIndex,
+            effectiveMin: effectiveMin,
+            effectiveMax: effectiveMax,
+            usesCustomOverlay: false
+        )
+    }
+
+    func updateAppSwitcherSelection(_ data: SwitcherData) {
+        guard data.usesCustomOverlay else { return }
+        AppSwitcherOverlayController.shared.select(data.index)
     }
 
     private func commitAppSwitcher(data: SwitcherData) {
         Haptic.switcherCommit()
-        sendKeyEvent(0x3A, down: true,  flags: [.maskAlternate]) // kOpt
-        sendKeyEvent(0x37, down: false, flags: [.maskCommand, .maskAlternate]) // kCmd
-        sendKeyEvent(0x3A, down: false, flags: []) // kOpt
-        
+        let selectedApp = data.apps.indices.contains(data.index) ? data.apps[data.index] : nil
+
+        if data.usesCustomOverlay {
+            AppSwitcherOverlayController.shared.hide()
+            selectedApp?.unhide()
+            selectedApp?.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        } else {
+            // Releasing Command confirms the selection in the native Cmd+Tab panel.
+            sendKeyEvent(0x3A, down: true,  flags: [.maskAlternate]) // kOpt
+            sendKeyEvent(0x37, down: false, flags: [.maskCommand, .maskAlternate]) // kCmd
+            sendKeyEvent(0x3A, down: false, flags: []) // kOpt
+        }
+
         if Settings.shared.appSwitcher.restoreMinimizedOnCommit {
+            let selectedPID = selectedApp?.processIdentifier
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                guard let front = NSWorkspace.shared.frontmostApplication else { return }
-                WindowTargeting.shared.unminimizeWindows(of: front.processIdentifier)
+                guard let pid = selectedPID ?? NSWorkspace.shared.frontmostApplication?.processIdentifier else { return }
+                WindowTargeting.shared.unminimizeWindows(of: pid)
             }
         }
     }

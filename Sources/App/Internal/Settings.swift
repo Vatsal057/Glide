@@ -559,7 +559,7 @@ struct EdgeMargin: Codable, Equatable {
     static let range: ClosedRange<Float> = 0.0...0.20
 }
 
-/// Hold-to-browse app switcher (Cmd+Tab overlay). Separate from the gesture rule list.
+/// Hold-to-browse app switcher with Glide overlay and native fallback. Separate from the gesture rule list.
 struct AppSwitcherSettings: Codable, Equatable {
     var enabled: Bool = true
     /// Always 3 — horizontal swipes with three fingers are reserved for the switcher.
