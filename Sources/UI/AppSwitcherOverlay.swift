@@ -59,8 +59,8 @@ private final class AppSwitcherOverlayModel: ObservableObject {
 
     var visibleWindowIndices: [Int] {
         guard let windows = selectedApp?.windows, !windows.isEmpty else { return [] }
-        let count = min(6, windows.count)
-        let start = min(max(0, selectedWindowIndex - count / 2), windows.count - count)
+        let start = selectedWindowIndex
+        let count = min(3, windows.count - start)
         return Array(start..<(start + count))
     }
 
@@ -211,37 +211,131 @@ private extension VerticalAlignment {
     }
     static let appSwitcherRailCenter = VerticalAlignment(AppSwitcherRailCenter.self)
 }
+
+private extension HorizontalAlignment {
+    struct SelectedAppCenter: AlignmentID {
+        static func defaultValue(in d: ViewDimensions) -> CGFloat {
+            return d[HorizontalAlignment.center]
+        }
+    }
+    static let selectedAppCenter = HorizontalAlignment(SelectedAppCenter.self)
+}
+
+private struct TeardropShape: Shape {
+    var neckOffset: CGFloat = 0
+    var neckWidth: CGFloat = 16
+    var neckHeight: CGFloat = 20
+    var cornerRadius: CGFloat = 28
+
+    var animatableData: CGFloat {
+        get { neckOffset }
+        set { neckOffset = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let midX = rect.midX + neckOffset
+        let topY = rect.minY
+        let neckBottomY = rect.minY + neckHeight
+        let bottomY = rect.maxY
+        let leftX = rect.minX
+        let rightX = rect.maxX
+        
+        let safeMidX = min(rightX - cornerRadius, max(leftX + cornerRadius, midX))
+        
+        path.move(to: CGPoint(x: safeMidX - neckWidth / 2, y: topY))
+        
+        path.addCurve(
+            to: CGPoint(x: rightX, y: neckBottomY + cornerRadius),
+            control1: CGPoint(x: min(rightX, max(leftX, safeMidX + neckWidth / 2)), y: topY + neckHeight * 0.4),
+            control2: CGPoint(x: rightX, y: neckBottomY)
+        )
+        
+        path.addLine(to: CGPoint(x: rightX, y: bottomY - cornerRadius))
+        
+        path.addArc(
+            center: CGPoint(x: rightX - cornerRadius, y: bottomY - cornerRadius),
+            radius: cornerRadius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        
+        path.addLine(to: CGPoint(x: leftX + cornerRadius, y: bottomY))
+        
+        path.addArc(
+            center: CGPoint(x: leftX + cornerRadius, y: bottomY - cornerRadius),
+            radius: cornerRadius,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        
+        path.addLine(to: CGPoint(x: leftX, y: neckBottomY + cornerRadius))
+        
+        path.addCurve(
+            to: CGPoint(x: safeMidX - neckWidth / 2, y: topY),
+            control1: CGPoint(x: leftX, y: neckBottomY),
+            control2: CGPoint(x: min(rightX, max(leftX, safeMidX - neckWidth / 2)), y: topY + neckHeight * 0.4)
+        )
+        
+        path.closeSubpath()
+        return path
+    }
+}
 private struct AppSwitcherOverlayView: View {
     @ObservedObject var model: AppSwitcherOverlayModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                panelBackground
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .mask {
-                        Canvas { context, size in
-                            context.addFilter(.alphaThreshold(min: 0.5, color: .black))
-                            context.addFilter(.blur(radius: 24))
-                            context.drawLayer { ctx in
-                                if let resolved = context.resolveSymbol(id: "layout") {
-                                    ctx.draw(resolved, at: CGPoint(x: size.width / 2, y: size.height / 2))
+        Group {
+            if !model.items.isEmpty {
+                GeometryReader { geo in
+                    ZStack {
+                        panelBackground
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .mask {
+                                Canvas { context, size in
+                                    context.addFilter(.alphaThreshold(min: 0.5, color: .black))
+                                    context.addFilter(.blur(radius: 24))
+                                    context.drawLayer { ctx in
+                                        if let resolved = context.resolveSymbol(id: "layout") {
+                                            ctx.draw(resolved, at: CGPoint(x: size.width / 2, y: size.height / 2))
+                                        }
+                                    }
+                                } symbols: {
+                                    layoutStructure(isMask: true)
+                                        .frame(width: geo.size.width, height: geo.size.height)
+                                        .tag("layout")
                                 }
                             }
-                        } symbols: {
-                            layoutStructure(isMask: true)
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .tag("layout")
-                        }
-                    }
 
-                layoutStructure(isMask: false)
-                    .frame(width: geo.size.width, height: geo.size.height)
+                        layoutStructure(isMask: false)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                    }
+                }
+                .animation(.interactiveSpring(response: 0.4, dampingFraction: 0.7), value: model.selectedApp?.windows.count)
             }
         }
-        .animation(.interactiveSpring(response: 0.4, dampingFraction: 0.7), value: model.selectedApp?.windows.count)
+    }
+
+    private var selectedAppOffset: CGFloat {
+        let visible = model.visibleAppIndices
+        let selIndex = model.selectedAppIndex
+        guard let posInVisible = visible.firstIndex(of: selIndex) else { return 0 }
+        
+        let cardStep: CGFloat = 132
+        let cardsTotalWidth = CGFloat(visible.count) * 128 + CGFloat(max(0, visible.count - 1)) * 4
+        let badgeLeftWidth: CGFloat = model.hiddenAppsBefore > 0 ? 46 : 0
+        let badgeRightWidth: CGFloat = model.hiddenAppsAfter > 0 ? 46 : 0
+        let railTotalWidth = cardsTotalWidth + badgeLeftWidth + badgeRightWidth
+        
+        let cardLeftInRail = badgeLeftWidth + CGFloat(posInVisible) * cardStep
+        let cardCenterInRail = cardLeftInRail + 64
+        let railCenter = railTotalWidth / 2.0
+        
+        return cardCenterInRail - railCenter
     }
 
     @ViewBuilder
@@ -269,26 +363,28 @@ private struct AppSwitcherOverlayView: View {
                 .alignmentGuide(.appSwitcherRailCenter) { d in d[VerticalAlignment.center] }
 
                 if (model.selectedApp?.windows.count ?? 0) > 1 {
-                    VStack(spacing: 0) {
-                        Rectangle()
-                            .fill(isMask ? Color.clear : Color.primary.opacity(0.2))
-                            .frame(width: 4, height: 32)
-                        
-                        Group {
-                            if isMask {
-                                windowSection.hidden()
-                            } else {
-                                windowSection
-                            }
-                        }
-                        .padding(20)
-                        .background {
-                            if isMask {
-                                Color.black.clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-                            }
+                    Group {
+                        if isMask {
+                            windowSection.hidden()
+                        } else {
+                            windowSection
                         }
                     }
-                    .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .top)))
+                    .padding(.top, 24)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+                    .background {
+                        if isMask {
+                            Color.black.clipShape(TeardropShape(neckOffset: 0))
+                        }
+                    }
+                    .offset(x: selectedAppOffset)
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.4, anchor: .top)),
+                            removal: .opacity.combined(with: .scale(scale: 0.6, anchor: .top))
+                        )
+                    )
                 }
             }
         }
@@ -309,8 +405,27 @@ private struct AppSwitcherOverlayView: View {
     }
 
     private var windowSection: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             if let app = model.selectedApp {
+                HStack(spacing: 6) {
+                    Image(nsImage: app.icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 16, height: 16)
+                    Text(app.name)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary.opacity(0.8))
+                    Text("•")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("\(app.windows.count) \(app.windows.count == 1 ? "window" : "windows")")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(Color.primary.opacity(0.06), in: Capsule())
+
                 TeardropWindowGrid(
                     windows: app.windows,
                     visibleIndices: model.visibleWindowIndices,
@@ -422,56 +537,32 @@ private struct TeardropWindowGrid: View {
     @ViewBuilder
     private func card(for index: Int) -> some View {
         if windows.indices.contains(index) {
+            let offsetIndex = max(0, index - selectedIndex)
             WindowSelectionCard(
                 item: windows[index],
                 appIcon: appIcon,
                 isSelected: index == selectedIndex,
                 reduceMotion: reduceMotion
             )
+            .scaleEffect(x: 1.0 - CGFloat(offsetIndex) * 0.08, y: 1.0 - CGFloat(offsetIndex) * 0.04)
+            .offset(y: CGFloat(offsetIndex * 50))
+            .zIndex(Double(-index))
         }
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            if visibleIndices.count == 2 {
-                HStack(spacing: 12) {
-                    card(for: visibleIndices[0])
-                    card(for: visibleIndices[1])
-                }
-            } else if visibleIndices.count == 3 {
-                card(for: visibleIndices[0])
-                HStack(spacing: 12) {
-                    card(for: visibleIndices[1])
-                    card(for: visibleIndices[2])
-                }
-            } else if visibleIndices.count == 4 {
-                HStack(spacing: 12) {
-                    card(for: visibleIndices[0])
-                    card(for: visibleIndices[1])
-                }
-                HStack(spacing: 12) {
-                    card(for: visibleIndices[2])
-                    card(for: visibleIndices[3])
-                }
-            } else if visibleIndices.count == 5 {
-                HStack(spacing: 12) {
-                    card(for: visibleIndices[0])
-                    card(for: visibleIndices[1])
-                }
-                HStack(spacing: 12) {
-                    card(for: visibleIndices[2])
-                    card(for: visibleIndices[3])
-                    card(for: visibleIndices[4])
-                }
-            } else {
-                let columns = Array(repeating: GridItem(.fixed(212), spacing: 12), count: 3)
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(visibleIndices, id: \.self) { i in
-                        card(for: i)
-                    }
-                }
+        ZStack(alignment: .top) {
+            ForEach(visibleIndices, id: \.self) { i in
+                card(for: i)
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.8).combined(with: .move(edge: .bottom)).combined(with: .opacity),
+                        removal: .scale(scale: 0.8).combined(with: .move(edge: .top)).combined(with: .opacity)
+                    ))
             }
         }
+        .padding(.bottom, CGFloat(max(0, visibleIndices.count - 1) * 50))
+        .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.6), value: visibleIndices)
+        .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.6), value: selectedIndex)
     }
 }
 
@@ -500,7 +591,30 @@ private struct WindowSelectionCard: View {
                 }
             }
             .frame(width: 192, height: 108)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .clipShape(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 10,
+                    bottomLeadingRadius: 22,
+                    bottomTrailingRadius: 22,
+                    topTrailingRadius: 10,
+                    style: .continuous
+                )
+            )
+            .overlay(alignment: .topTrailing) {
+                if let status = item.status {
+                    HStack(spacing: 3) {
+                        Image(systemName: status.symbol)
+                            .font(.system(size: 9, weight: .bold))
+                        Text(status.label)
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.65), in: Capsule())
+                    .padding(6)
+                }
+            }
 
             VStack(spacing: 2) {
                 Text(item.title)
@@ -517,17 +631,35 @@ private struct WindowSelectionCard: View {
         }
         .padding(10)
         .frame(width: 212)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(isSelected ? GlideSwitcherPalette.touchLilac.opacity(0.18) : Color.primary.opacity(0.035))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(isSelected ? GlideSwitcherPalette.motionViolet : Color.primary.opacity(0.08),
-                        lineWidth: isSelected ? 2.5 : 1)
+        .background {
+            let shape = UnevenRoundedRectangle(
+                topLeadingRadius: 14,
+                bottomLeadingRadius: 28,
+                bottomTrailingRadius: 28,
+                topTrailingRadius: 14,
+                style: .continuous
+            )
+            shape.fill(Color(nsColor: .windowBackgroundColor))
+            shape.fill(isSelected ? GlideSwitcherPalette.touchLilac.opacity(0.22) : Color.primary.opacity(0.04))
         }
-        .scaleEffect(isSelected ? 1.02 : 1)
-        .animation(reduceMotion ? nil : .interactiveSpring(response: 0.25, dampingFraction: 0.7), value: isSelected)
+        .overlay {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 14,
+                bottomLeadingRadius: 28,
+                bottomTrailingRadius: 28,
+                topTrailingRadius: 14,
+                style: .continuous
+            )
+            .stroke(
+                isSelected
+                ? AnyShapeStyle(LinearGradient(colors: [GlideSwitcherPalette.motionViolet, GlideSwitcherPalette.touchLilac], startPoint: .topLeading, endPoint: .bottomTrailing))
+                : AnyShapeStyle(Color.primary.opacity(0.08)),
+                lineWidth: isSelected ? 2.5 : 1
+            )
+        }
+        .shadow(color: isSelected ? GlideSwitcherPalette.motionViolet.opacity(0.22) : Color.clear, radius: 10, y: 4)
+        .scaleEffect(isSelected ? 1.03 : 1)
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: isSelected)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.title)
         .accessibilityValue(isSelected ? "Selected window" : (item.status?.label ?? "Current Space"))

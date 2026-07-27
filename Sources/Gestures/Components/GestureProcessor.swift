@@ -117,20 +117,24 @@ final class GestureProcessor {
                data.windowsByApp[data.index].count > 1 {
                 let verticalThreshold = max(tuning.appSwitcherStepThreshold * 2.5, 0.008)
                 let verticalIntent = abs(deltaY) > verticalThreshold && abs(deltaY) > abs(deltaX) * 1.15
-                if verticalIntent, canStep {
-                    let windowCount = data.windowsByApp[data.index].count
-                    let nextWindowIndex = deltaY < 0
-                        ? min(data.windowIndex + 1, windowCount - 1)
-                        : max(data.windowIndex - 1, 0)
-                    if nextWindowIndex != data.windowIndex {
-                        Haptic.switcherStep()
-                        data.windowIndex = nextWindowIndex
+                if verticalIntent {
+                    if canStep {
+                        let windowCount = data.windowsByApp[data.index].count
+                        let nextWindowIndex = deltaY < 0
+                            ? min(data.windowIndex + 1, windowCount - 1)
+                            : max(data.windowIndex - 1, 0)
+                        
+                        if nextWindowIndex != data.windowIndex {
+                            Haptic.switcherStep()
+                            data.windowIndex = nextWindowIndex
+                            engine?.lastStepTime = now
+                            engine?.updateAppSwitcherSelection(data)
+                        }
+                        
                         data.refX = frame.cx
                         data.refY = frame.cy
-                        engine?.lastStepTime = now
-                        engine?.updateAppSwitcherSelection(data)
-                        return .switchingApps(data)
                     }
+                    return .switchingApps(data)
                 }
             }
 
@@ -144,11 +148,8 @@ final class GestureProcessor {
                         data.index += 1
                     }
                     data.windowIndex = 0
-                    data.refX = frame.cx
-                    data.refY = frame.cy
                     engine?.lastStepTime = now
                     engine?.updateAppSwitcherSelection(data)
-                    return .switchingApps(data)
                 } else if deltaX < 0, data.index > data.effectiveMin {
                     Haptic.switcherStep()
                     if !data.usesCustomOverlay { engine?.sendCmdShiftTab() }
@@ -158,12 +159,13 @@ final class GestureProcessor {
                         data.index -= 1
                     }
                     data.windowIndex = 0
-                    data.refX = frame.cx
-                    data.refY = frame.cy
                     engine?.lastStepTime = now
                     engine?.updateAppSwitcherSelection(data)
-                    return .switchingApps(data)
                 }
+                
+                data.refX = frame.cx
+                data.refY = frame.cy
+                return .switchingApps(data)
             }
             return .switchingApps(data)
 

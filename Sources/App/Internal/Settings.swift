@@ -602,7 +602,7 @@ struct GestureTuning: Codable, Equatable {
     var tapHoldDuration:            TimeInterval = 0.5
     /// Each corner's reach (normalized) for zoned force-clicks. 0.35 → outer 35%
     /// on each axis counts as that corner; the middle stays position-blind.
-    var forceClickCornerMargin:     Float        = 0.35
+    var forceClickMargin:           EdgeMargin   = EdgeMargin(left: 0.35, right: 0.35, top: 0.35, bottom: 0.35)
     var edgeMarginEnabled:          Bool         = true
     var edgeMargin:                 EdgeMargin   = EdgeMargin()
 
@@ -625,7 +625,20 @@ struct GestureTuning: Codable, Equatable {
         swipeCoherenceThreshold   = try c.decodeIfPresent(Float.self,        forKey: .swipeCoherenceThreshold)   ?? 0.30
         swipeAngleTolerance       = try c.decodeIfPresent(Float.self,        forKey: .swipeAngleTolerance)       ?? 45
         tapHoldDuration           = try c.decodeIfPresent(TimeInterval.self, forKey: .tapHoldDuration)           ?? 0.5
-        forceClickCornerMargin    = try c.decodeIfPresent(Float.self,        forKey: .forceClickCornerMargin)    ?? 0.35
+        struct AnyKey: CodingKey {
+            var stringValue: String
+            var intValue: Int? { nil }
+            init?(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { nil }
+        }
+        if let fm = try? c.decodeIfPresent(EdgeMargin.self, forKey: .forceClickMargin) {
+            forceClickMargin = fm
+        } else if let fallbackContainer = try? decoder.container(keyedBy: AnyKey.self),
+                  let legacyMargin = try? fallbackContainer.decodeIfPresent(Float.self, forKey: AnyKey(stringValue: "forceClickCornerMargin")!) {
+            forceClickMargin = EdgeMargin(left: legacyMargin, right: legacyMargin, top: legacyMargin, bottom: legacyMargin)
+        } else {
+            forceClickMargin = EdgeMargin(left: 0.35, right: 0.35, top: 0.35, bottom: 0.35)
+        }
         edgeMarginEnabled         = try c.decodeIfPresent(Bool.self,         forKey: .edgeMarginEnabled)         ?? true
         edgeMargin                = try c.decodeIfPresent(EdgeMargin.self,   forKey: .edgeMargin)                ?? EdgeMargin()
     }
@@ -836,7 +849,11 @@ final class Settings {
         n.swipeCoherenceThreshold  = max(0.0, min(n.swipeCoherenceThreshold, 0.95))
         n.swipeAngleTolerance      = max(20, min(n.swipeAngleTolerance, 45))
         n.tapHoldDuration          = max(0.3, min(n.tapHoldDuration, 3.0))
-        n.forceClickCornerMargin   = max(0.15, min(n.forceClickCornerMargin, 0.45))
+        let clampForce = { (v: Float) in max(0.15, min(v, 0.45)) }
+        n.forceClickMargin.left   = clampForce(n.forceClickMargin.left)
+        n.forceClickMargin.right  = clampForce(n.forceClickMargin.right)
+        n.forceClickMargin.top    = clampForce(n.forceClickMargin.top)
+        n.forceClickMargin.bottom = clampForce(n.forceClickMargin.bottom)
         let clamp = { (v: Float) in max(EdgeMargin.range.lowerBound,
                                         min(v, EdgeMargin.range.upperBound)) }
         n.edgeMargin.left   = clamp(n.edgeMargin.left)

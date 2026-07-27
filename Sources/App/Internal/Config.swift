@@ -50,6 +50,10 @@ struct GlideConfig {
         var swipeAngleTolerance: Float = 45.0
         var tapHoldDuration: Double = 0.5
         var forceClickCornerMargin: Float = 0.35
+        var forceClickMarginLeft: Float = 0.35
+        var forceClickMarginRight: Float = 0.35
+        var forceClickMarginTop: Float = 0.35
+        var forceClickMarginBottom: Float = 0.35
         var edgeMarginEnabled: Bool = true
         var edgeMarginLeft: Float = 0.05
         var edgeMarginRight: Float = 0.05
@@ -150,7 +154,10 @@ extension GlideConfig {
         cfg.tuning.swipeCoherenceThreshold   = t.swipeCoherenceThreshold
         cfg.tuning.swipeAngleTolerance       = t.swipeAngleTolerance
         cfg.tuning.tapHoldDuration           = t.tapHoldDuration
-        cfg.tuning.forceClickCornerMargin    = t.forceClickCornerMargin
+        cfg.tuning.forceClickMarginLeft      = t.forceClickMargin.left
+        cfg.tuning.forceClickMarginRight     = t.forceClickMargin.right
+        cfg.tuning.forceClickMarginTop       = t.forceClickMargin.top
+        cfg.tuning.forceClickMarginBottom    = t.forceClickMargin.bottom
         cfg.tuning.edgeMarginEnabled         = t.edgeMarginEnabled
         cfg.tuning.edgeMarginLeft            = t.edgeMargin.left
         cfg.tuning.edgeMarginRight           = t.edgeMargin.right
@@ -241,7 +248,11 @@ extension GlideConfig {
         t.swipeCoherenceThreshold   = tuning.swipeCoherenceThreshold
         t.swipeAngleTolerance       = tuning.swipeAngleTolerance
         t.tapHoldDuration           = tuning.tapHoldDuration
-        t.forceClickCornerMargin    = tuning.forceClickCornerMargin
+        // If a new field was read, use it. Otherwise fall back to the legacy forceClickCornerMargin, which defaults to 0.35.
+        t.forceClickMargin.left     = tuning.forceClickMarginLeft != 0.35 ? tuning.forceClickMarginLeft : tuning.forceClickCornerMargin
+        t.forceClickMargin.right    = tuning.forceClickMarginRight != 0.35 ? tuning.forceClickMarginRight : tuning.forceClickCornerMargin
+        t.forceClickMargin.top      = tuning.forceClickMarginTop != 0.35 ? tuning.forceClickMarginTop : tuning.forceClickCornerMargin
+        t.forceClickMargin.bottom   = tuning.forceClickMarginBottom != 0.35 ? tuning.forceClickMarginBottom : tuning.forceClickCornerMargin
         t.edgeMarginEnabled         = tuning.edgeMarginEnabled
         t.edgeMargin.left           = tuning.edgeMarginLeft
         t.edgeMargin.right          = tuning.edgeMarginRight
@@ -399,7 +410,11 @@ enum GlideConfigSerializer {
             "    swipe_coherence_threshold: \(fmt(config.tuning.swipeCoherenceThreshold))",
             "    swipe_angle_tolerance: \(String(format: "%.1f", config.tuning.swipeAngleTolerance))",
             "    tap_hold_duration: \(String(format: "%.2f", config.tuning.tapHoldDuration))",
-            "    force_click_corner_margin: \(String(format: "%.2f", config.tuning.forceClickCornerMargin))",
+            "    force_click_margin:",
+            "      left: \(fmt(config.tuning.forceClickMarginLeft))",
+            "      right: \(fmt(config.tuning.forceClickMarginRight))",
+            "      top: \(fmt(config.tuning.forceClickMarginTop))",
+            "      bottom: \(fmt(config.tuning.forceClickMarginBottom))",
             "",
             "    edge_margin:",
             "      enabled: \(config.tuning.edgeMarginEnabled ? "true" : "false")",
@@ -670,11 +685,34 @@ enum GlideConfigParser {
             case "swipe_angle_tolerance":        tuning.swipeAngleTolerance       = floatVal(val)  ?? tuning.swipeAngleTolerance
             case "tap_hold_duration":            tuning.tapHoldDuration           = doubleVal(val) ?? tuning.tapHoldDuration
             case "force_click_corner_margin":    tuning.forceClickCornerMargin    = floatVal(val)  ?? tuning.forceClickCornerMargin
+            case "force_click_margin":
+                let marginIndent = ind
+                i += 1
+                parseForceClickMargin(lines, from: &i, parentIndent: marginIndent, into: &tuning)
+                continue
             case "edge_margin":
                 let marginIndent = ind
                 i += 1
                 parseEdgeMargin(lines, from: &i, parentIndent: marginIndent, into: &tuning)
                 continue
+            default: break
+            }
+            i += 1
+        }
+    }
+
+    private static func parseForceClickMargin(_ lines: [String], from i: inout Int, parentIndent: Int, into tuning: inout GlideConfig.Tuning) {
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
+            switch key {
+            case "left":    tuning.forceClickMarginLeft    = floatVal(val) ?? tuning.forceClickMarginLeft
+            case "right":   tuning.forceClickMarginRight   = floatVal(val) ?? tuning.forceClickMarginRight
+            case "top":     tuning.forceClickMarginTop     = floatVal(val) ?? tuning.forceClickMarginTop
+            case "bottom":  tuning.forceClickMarginBottom  = floatVal(val) ?? tuning.forceClickMarginBottom
             default: break
             }
             i += 1

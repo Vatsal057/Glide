@@ -10,19 +10,27 @@ enum TrackpadZone: String, Codable, CaseIterable {
     case topRight    = "Top-Right"
     case bottomLeft  = "Bottom-Left"
     case bottomRight = "Bottom-Right"
+    case topEdge     = "Top Edge"
+    case bottomEdge  = "Bottom Edge"
+    case leftEdge    = "Left Edge"
+    case rightEdge   = "Right Edge"
 
     /// Which corner the normalized centroid falls in, or nil for the center.
     /// MT coords: x = 0 left → 1 right, y = 0 bottom → 1 top. `margin` is each
     /// corner's reach along both axes (0.35 → outer 35% on each side).
-    static func at(cx: Float, cy: Float, margin: Float) -> TrackpadZone? {
-        let left = cx < margin, right = cx > 1 - margin
-        let bottom = cy < margin, top = cy > 1 - margin
+    static func at(cx: Float, cy: Float, margin: EdgeMargin) -> TrackpadZone? {
+        let left = cx < margin.left, right = cx > 1 - margin.right
+        let bottom = cy < margin.bottom, top = cy > 1 - margin.top
         switch (left, right, top, bottom) {
-        case (true, _, true, _):  return .topLeft
-        case (_, true, true, _):  return .topRight
-        case (true, _, _, true):  return .bottomLeft
-        case (_, true, _, true):  return .bottomRight
-        default:                  return nil
+        case (true, false, true, false):  return .topLeft
+        case (false, true, true, false):  return .topRight
+        case (true, false, false, true):  return .bottomLeft
+        case (false, true, false, true):  return .bottomRight
+        case (true, false, false, false): return .leftEdge
+        case (false, true, false, false): return .rightEdge
+        case (false, false, true, false): return .topEdge
+        case (false, false, false, true): return .bottomEdge
+        default:                          return nil
         }
     }
 
@@ -32,6 +40,10 @@ enum TrackpadZone: String, Codable, CaseIterable {
         case "top_right":    self = .topRight
         case "bottom_left":  self = .bottomLeft
         case "bottom_right": self = .bottomRight
+        case "top_edge":     self = .topEdge
+        case "bottom_edge":  self = .bottomEdge
+        case "left_edge":    self = .leftEdge
+        case "right_edge":   self = .rightEdge
         default:             return nil
         }
     }
@@ -43,6 +55,10 @@ enum TrackpadZone: String, Codable, CaseIterable {
         case .topRight:    return "top_right"
         case .bottomLeft:  return "bottom_left"
         case .bottomRight: return "bottom_right"
+        case .topEdge:     return "top_edge"
+        case .bottomEdge:  return "bottom_edge"
+        case .leftEdge:    return "left_edge"
+        case .rightEdge:   return "right_edge"
         }
     }
 }

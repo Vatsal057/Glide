@@ -51,6 +51,8 @@ final class GestureEngine {
     /// Pending Tap & Hold — fires when fingers rest motionless past tapHoldDuration.
     private var holdWorkItem: DispatchWorkItem?
     private var holdArmedFingerCount = 0
+    private var holdStartCentroid: (x: Float, y: Float)?
+    private var holdMaxMovement: Float = 0
 
     // MARK: - Observable state
     private(set) var currentPhaseName: String = "Idle"
@@ -163,7 +165,20 @@ final class GestureEngine {
 
         // Tap & Hold: (re)arm whenever the resting finger count changes, cancel on lift.
         if frame.count >= 3 {
-            if Int(frame.count) != holdArmedFingerCount { armHoldTimer(fingerCount: Int(frame.count)) }
+            if Int(frame.count) != holdArmedFingerCount {
+                if TouchTracker.areClickTouchesSimultaneous() {
+                    armHoldTimer(fingerCount: Int(frame.count), cx: frame.cx, cy: frame.cy)
+                } else {
+                    cancelHoldTimer()
+                }
+            } else if holdArmedFingerCount > 0, let start = holdStartCentroid {
+                let dx = frame.cx - start.x
+                let dy = frame.cy - start.y
+                holdMaxMovement = max(holdMaxMovement, (dx * dx + dy * dy).squareRoot())
+                if holdMaxMovement >= tapMaxMovement {
+                    cancelHoldTimer()
+                }
+            }
         } else {
             cancelHoldTimer()
         }
@@ -188,10 +203,12 @@ final class GestureEngine {
 
     // MARK: - Tap & Hold
 
-    private func armHoldTimer(fingerCount n: Int) {
+    private func armHoldTimer(fingerCount n: Int, cx: Float, cy: Float) {
         holdWorkItem?.cancel()
         holdWorkItem = nil
         holdArmedFingerCount = n
+        holdStartCentroid = (x: cx, y: cy)
+        holdMaxMovement = 0
         guard GestureRuleResolver.hasHoldRule(fingers: n) else { return }
         let work = DispatchWorkItem { [weak self] in self?.fireHoldIfStillValid(fingerCount: n) }
         holdWorkItem = work
@@ -202,6 +219,7 @@ final class GestureEngine {
         holdWorkItem?.cancel()
         holdWorkItem = nil
         holdArmedFingerCount = 0
+        holdStartCentroid = nil
     }
 
     private func fireHoldIfStillValid(fingerCount n: Int) {
@@ -211,7 +229,7 @@ final class GestureEngine {
               TouchTracker.glideClickFingerCount == 0,
               NSEvent.pressedMouseButtons & 1 == 0,   // physical press → click/force-click path
               !isSystemZoomSession,
-              touchSessionMovement < tapMaxMovement else { return }
+              holdMaxMovement < tapMaxMovement else { return }
         switch phase {
         case .fired, .switchingApps, .continuousSwipe, .lockedSwipe: return
         default: break
@@ -290,7 +308,7 @@ final class GestureEngine {
         let modifiers = captureModifiers()
         guard let rule = GestureRuleResolver.forceClickRule(
                 fingers: n, cx: currentCentroidX, cy: currentCentroidY,
-                margin: Settings.shared.tuning.forceClickCornerMargin, modifiers: modifiers) else { return }
+                margin: Settings.shared.tuning.forceClickMargin, modifiers: modifiers) else { return }
 
         // Matched — the deep press supersedes any pending normal click.
         pendingClickTimeout?.cancel()

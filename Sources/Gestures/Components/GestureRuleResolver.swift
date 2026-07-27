@@ -61,7 +61,7 @@ final class GestureRuleResolver {
     /// centroid falls in wins; otherwise the position-blind (`.any`) rule handles
     /// the center and any corner without its own rule. Returns nil when neither
     /// exists — the caller then treats the press as a plain click.
-    static func forceClickRule(fingers: Int, cx: Float, cy: Float, margin: Float,
+    static func forceClickRule(fingers: Int, cx: Float, cy: Float, margin: EdgeMargin,
                                modifiers: CapturedModifiers) -> GestureRule? {
         let matching = matchingRules(fingers: fingers, direction: .forceClick, modifiers: modifiers)
         if let corner = TrackpadZone.at(cx: cx, cy: cy, margin: margin),
