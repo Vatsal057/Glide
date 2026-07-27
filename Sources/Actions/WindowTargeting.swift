@@ -648,6 +648,7 @@ final class WindowTargeting {
 
     func switcherWindows(for apps: [NSRunningApplication]) -> [[AppSwitcherWindow]] {
         let serverWindowsByProcess = windowServerWindowsByProcess()
+        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
         return apps.map { app in
             let appElement = AXUIElementCreateApplication(app.processIdentifier)
@@ -688,10 +689,15 @@ final class WindowTargeting {
             }
 
             if let focusedID,
-               let index = result.firstIndex(where: { $0.windowID == focusedID }),
-               index != 0 {
+               let index = result.firstIndex(where: { $0.windowID == focusedID }) {
                 let focused = result.remove(at: index)
-                result.insert(focused, at: 0)
+                if app.processIdentifier == frontmostPID, !result.isEmpty {
+                    // Returning to the app you are already using should pick its
+                    // alternate window first, mirroring the intent of ⌘`.
+                    result.append(focused)
+                } else {
+                    result.insert(focused, at: 0)
+                }
             }
             return result
         }
