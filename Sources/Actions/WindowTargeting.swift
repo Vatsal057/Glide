@@ -581,10 +581,11 @@ final class WindowTargeting {
     }
 
     private func allWindowIDs(for pid: pid_t, fallback: Set<CGWindowID>) -> Set<CGWindowID> {
-        guard let windowIDs = GLDWCopyWindowIDsForProcess(pid) as? [NSNumber] else {
+        guard let unmanagedWindowIDs = GLDWCopyWindowIDsForProcess(pid) else {
             return fallback
         }
-        let ids = Set(windowIDs.map { CGWindowID($0.uint32Value) })
+        let windowIDs = unmanagedWindowIDs.takeRetainedValue() as NSArray
+        let ids = Set(windowIDs.compactMap { ($0 as? NSNumber).map { CGWindowID($0.uint32Value) } })
         return ids.isEmpty ? fallback : ids
     }
 
@@ -702,34 +703,37 @@ final class WindowTargeting {
             _ = setAXBool(element, attribute: kAXMinimizedAttribute as CFString, value: false)
         }
 
-        // This WindowServer path works without an AX element and asks macOS to
-        // make the exact window key, including when that requires entering its
-        // Space or native full-screen Space.
-        if let windowID = window.windowID,
-           GLDWFocusWindow(app.processIdentifier, windowID) {
-            return
-        }
-
-        // Fallback for systems where the WindowServer bridge is unavailable. AX
-        // may only expose this element after application activation transitions
-        // to its Space, so resolve it again in the delayed pass.
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        if let element = window.element {
+        func focus(_ element: AXUIElement?) {
+            guard let element else { return }
             AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, element)
             AXUIElementPerformAction(element, kAXRaiseAction as CFString)
         }
+
+        // Claim the exact target before activating the process. A successful
+        // WindowServer focus alone does not guarantee that macOS moves to the
+        // target's Space, so it must never short-circuit this sequence.
+        focus(window.element)
         app.activate(options: .activateIgnoringOtherApps)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self] in
             guard let self else { return }
             let element = window.element ?? window.windowID.flatMap { targetID in
                 self.windows(for: app.processIdentifier).first { candidate in
                     self.cgWindowID(for: candidate) == targetID
                 }
             }
-            guard let element else { return }
-            AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, element)
-            AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+            focus(element)
+            if let windowID = window.windowID {
+                _ = GLDWFocusWindow(app.processIdentifier, windowID)
+            }
+
+            // The app activation and Space transition are asynchronous. Reapply
+            // the AX focus after the transition so macOS cannot fall back to the
+            // application's most recently focused window on another Space.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                focus(element)
+            }
         }
     }
 
