@@ -67,7 +67,10 @@ struct AppSwitcherWindow {
     let id: Int
     let processIdentifier: pid_t
     let windowID: CGWindowID?
-    let element: AXUIElement
+    /// Accessibility only exposes windows in the currently active Space for some
+    /// applications. Windows discovered through the WindowServer can therefore
+    /// legitimately have no AX element until their Space is activated.
+    let element: AXUIElement?
     let title: String
     let isMinimized: Bool
     let isOnCurrentSpace: Bool
