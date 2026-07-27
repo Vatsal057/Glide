@@ -580,6 +580,14 @@ final class WindowTargeting {
         return windowsByProcess
     }
 
+    private func allWindowIDs(for pid: pid_t, fallback: Set<CGWindowID>) -> Set<CGWindowID> {
+        guard let windowIDs = GLDWCopyWindowIDsForProcess(pid) as? [NSNumber] else {
+            return fallback
+        }
+        let ids = Set(windowIDs.map { CGWindowID($0.uint32Value) })
+        return ids.isEmpty ? fallback : ids
+    }
+
     /// Returns AX references for every WindowServer candidate owned by an app.
     /// `AXWindows` only exposes the active Space, so missing references are
     /// reconstructed from the app's remote AX tokens. The final role/subrole
@@ -656,9 +664,10 @@ final class WindowTargeting {
             let serverWindows = serverWindowsByProcess[app.processIdentifier] ?? [:]
             let accessibilityWindows = switcherAXWindows(
                 for: app.processIdentifier,
-                candidateIDs: Set(serverWindows.compactMap { id, window in
-                    window.isOnCurrentSpace ? nil : id
-                })
+                candidateIDs: allWindowIDs(
+                    for: app.processIdentifier,
+                    fallback: Set(serverWindows.keys)
+                )
             )
             var result = accessibilityWindows.filter(isSwitcherWindow).map { window in
                 let windowID = cgWindowID(for: window)
