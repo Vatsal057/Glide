@@ -520,6 +520,7 @@ final class WindowTargeting {
 
     func windows(for pid: pid_t) -> [AXUIElement] {
         let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.1)
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) == .success,
               let wins = ref as? [AXUIElement] else { return [] }
@@ -619,7 +620,11 @@ final class WindowTargeting {
         guard !missingIDs.isEmpty else { return Array(windowsByID.values) }
 
         var recovered = remoteAXWindows[pid] ?? [:]
-        for elementID in 0..<0x7fff {
+        // Remote AX window element IDs in macOS apps are assigned sequentially
+        // for top-level windows (typically 0..64). Capping at 128 avoids thousands
+        // of failing IPC calls for non-AX WindowServer window IDs (popups, tooltips, etc.).
+        let maxElementID = 128
+        for elementID in 0..<maxElementID {
             guard let window = remoteAXWindow(pid: pid, elementID: UInt64(elementID)),
                   axRole(window) == (kAXWindowRole as String),
                   let windowID = cgWindowID(for: window),
@@ -643,7 +648,9 @@ final class WindowTargeting {
             bytes.storeBytes(of: UInt32(0x636f636f), toByteOffset: 8, as: UInt32.self)
             bytes.storeBytes(of: elementID, toByteOffset: 12, as: UInt64.self)
         }
-        return _AXUIElementCreateWithRemoteToken(Data(tokenBytes) as CFData)
+        guard let element = _AXUIElementCreateWithRemoteToken(Data(tokenBytes) as CFData) else { return nil }
+        AXUIElementSetMessagingTimeout(element, 0.05)
+        return element
     }
 
     func switcherWindows(for apps: [NSRunningApplication]) -> [[AppSwitcherWindow]] {
@@ -652,6 +659,7 @@ final class WindowTargeting {
 
         return apps.map { app in
             let appElement = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetMessagingTimeout(appElement, 0.1)
             var focusedRef: CFTypeRef?
             let focusedWindow: AXUIElement? = {
                 guard AXUIElementCopyAttributeValue(
