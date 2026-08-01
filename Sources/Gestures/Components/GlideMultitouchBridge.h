@@ -37,4 +37,11 @@ bool GLDTIsAvailable(void);
 bool GLDTStart(GLDTFrameCallback callback, void *context);
 void GLDTStop(void);
 
+/// Fewest simultaneous contacts a frame must carry to be forwarded to Swift.
+/// Defaults to 3 — the floor for every gesture rule — which keeps one- and
+/// two-finger cursor work entirely out of the app. Features that need sparser
+/// contact (the corner TrackPoint reads a single finger) lower it to 1 while
+/// they are enabled. Clamped to 1...32; safe to call from any thread.
+void GLDTSetMinimumContactCount(int32_t count);
+
 #endif

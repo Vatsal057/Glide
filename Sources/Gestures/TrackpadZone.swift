@@ -34,6 +34,32 @@ enum TrackpadZone: String, Codable, CaseIterable {
         }
     }
 
+    /// Whether a normalized point falls inside this zone, where `reach` is the
+    /// zone's depth along each axis. Same coordinate convention as
+    /// `at(cx:cy:margin:)`. Unlike that method this answers a single zone, so a
+    /// point in the top-left corner is inside `.topEdge` and `.leftEdge` too —
+    /// which is what a zone the user picked deliberately should do.
+    func contains(x: Float, y: Float, reach: Float) -> Bool {
+        let left = x <= reach, right = x >= 1 - reach
+        let bottom = y <= reach, top = y >= 1 - reach
+        switch self {
+        case .any:         return true
+        case .topLeft:     return left && top
+        case .topRight:    return right && top
+        case .bottomLeft:  return left && bottom
+        case .bottomRight: return right && bottom
+        case .topEdge:     return top
+        case .bottomEdge:  return bottom
+        case .leftEdge:    return left
+        case .rightEdge:   return right
+        }
+    }
+
+    /// Zones offered as a TrackPoint anchor. Corners only: an edge strip spans
+    /// half the trackpad and would swallow ordinary cursor work, and `.any`
+    /// would swallow all of it.
+    static let cornerCases: [TrackpadZone] = [.bottomRight, .bottomLeft, .topRight, .topLeft]
+
     init?(yamlValue: String?) {
         switch yamlValue?.lowercased() {
         case "top_left":     self = .topLeft

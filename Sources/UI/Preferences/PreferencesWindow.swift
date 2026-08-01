@@ -5,6 +5,7 @@ enum PrefsTab: String, CaseIterable, Identifiable {
     case gestures      = "Gestures"
     case keyboard      = "Keyboard"
     case appSwitcher   = "App Switcher"
+    case trackPoint    = "TrackPoint"
     case tuning        = "Tuning"
     case general       = "General"
     case configuration = "Configuration"
@@ -14,6 +15,7 @@ enum PrefsTab: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .appSwitcher:   return "rectangle.2.swap"
+        case .trackPoint:    return "dot.circle.and.hand.point.up.left.fill"
         case .gestures:      return "hand.draw"
         case .keyboard:      return "keyboard"
         case .tuning:        return "slider.horizontal.3"
@@ -41,6 +43,7 @@ struct PreferencesWindow: View {
             Group {
                 switch selectedTab {
                 case .appSwitcher:   AppSwitcherTab()
+                case .trackPoint:    TrackPointTab()
                 case .gestures:      GesturesTab()
                 case .keyboard:      KeyboardTab()
                 case .tuning:        TuningTab()

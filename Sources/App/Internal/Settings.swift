@@ -576,6 +576,103 @@ struct AppSwitcherSettings: Codable, Equatable {
     }
 }
 
+/// Turns one corner of the trackpad into a pointing stick. Rest a finger in the
+/// zone, hold briefly to engage, then push: the offset from where the finger
+/// landed becomes cursor *velocity*, so the whole screen is reachable from a
+/// patch of trackpad the size of a fingertip. Separate from the gesture rule
+/// list — it reads a single contact, which no rule ever does.
+/// What a TrackPoint corner drives.
+enum TrackPointMode: String, Codable, CaseIterable {
+    case pointer
+    case scroll
+}
+
+struct TrackPointSettings: Codable, Equatable {
+    var enabled: Bool = false
+    /// Which corner anchors the pointer stick.
+    var zone: TrackpadZone = .bottomRight
+    /// Resting a second finger anywhere on the pad turns the engaged stick into a
+    /// scroller — the same role the middle button plays on a real TrackPoint.
+    /// A held finger rather than a toggle, so the mode can't be left on by
+    /// accident, and it costs no extra corner.
+    var scrollEnabled: Bool = true
+    /// Scroll speed in points/second at full push.
+    var scrollSpeed: Float = 1200
+    /// Reverses both scroll axes, matching what the system's natural-scrolling
+    /// switch does.
+    var invertScroll: Bool = false
+    /// Zone depth along each axis (normalized). 0.16 → outer 16% of both axes.
+    var zoneSize: Float = 0.16
+    /// Motionless time in the zone before the stick engages. Keeps a normal
+    /// cursor drag that happens to start in the corner from being hijacked.
+    var activationDelay: TimeInterval = 0.15
+    /// Push distance the finger travels before it must have committed — exceed
+    /// it during `activationDelay` and the touch is left to macOS.
+    var activationMovement: Float = 0.012
+    /// Push distance ignored around the anchor, so a resting finger doesn't drift.
+    var deadZone: Float = 0.005
+    /// Push distance that reaches `maxSpeed`. Smaller feels twitchier.
+    var pushRange: Float = 0.055
+    /// Cursor speed in points/second at full push.
+    var maxSpeed: Float = 1500
+    /// Response curve exponent. 1 is linear; higher trades top-end reach for
+    /// fine control near the anchor, which is what a pointing stick wants.
+    var acceleration: Float = 2.2
+    /// Tap the Taptic Engine when the stick engages and releases.
+    var hapticFeedback: Bool = true
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled            = try c.decodeIfPresent(Bool.self,         forKey: .enabled)            ?? false
+        zone               = (try? c.decodeIfPresent(TrackpadZone.self, forKey: .zone))
+                             .flatMap { $0 }                                                       ?? .bottomRight
+        scrollEnabled      = try c.decodeIfPresent(Bool.self,         forKey: .scrollEnabled)      ?? true
+        scrollSpeed        = try c.decodeIfPresent(Float.self,        forKey: .scrollSpeed)        ?? 1200
+        invertScroll       = try c.decodeIfPresent(Bool.self,         forKey: .invertScroll)       ?? false
+        zoneSize           = try c.decodeIfPresent(Float.self,        forKey: .zoneSize)           ?? 0.16
+        activationDelay    = try c.decodeIfPresent(TimeInterval.self, forKey: .activationDelay)    ?? 0.15
+        activationMovement = try c.decodeIfPresent(Float.self,        forKey: .activationMovement) ?? 0.012
+        deadZone           = try c.decodeIfPresent(Float.self,        forKey: .deadZone)           ?? 0.005
+        pushRange          = try c.decodeIfPresent(Float.self,        forKey: .pushRange)          ?? 0.055
+        maxSpeed           = try c.decodeIfPresent(Float.self,        forKey: .maxSpeed)           ?? 1500
+        acceleration       = try c.decodeIfPresent(Float.self,        forKey: .acceleration)       ?? 2.2
+        hapticFeedback     = try c.decodeIfPresent(Bool.self,         forKey: .hapticFeedback)     ?? true
+    }
+
+    static let zoneSizeRange:        ClosedRange<Float>        = 0.08...0.35
+    static let activationDelayRange: ClosedRange<TimeInterval> = 0.0...0.6
+    static let deadZoneRange:        ClosedRange<Float>        = 0.0...0.02
+    static let pushRangeRange:       ClosedRange<Float>        = 0.02...0.15
+    static let maxSpeedRange:        ClosedRange<Float>        = 200...4000
+    static let scrollSpeedRange:     ClosedRange<Float>        = 200...4000
+    static let accelerationRange:    ClosedRange<Float>        = 1.0...4.0
+
+    static func normalized(_ s: TrackPointSettings) -> TrackPointSettings {
+        var n = s
+        if !TrackpadZone.cornerCases.contains(n.zone) { n.zone = .bottomRight }
+        n.scrollSpeed        = n.scrollSpeed.clamped(to: scrollSpeedRange)
+        n.zoneSize           = n.zoneSize.clamped(to: zoneSizeRange)
+        n.activationDelay    = n.activationDelay.clamped(to: activationDelayRange)
+        n.activationMovement = n.activationMovement.clamped(to: 0.004...0.05)
+        n.deadZone           = n.deadZone.clamped(to: deadZoneRange)
+        n.pushRange          = n.pushRange.clamped(to: pushRangeRange)
+        n.maxSpeed           = n.maxSpeed.clamped(to: maxSpeedRange)
+        n.acceleration       = n.acceleration.clamped(to: accelerationRange)
+        // The dead zone has to stay meaningfully inside the push range or every
+        // push is either ignored or instantly at full speed.
+        n.deadZone           = min(n.deadZone, n.pushRange * 0.6)
+        return n
+    }
+}
+
+extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
 /// Which speed classifier decides slow/normal/fast.
 enum SpeedLogic: String, Codable, CaseIterable {
     /// Average speed (distance ÷ time) at trigger distance. Deterministic, two thresholds.
@@ -663,6 +760,7 @@ final class Settings {
 
     private var _rules:           [GestureRule]
     private var _appSwitcher:     AppSwitcherSettings = AppSwitcherSettings()
+    private var _trackPoint:      TrackPointSettings  = TrackPointSettings()
     /// Guards `_tuning` — the only setting read off the main thread (the MT
     /// callback reads edge margins every frame).
     private let tuningLock = NSLock()
@@ -684,6 +782,11 @@ final class Settings {
     var appSwitcher: AppSwitcherSettings {
         get { _appSwitcher }
         set { _appSwitcher = AppSwitcherSettings.normalized(newValue); GlideConfigStore.shared.scheduleSave() }
+    }
+
+    var trackPoint: TrackPointSettings {
+        get { _trackPoint }
+        set { _trackPoint = TrackPointSettings.normalized(newValue); GlideConfigStore.shared.scheduleSave() }
     }
 
     var tuning: GestureTuning {
@@ -731,6 +834,13 @@ final class Settings {
 
     func resetTuning() { tuning = GestureTuning() }
 
+    /// Keeps `enabled` — resetting the feel of the stick shouldn't switch it off.
+    func resetTrackPoint() {
+        var fresh = TrackPointSettings()
+        fresh.enabled = _trackPoint.enabled
+        trackPoint = fresh
+    }
+
     // MARK: Batch load — bypasses per-field saves (called by GlideConfigStore.load)
 
     func apply(_ config: GlideConfig) {
@@ -738,6 +848,7 @@ final class Settings {
         var loadedRules = config.toRules()
         Self.migrateLegacyAppSwitcherRules(into: &switcher, rules: &loadedRules)
         _appSwitcher     = AppSwitcherSettings.normalized(switcher)
+        _trackPoint      = TrackPointSettings.normalized(config.toTrackPoint())
         _rules           = Self.normalizeRules(loadedRules, appSwitcher: _appSwitcher)
         let normalizedTuning = Self.normalizedTuning(config.toTuning())
         tuningLock.lock(); _tuning = normalizedTuning; tuningLock.unlock()

@@ -29,6 +29,7 @@ final class PreferencesStore: ObservableObject {
         }
     }
     @Published private(set) var appSwitcher: AppSwitcherSettings = .init()
+    @Published private(set) var trackPoint: TrackPointSettings = .init()
     @Published private(set) var tuning: GestureTuning = .init()
     @Published private(set) var windowTargetingMode: WindowTargetingMode = .focusedThenCursor
     @Published private(set) var hapticFeedbackEnabled = true
@@ -48,6 +49,8 @@ final class PreferencesStore: ObservableObject {
         let s = Settings.shared
         rules = s.rules.map(sanitizedRule)
         appSwitcher = s.appSwitcher
+        trackPoint = s.trackPoint
+        TrackPointController.shared.applySettings()
         tuning = s.tuning
         windowTargetingMode = s.windowTargetingMode
         hapticFeedbackEnabled = s.hapticFeedbackEnabled
@@ -209,6 +212,20 @@ final class PreferencesStore: ObservableObject {
         Settings.shared.resetTuning()
         tuning = Settings.shared.tuning
         TouchTracker.updateTuningCache(edgeMarginEnabled: tuning.edgeMarginEnabled, edgeMargin: tuning.edgeMargin)
+    }
+
+    func updateTrackPoint(_ mutate: (inout TrackPointSettings) -> Void) {
+        var copy = trackPoint
+        mutate(&copy)
+        Settings.shared.trackPoint = copy       // TrackPointSettings.normalized runs here + saves
+        trackPoint = Settings.shared.trackPoint // read back the clamped value
+        TrackPointController.shared.applySettings()
+    }
+
+    func resetTrackPoint() {
+        Settings.shared.resetTrackPoint()
+        trackPoint = Settings.shared.trackPoint
+        TrackPointController.shared.applySettings()
     }
 
     // ── YAML Config Export — copies live file to user-chosen location ──

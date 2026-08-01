@@ -65,20 +65,37 @@ static int32_t last_forwarded_identifiers[32];
 static float last_forwarded_x[32];
 static float last_forwarded_y[32];
 static GLDTStatus last_start_status = GLDTStatusStartFailed;
+// Gesture rules all need 3+ contacts, so that is the default floor and sparser
+// frames never reach Swift. GLDTSetMinimumContactCount lowers it for features
+// that read fewer fingers (the corner TrackPoint).
+static int32_t minimum_contact_count = 3;
 
 // MultitouchSupport can deliver substantially faster than the app can display or act on.
 // A 60 Hz ceiling preserves one update per display frame and prevents raw input from
 // flooding Swift's main actor. Contact-count changes and the final release always pass.
-static const double minimum_frame_interval = 1.0 / 60.0;
+static const double gesture_frame_interval = 1.0 / 60.0;
 // Stationary contacts fluctuate slightly even when the fingers are resting. Compare
 // against the last delivered positions so genuine slow movement still accumulates.
-static const float minimum_position_delta = 0.0015f;
+static const float gesture_position_delta = 0.0015f;
+
+// Sparse frames — fewer contacts than any gesture rule needs — exist only for the
+// TrackPoint, which integrates a direction continuously rather than matching a
+// discrete gesture, and so wants every sample the hardware produces.
+//
+// The ceiling matters more than it looks: capping at 60 Hz against a trackpad that
+// reports at ~82 Hz beats down to 41 Hz, because every second frame lands inside the
+// interval and is dropped. That is fine for gesture matching and visibly steppy for
+// a pointing stick. Well under the hardware period, so no frame is ever skipped, and
+// the gesture path keeps its own ceiling untouched.
+static const double sparse_frame_interval = 1.0 / 240.0;
+static const float sparse_position_delta = 0.0004f;
 
 static bool contacts_moved_meaningfully(
     const int32_t *identifiers,
     const float *x,
     const float *y,
-    int32_t active_count
+    int32_t active_count,
+    float minimum_position_delta
 ) {
     if (active_count != last_forwarded_active_count) {
         return true;
@@ -150,7 +167,15 @@ static int contact_frame_callback(
     GLDTFrameCallback callback = client_callback;
     void *context = client_context;
     bool should_forward = false;
-    if (active_count >= 3) {
+    int32_t minimum_contacts = minimum_contact_count;
+    if (active_count >= minimum_contacts) {
+        // Below the gesture floor nothing is being matched, so the sparse limits
+        // apply; at three or more contacts the gesture pipeline's own gating is
+        // preserved exactly, keeping frame-counted rules (candidate_frames) intact.
+        bool sparse = active_count < 3;
+        double minimum_frame_interval = sparse ? sparse_frame_interval : gesture_frame_interval;
+        float minimum_position_delta = sparse ? sparse_position_delta : gesture_position_delta;
+
         bool started = !forwarding_gesture;
         bool contact_count_changed = active_count != last_forwarded_active_count;
         bool interval_elapsed =
@@ -160,7 +185,8 @@ static int contact_frame_callback(
             active_identifiers,
             active_x,
             active_y,
-            active_count
+            active_count,
+            minimum_position_delta
         );
         forwarding_gesture = true;
         should_forward = started || contact_count_changed || (interval_elapsed && moved);
@@ -173,7 +199,7 @@ static int contact_frame_callback(
                 active_count
             );
         }
-    } else if (active_count < 3 && forwarding_gesture) {
+    } else if (forwarding_gesture) {
         forwarding_gesture = false;
         should_forward = true;
         last_forwarded_timestamp = 0;
@@ -225,6 +251,25 @@ GLDTStatus GLDTGetLastStartStatus(void) {
 
 bool GLDTIsAvailable(void) {
     return GLDTGetAvailabilityStatus() == GLDTStatusAvailable;
+}
+
+void GLDTSetMinimumContactCount(int32_t count) {
+    if (count < 1) {
+        count = 1;
+    } else if (count > 32) {
+        count = 32;
+    }
+    pthread_mutex_lock(&state_lock);
+    if (minimum_contact_count != count) {
+        minimum_contact_count = count;
+        // The forwarding window is keyed to the old threshold. Reset it so the
+        // next frame is treated as a fresh start rather than diffed against
+        // contacts that were captured under different gating.
+        forwarding_gesture = false;
+        last_forwarded_timestamp = 0;
+        last_forwarded_active_count = 0;
+    }
+    pthread_mutex_unlock(&state_lock);
 }
 
 bool GLDTStart(GLDTFrameCallback callback, void *context) {

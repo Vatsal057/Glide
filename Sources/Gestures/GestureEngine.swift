@@ -90,6 +90,7 @@ final class GestureEngine {
 
         TouchTracker.updateTuningCache(edgeMarginEnabled: Settings.shared.tuning.edgeMarginEnabled,
                                         edgeMargin: Settings.shared.tuning.edgeMargin)
+        TrackPointController.shared.applySettings()
         inputManager.setupTaps()
         MultitouchBridge.shared.start(callback: glideMTCallback)
         inputManager.installMonitors()
@@ -107,6 +108,7 @@ final class GestureEngine {
         guard isRunning else { return }
 
         finishIfNeeded()
+        TrackPointController.shared.engineWillStop()
         MultitouchBridge.shared.stop()
         inputManager.teardownTaps()
         inputManager.removeMonitors()
