@@ -1,6 +1,47 @@
 import SwiftUI
 import CoreGraphics
 
+private struct AppSwitcherPreviewDeckShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let neckWidth: CGFloat = 16
+        let neckHeight: CGFloat = 14
+        let radius: CGFloat = 18
+        let midX = rect.midX
+        var path = Path()
+
+        path.move(to: CGPoint(x: midX - neckWidth / 2, y: rect.minY))
+        path.addCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + neckHeight + radius),
+            control1: CGPoint(x: midX + neckWidth / 2, y: rect.minY),
+            control2: CGPoint(x: rect.maxX, y: rect.minY + neckHeight)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+        path.addArc(
+            center: CGPoint(x: rect.maxX - radius, y: rect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
+        path.addArc(
+            center: CGPoint(x: rect.minX + radius, y: rect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + neckHeight + radius))
+        path.addCurve(
+            to: CGPoint(x: midX - neckWidth / 2, y: rect.minY),
+            control1: CGPoint(x: rect.minX, y: rect.minY + neckHeight),
+            control2: CGPoint(x: midX - neckWidth / 2, y: rect.minY)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
 struct AppSwitcherTab: View {
     @EnvironmentObject var store: PreferencesStore
     @State private var screenCaptureGranted = CGPreflightScreenCaptureAccess()
@@ -88,10 +129,11 @@ struct AppSwitcherTab: View {
     }
 
     private var overlayPreview: some View {
-        VStack(spacing: 0) {
+        let violet = Color(red: 148 / 255, green: 129 / 255, blue: 201 / 255)
+        return VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "hand.draw.fill")
-                    .foregroundStyle(Color(red: 148 / 255, green: 129 / 255, blue: 201 / 255))
+                    .foregroundStyle(violet)
                 Text("Custom overlay preview")
                     .font(.callout.weight(.semibold))
                 Spacer()
@@ -104,40 +146,101 @@ struct AppSwitcherTab: View {
 
             Divider()
 
-            HStack(spacing: 10) {
-                previewCard(name: "Finder", symbol: "face.smiling", selected: false)
-                previewCard(name: "Notes", symbol: "note.text", selected: true)
-                previewCard(name: "Safari", symbol: "safari", selected: false)
+            VStack(spacing: 0) {
+                HStack(spacing: 14) {
+                    previewApp(name: "Mail", symbol: "envelope.fill", selected: false)
+                    previewApp(name: "Notes", symbol: "note.text", selected: true)
+                    previewApp(name: "Safari", symbol: "safari.fill", selected: false)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                VStack(spacing: 8) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "note.text")
+                            .foregroundStyle(violet)
+                        Text("Notes")
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                        Text("• 2 windows")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ZStack(alignment: .top) {
+                        previewWindow(title: "Quick Notes", selected: false)
+                            .scaleEffect(0.92)
+                            .offset(y: 18)
+                        previewWindow(title: "Project Notes", selected: true)
+                    }
+                    .frame(height: 108)
+                }
+                .padding(.top, 21)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 14)
+                .background(.regularMaterial, in: AppSwitcherPreviewDeckShape())
+                .frame(width: 210)
             }
             .padding(14)
             .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Example app switcher with Notes selected and a two-window deck")
         }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.primary.opacity(0.12), lineWidth: 1)
         }
     }
 
-    private func previewCard(name: String, symbol: String, selected: Bool) -> some View {
-        let violet = Color(red: 148 / 255, green: 129 / 255, blue: 201 / 255)
-        return VStack(spacing: 7) {
-            Image(systemName: symbol)
-                .font(.system(size: 28, weight: .medium))
-                .frame(width: 42, height: 42)
-                .foregroundStyle(selected ? violet : Color.secondary)
-            Text(name)
-                .font(.caption.weight(selected ? .semibold : .medium))
+    private func previewApp(name: String, symbol: String, selected: Bool) -> some View {
+        VStack(spacing: 4) {
+            ZStack {
+                if selected {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.primary.opacity(0.12))
+                }
+                Image(systemName: symbol)
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(
+                        selected
+                        ? Color(red: 148 / 255, green: 129 / 255, blue: 201 / 255)
+                        : Color.secondary
+                    )
+            }
+            .frame(width: 48, height: 44)
+
+            Text(selected ? name : " ")
+                .font(.caption2.weight(.medium))
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: 64)
         }
-        .frame(width: 104, height: 82)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(selected ? violet.opacity(0.16) : Color.primary.opacity(0.05))
-        )
+    }
+
+    private func previewWindow(title: String, selected: Bool) -> some View {
+        let violet = Color(red: 148 / 255, green: 129 / 255, blue: 201 / 255)
+        return VStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.primary.opacity(0.07))
+                .frame(width: 142, height: 58)
+                .overlay {
+                    Image(systemName: "text.alignleft")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+            Text(title)
+                .font(.caption2.weight(selected ? .semibold : .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: 142)
+        }
+        .padding(7)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(selected ? violet : Color.primary.opacity(0.10), lineWidth: selected ? 3 : 1)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(selected ? violet : Color.primary.opacity(0.08), lineWidth: selected ? 2 : 1)
         }
     }
     private var presentationSection: some View {
@@ -151,7 +254,7 @@ struct AppSwitcherTab: View {
                         Text(screenCaptureGranted ? "Window previews are ready" : "Using app icons")
                             .font(.subheadline.weight(.semibold))
                         Text(screenCaptureGranted
-                             ? "Glide shows each app’s largest visible window when the switcher opens."
+                             ? "Glide shows a preview for each selectable window on the current Space as you move through apps."
                              : "The switcher works without Screen Recording. Grant access if you also want window previews.")
                             .font(.caption)
                             .foregroundStyle(.secondary)

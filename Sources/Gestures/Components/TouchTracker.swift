@@ -13,6 +13,51 @@ enum TouchTracker {
     // ─────────────────────────────────────────────
 
     static let stateLock = NSLock()
+    private static let frameDispatchLock = NSLock()
+    private static var pendingTerminalFrame: TouchFrameData?
+    private static var pendingLatestFrame: TouchFrameData?
+    private static var frameDispatchScheduled = false
+
+    fileprivate static func enqueueFrame(_ frame: TouchFrameData) {
+        frameDispatchLock.lock()
+        if frame.count < 3 {
+            pendingTerminalFrame = frame
+            pendingLatestFrame = nil
+        } else {
+            pendingLatestFrame = frame
+        }
+        let shouldSchedule = !frameDispatchScheduled
+        if shouldSchedule { frameDispatchScheduled = true }
+        frameDispatchLock.unlock()
+
+        if shouldSchedule {
+            DispatchQueue.main.async { drainLatestFrame() }
+        }
+    }
+
+    private static func drainLatestFrame() {
+        frameDispatchLock.lock()
+        let frame: TouchFrameData?
+        if let terminal = pendingTerminalFrame {
+            frame = terminal
+            pendingTerminalFrame = nil
+        } else {
+            frame = pendingLatestFrame
+            pendingLatestFrame = nil
+        }
+        frameDispatchLock.unlock()
+
+        if let frame { GestureEngine.shared.onTouches(frame) }
+
+        frameDispatchLock.lock()
+        let hasPendingFrame = pendingTerminalFrame != nil || pendingLatestFrame != nil
+        if !hasPendingFrame { frameDispatchScheduled = false }
+        frameDispatchLock.unlock()
+
+        if hasPendingFrame {
+            DispatchQueue.main.async { drainLatestFrame() }
+        }
+    }
 
     fileprivate static var _deviceFingerCounts: [UnsafeMutableRawPointer: Int] = [:]
     fileprivate static var _sessionPeakActiveTouches: Int = 0
@@ -103,7 +148,6 @@ enum TouchTracker {
 
     static func resetGlobalMTState() {
         stateLock.lock()
-        defer { stateLock.unlock() }
         _deviceFingerCounts.removeAll(keepingCapacity: true)
         _sessionPeakActiveTouches = 0
         _activeTouches = 0
@@ -114,6 +158,12 @@ enum TouchTracker {
         _oldestFingerAge = 0
         _newestFingerAge = 0
         _lastFingerLiftTime = 0
+        stateLock.unlock()
+
+        frameDispatchLock.lock()
+        pendingTerminalFrame = nil
+        pendingLatestFrame = nil
+        frameDispatchLock.unlock()
     }
 }
 let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
@@ -158,10 +208,9 @@ let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
         }
         TouchTracker.stateLock.unlock()
         if hadTouches {
-            DispatchQueue.main.async {
-                TouchTracker.glideClickFingerCount = 0
-                GestureEngine.shared.onTouches(TouchFrameData(count: 0, cx: 0, cy: 0, spread: 0, coherence: 1))
-            }
+            TouchTracker.enqueueFrame(
+                TouchFrameData(count: 0, cx: 0, cy: 0, spread: 0, coherence: 1)
+            )
         }
         return
     }
@@ -241,5 +290,5 @@ let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
     }
 
     let frameData = TouchFrameData(count: activeCount, cx: cx, cy: cy, spread: spread, coherence: coherence)
-    DispatchQueue.main.async { GestureEngine.shared.onTouches(frameData) }
+    TouchTracker.enqueueFrame(frameData)
 }

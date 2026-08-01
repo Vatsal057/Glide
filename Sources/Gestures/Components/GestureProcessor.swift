@@ -195,6 +195,9 @@ final class GestureProcessor {
         updated.lastFrameTime = now
         SpeedClassifier.appendVelocitySample(frameDist / Float(max(frameDt, 0.001)), to: &updated.velocitySamples)
         updated.recentDeltas.insert((dx: frameDx, dy: frameDy), at: 0)
+        if updated.recentDeltas.count > 120 {
+            updated.recentDeltas.removeLast(updated.recentDeltas.count - 120)
+        }
 
         var totalDx: Float = 0, totalDy: Float = 0
         var thresholdIndex: Int?

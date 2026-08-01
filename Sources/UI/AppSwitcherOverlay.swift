@@ -9,6 +9,7 @@ private enum GlideSwitcherPalette {
 
 private struct AppSwitcherWindowItem: Identifiable {
     let id: Int
+    let windowID: CGWindowID?
     let title: String
     let isMinimized: Bool
     let isOnCurrentSpace: Bool
@@ -35,6 +36,7 @@ private final class AppSwitcherOverlayModel: ObservableObject {
     @Published private(set) var selectedAppIndex = 0
     @Published private(set) var selectedWindowIndex = 0
     @Published private(set) var visibleAppCapacity = 1
+    private var thumbnailLocations: [CGWindowID: (appIndex: Int, windowIndex: Int)] = [:]
 
     var selectedApp: AppSwitcherItem? {
         items.indices.contains(selectedAppIndex) ? items[selectedAppIndex] : nil
@@ -75,7 +77,8 @@ private final class AppSwitcherOverlayModel: ObservableObject {
         windowsByApp: [[AppSwitcherWindow]],
         selectedAppIndex: Int,
         selectedWindowIndex: Int,
-        visibleAppCapacity: Int
+        visibleAppCapacity: Int,
+        cachedThumbnails: [CGWindowID: NSImage]
     ) {
         items = apps.enumerated().map { index, app in
             let windows = windowsByApp.indices.contains(index) ? windowsByApp[index] : []
@@ -86,15 +89,25 @@ private final class AppSwitcherOverlayModel: ObservableObject {
                 windows: windows.map { window in
                     AppSwitcherWindowItem(
                         id: window.id,
+                        windowID: window.windowID,
                         title: window.title,
                         isMinimized: window.isMinimized,
                         isOnCurrentSpace: window.isOnCurrentSpace,
                         isApplicationHidden: window.isApplicationHidden,
-                        thumbnail: nil
+                        thumbnail: window.windowID.flatMap { cachedThumbnails[$0] }
                     )
                 }
             )
         }
+        thumbnailLocations.removeAll(keepingCapacity: true)
+        for appIndex in items.indices {
+            for windowIndex in items[appIndex].windows.indices {
+                if let windowID = items[appIndex].windows[windowIndex].windowID {
+                    thumbnailLocations[windowID] = (appIndex, windowIndex)
+                }
+            }
+        }
+
         self.selectedAppIndex = min(max(selectedAppIndex, 0), max(items.count - 1, 0))
         let windowCount = self.items.indices.contains(self.selectedAppIndex)
             ? self.items[self.selectedAppIndex].windows.count : 0
@@ -104,25 +117,28 @@ private final class AppSwitcherOverlayModel: ObservableObject {
 
     func select(appIndex: Int, windowIndex: Int) {
         guard items.indices.contains(appIndex) else { return }
-        selectedAppIndex = appIndex
-        selectedWindowIndex = min(max(windowIndex, 0), max(items[appIndex].windows.count - 1, 0))
+        let nextWindowIndex = min(max(windowIndex, 0), max(items[appIndex].windows.count - 1, 0))
+        if selectedAppIndex != appIndex { selectedAppIndex = appIndex }
+        if selectedWindowIndex != nextWindowIndex { selectedWindowIndex = nextWindowIndex }
     }
 
-    func updateThumbnails(_ images: [Int: NSImage]) {
+    func updateThumbnails(_ images: [CGWindowID: NSImage]) {
         guard !images.isEmpty else { return }
         var updated = items
-        for appIndex in updated.indices {
-            for windowIndex in updated[appIndex].windows.indices {
-                let id = updated[appIndex].windows[windowIndex].id
-                updated[appIndex].windows[windowIndex].thumbnail = images[id]
-                    ?? updated[appIndex].windows[windowIndex].thumbnail
-            }
+        var changed = false
+        for (windowID, image) in images {
+            guard let location = thumbnailLocations[windowID],
+                  updated.indices.contains(location.appIndex),
+                  updated[location.appIndex].windows.indices.contains(location.windowIndex) else { continue }
+            updated[location.appIndex].windows[location.windowIndex].thumbnail = image
+            changed = true
         }
-        items = updated
+        if changed { items = updated }
     }
 
     func clear() {
         items = []
+        thumbnailLocations.removeAll(keepingCapacity: true)
         selectedAppIndex = 0
         selectedWindowIndex = 0
     }
@@ -132,6 +148,9 @@ final class AppSwitcherOverlayController {
 
     private let model = AppSwitcherOverlayModel()
     private var captureGeneration = UUID()
+    private var captureTask: AppSwitcherPreviewCaptureTask?
+    private var captureRequest: DispatchWorkItem?
+    private var windowsByApp: [[AppSwitcherWindow]] = []
 
     private lazy var panel: NSPanel = {
         let panel = NSPanel(
@@ -143,7 +162,7 @@ final class AppSwitcherOverlayController {
         panel.level = .popUpMenu
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.animationBehavior = .none
@@ -164,42 +183,97 @@ final class AppSwitcherOverlayController {
         let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
         guard let screen else { return false }
 
+        captureRequest?.cancel()
+        captureTask?.cancel()
+        let generation = UUID()
+        captureGeneration = generation
+        self.windowsByApp = windowsByApp
+
         let itemWidth: CGFloat = 148
-        let appCapacity = min(apps.count, max(3, Int((screen.frame.width - 240) / itemWidth)))
-        
+        let widthCapacity = max(3, Int((screen.frame.width - 240) / itemWidth))
+        let appCapacity = min(apps.count, min(7, widthCapacity))
+
         model.configure(
             apps: apps,
             windowsByApp: windowsByApp,
             selectedAppIndex: selectedAppIndex,
             selectedWindowIndex: selectedWindowIndex,
-            visibleAppCapacity: appCapacity
+            visibleAppCapacity: appCapacity,
+            cachedThumbnails: [:]
         )
-        panel.setFrame(screen.frame, display: true)
-        panel.orderFrontRegardless()
 
-        let generation = UUID()
-        captureGeneration = generation
-        let preferredID = windowsByApp.indices.contains(selectedAppIndex)
-            && windowsByApp[selectedAppIndex].indices.contains(selectedWindowIndex)
-            ? windowsByApp[selectedAppIndex][selectedWindowIndex].id : nil
-        AppSwitcherPreviewProvider.capture(
-            windowsByApp: windowsByApp,
-            preferredID: preferredID
-        ) { [weak self] images in
-            guard let self, self.captureGeneration == generation else { return }
-            self.model.updateThumbnails(images)
-        }
+        let visibleCount = min(appCapacity, apps.count)
+        let cardsWidth = CGFloat(visibleCount) * 128 + CGFloat(max(0, visibleCount - 1)) * 4
+        let overflowWidth: CGFloat = apps.count > visibleCount ? 84 : 0
+        let panelWidth = min(screen.frame.width, max(520, cardsWidth + overflowWidth + 192))
+        let panelHeight = min(screen.frame.height, 900)
+        let panelFrame = NSRect(
+            x: screen.frame.midX - panelWidth / 2,
+            y: screen.frame.midY - panelHeight / 2,
+            width: panelWidth,
+            height: panelHeight
+        )
+        panel.setFrame(panelFrame, display: true)
+        panel.orderFrontRegardless()
+        scheduleVisibleCapture(generation: generation, delay: 0)
         return true
     }
 
     func select(appIndex: Int, windowIndex: Int) {
+        let previousAppIndex = model.selectedAppIndex
+        let previousWindowIndex = model.selectedWindowIndex
         model.select(appIndex: appIndex, windowIndex: windowIndex)
+        if model.selectedAppIndex != previousAppIndex || model.selectedWindowIndex != previousWindowIndex {
+            scheduleVisibleCapture(generation: captureGeneration, delay: 0.04)
+        }
     }
 
     func hide() {
+        captureRequest?.cancel()
+        captureRequest = nil
+        captureTask?.cancel()
+        captureTask = nil
         captureGeneration = UUID()
+        windowsByApp = []
         panel.orderOut(nil)
         model.clear()
+    }
+
+    private func scheduleVisibleCapture(generation: UUID, delay: TimeInterval) {
+        captureRequest?.cancel()
+        captureTask?.cancel()
+
+        let request = DispatchWorkItem { [weak self] in
+            self?.captureVisibleWindows(generation: generation)
+        }
+        captureRequest = request
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: request)
+    }
+
+    private func captureVisibleWindows(generation: UUID) {
+        let appIndex = model.selectedAppIndex
+        guard windowsByApp.indices.contains(appIndex) else {
+            captureTask = nil
+            return
+        }
+
+        let appWindows = windowsByApp[appIndex]
+        let visibleWindows = model.visibleWindowIndices.compactMap { index in
+            appWindows.indices.contains(index) ? appWindows[index] : nil
+        }
+        guard !visibleWindows.isEmpty else {
+            captureTask = nil
+            return
+        }
+
+        model.updateThumbnails(AppSwitcherPreviewProvider.cachedImages(for: visibleWindows))
+        captureTask = AppSwitcherPreviewProvider.capture(
+            windows: visibleWindows,
+            preferredID: model.selectedWindow?.id
+        ) { [weak self] images in
+            guard let self, self.captureGeneration == generation else { return }
+            self.model.updateThumbnails(images)
+        }
     }
 }
 
@@ -283,6 +357,7 @@ private struct TeardropShape: Shape {
         return path
     }
 }
+
 private struct AppSwitcherOverlayView: View {
     @ObservedObject var model: AppSwitcherOverlayModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -315,7 +390,7 @@ private struct AppSwitcherOverlayView: View {
                             .frame(width: geo.size.width, height: geo.size.height)
                     }
                 }
-                .animation(.interactiveSpring(response: 0.4, dampingFraction: 0.7), value: model.selectedApp?.windows.count)
+                .animation(reduceMotion ? nil : .interactiveSpring(response: 0.4, dampingFraction: 0.7), value: model.selectedApp?.windows.count)
             }
         }
     }
@@ -415,6 +490,9 @@ private struct AppSwitcherOverlayView: View {
                     Text(app.name)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.primary.opacity(0.8))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 108)
                     Text("•")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -505,7 +583,8 @@ private struct AppRailCard: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                    .fixedSize()
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 118)
                     .offset(y: 18)
             }
         }
@@ -652,12 +731,11 @@ private struct WindowSelectionCard: View {
             )
             .stroke(
                 isSelected
-                ? AnyShapeStyle(LinearGradient(colors: [GlideSwitcherPalette.motionViolet, GlideSwitcherPalette.touchLilac], startPoint: .topLeading, endPoint: .bottomTrailing))
+                ? AnyShapeStyle(GlideSwitcherPalette.motionViolet)
                 : AnyShapeStyle(Color.primary.opacity(0.08)),
                 lineWidth: isSelected ? 2.5 : 1
             )
         }
-        .shadow(color: isSelected ? GlideSwitcherPalette.motionViolet.opacity(0.22) : Color.clear, radius: 10, y: 4)
         .scaleEffect(isSelected ? 1.03 : 1)
         .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: isSelected)
         .accessibilityElement(children: .ignore)
@@ -666,45 +744,175 @@ private struct WindowSelectionCard: View {
     }
 }
 
+private final class AppSwitcherPreviewCaptureTask {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+}
+
 private enum AppSwitcherPreviewProvider {
-    static func capture(
-        windowsByApp: [[AppSwitcherWindow]],
-        preferredID: Int?,
-        completion: @escaping ([Int: NSImage]) -> Void
-    ) {
+    private struct Target {
+        let logicalID: Int
+        let processIdentifier: pid_t
+        let windowID: CGWindowID
+    }
+
+    private struct CacheEntry {
+        let processIdentifier: pid_t
+        let image: NSImage
+        var lastAccess: TimeInterval
+    }
+
+    private static let captureQueue = DispatchQueue(
+        label: "com.glide.app-switcher-previews",
+        qos: .userInitiated
+    )
+    private static let cacheLock = NSLock()
+    private static var cache: [CGWindowID: CacheEntry] = [:]
+    private static let cacheLifetime: TimeInterval = 60
+    private static let maximumCacheEntries = 18
+
+    static func cachedImages(for windows: [AppSwitcherWindow]) -> [CGWindowID: NSImage] {
         guard CGPreflightScreenCaptureAccess() else {
-            completion([:])
-            return
+            clearCache()
+            return [:]
         }
 
-        var targets = windowsByApp.flatMap { windows in
-            windows.compactMap { window -> (id: Int, windowID: CGWindowID)? in
-                guard !window.isMinimized, window.isOnCurrentSpace, let windowID = window.windowID else { return nil }
-                return (window.id, windowID)
-            }
+        let now = ProcessInfo.processInfo.systemUptime
+        cacheLock.lock()
+        cache = cache.filter { _, entry in now - entry.lastAccess <= cacheLifetime }
+
+        var images: [CGWindowID: NSImage] = [:]
+        for window in windows {
+            guard !window.isMinimized,
+                  window.isOnCurrentSpace,
+                  let windowID = window.windowID,
+                  var entry = cache[windowID],
+                  entry.processIdentifier == window.processIdentifier else { continue }
+            entry.lastAccess = now
+            cache[windowID] = entry
+            images[windowID] = entry.image
         }
-        if let preferredID, let index = targets.firstIndex(where: { $0.id == preferredID }) {
+        cacheLock.unlock()
+        return images
+    }
+
+    static func capture(
+        windows: [AppSwitcherWindow],
+        preferredID: Int?,
+        completion: @escaping ([CGWindowID: NSImage]) -> Void
+    ) -> AppSwitcherPreviewCaptureTask? {
+        guard CGPreflightScreenCaptureAccess() else {
+            clearCache()
+            completion([:])
+            return nil
+        }
+
+        var targets = windows.compactMap { window -> Target? in
+            guard !window.isMinimized,
+                  window.isOnCurrentSpace,
+                  let windowID = window.windowID else { return nil }
+            return Target(
+                logicalID: window.id,
+                processIdentifier: window.processIdentifier,
+                windowID: windowID
+            )
+        }
+        if let preferredID, let index = targets.firstIndex(where: { $0.logicalID == preferredID }) {
             let preferred = targets.remove(at: index)
             targets.insert(preferred, at: 0)
         }
+        guard !targets.isEmpty else { return nil }
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            var images: [Int: NSImage] = [:]
-            for target in targets {
+        let task = AppSwitcherPreviewCaptureTask()
+        captureQueue.async {
+            var deferredImages: [CGWindowID: NSImage] = [:]
+            for (index, target) in targets.enumerated() {
+                guard !task.isCancelled else { return }
+                if cachedImage(for: target) != nil { continue }
+
                 guard let captured = CGWindowListCreateImage(
                     .null,
                     .optionIncludingWindow,
                     target.windowID,
-                    [.boundsIgnoreFraming, .bestResolution]
-                ), let thumbnail = resized(captured, maximumDimension: 640) else { continue }
-                images[target.id] = NSImage(
+                    [.boundsIgnoreFraming, .nominalResolution]
+                ) else { continue }
+                guard !task.isCancelled else { return }
+                guard let thumbnail = resized(captured, maximumDimension: 384) else { continue }
+                guard !task.isCancelled else { return }
+
+                let image = NSImage(
                     cgImage: thumbnail,
                     size: NSSize(width: thumbnail.width, height: thumbnail.height)
                 )
+                store(image, for: target)
+
+                if index == 0 {
+                    DispatchQueue.main.async {
+                        guard !task.isCancelled else { return }
+                        completion([target.windowID: image])
+                    }
+                } else {
+                    deferredImages[target.windowID] = image
+                }
             }
-            DispatchQueue.main.async { completion(images) }
+
+            if !deferredImages.isEmpty, !task.isCancelled {
+                DispatchQueue.main.async {
+                    guard !task.isCancelled else { return }
+                    completion(deferredImages)
+                }
+            }
         }
+        return task
     }
+
+    private static func cachedImage(for target: Target) -> NSImage? {
+        let now = ProcessInfo.processInfo.systemUptime
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        guard var entry = cache[target.windowID],
+              entry.processIdentifier == target.processIdentifier,
+              now - entry.lastAccess <= cacheLifetime else {
+            cache.removeValue(forKey: target.windowID)
+            return nil
+        }
+        entry.lastAccess = now
+        cache[target.windowID] = entry
+        return entry.image
+    }
+
+    private static func store(_ image: NSImage, for target: Target) {
+        cacheLock.lock()
+        cache[target.windowID] = CacheEntry(
+            processIdentifier: target.processIdentifier,
+            image: image,
+            lastAccess: ProcessInfo.processInfo.systemUptime
+        )
+        while cache.count > maximumCacheEntries,
+              let leastRecentID = cache.min(by: { $0.value.lastAccess < $1.value.lastAccess })?.key {
+            cache.removeValue(forKey: leastRecentID)
+        }
+        cacheLock.unlock()
+    }
+
+    private static func clearCache() {
+        cacheLock.lock()
+        cache.removeAll()
+        cacheLock.unlock()
+    }
+
     private static func resized(_ image: CGImage, maximumDimension: Int) -> CGImage? {
         let longest = max(image.width, image.height)
         guard longest > maximumDimension else { return image }

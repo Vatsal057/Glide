@@ -31,6 +31,13 @@ final class WindowTargeting {
     // private-token lookup cost when an application creates a new window.
     private var remoteAXWindows: [pid_t: [CGWindowID: AXUIElement]] = [:]
     private var unresolvedRemoteWindowIDs: [pid_t: Set<CGWindowID>] = [:]
+    private var unresolvedRemoteWindowCacheDates: [pid_t: TimeInterval] = [:]
+
+    private func pruneSwitcherCaches(runningPIDs: Set<pid_t>) {
+        remoteAXWindows = remoteAXWindows.filter { runningPIDs.contains($0.key) }
+        unresolvedRemoteWindowIDs = unresolvedRemoteWindowIDs.filter { runningPIDs.contains($0.key) }
+        unresolvedRemoteWindowCacheDates = unresolvedRemoteWindowCacheDates.filter { runningPIDs.contains($0.key) }
+    }
 
     /// Prunes savedFrames entries for PIDs that are no longer running.
     /// Only runs when the dict exceeds 20 entries to avoid background overhead.
@@ -607,6 +614,19 @@ final class WindowTargeting {
             }
         }
 
+        let now = ProcessInfo.processInfo.systemUptime
+        if var cached = remoteAXWindows[pid] {
+            cached = cached.filter { candidateIDs.contains($0.key) }
+            remoteAXWindows[pid] = cached.isEmpty ? nil : cached
+        }
+        if now - (unresolvedRemoteWindowCacheDates[pid] ?? 0) > 10 {
+            unresolvedRemoteWindowIDs[pid] = nil
+            unresolvedRemoteWindowCacheDates[pid] = nil
+        } else if var unresolved = unresolvedRemoteWindowIDs[pid] {
+            unresolved.formIntersection(candidateIDs)
+            unresolvedRemoteWindowIDs[pid] = unresolved.isEmpty ? nil : unresolved
+        }
+
         var missingIDs = candidateIDs.subtracting(Set(windowsByID.keys))
         if let cached = remoteAXWindows[pid] {
             for id in missingIDs {
@@ -637,6 +657,7 @@ final class WindowTargeting {
         remoteAXWindows[pid] = recovered
         if !missingIDs.isEmpty {
             unresolvedRemoteWindowIDs[pid, default: []].formUnion(missingIDs)
+            unresolvedRemoteWindowCacheDates[pid] = now
         }
         return Array(windowsByID.values)
     }
@@ -654,6 +675,7 @@ final class WindowTargeting {
     }
 
     func switcherWindows(for apps: [NSRunningApplication]) -> [[AppSwitcherWindow]] {
+        pruneSwitcherCaches(runningPIDs: Set(apps.map(\.processIdentifier)))
         let serverWindowsByProcess = windowServerWindowsByProcess()
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
