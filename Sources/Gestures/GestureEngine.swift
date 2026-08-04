@@ -95,10 +95,7 @@ final class GestureEngine {
         MultitouchBridge.shared.start(callback: glideMTCallback)
         inputManager.installMonitors()
         AppSwitcherState.shared.startMRUTracking()
-        if Settings.shared.appSwitcher.skipWindowlessFinder {
-            WindowTargeting.shared.refreshFinderWindowCache()   // warm before first switcher open
-        }
-        
+
         isRunning = true
         updateObservableState()
         AppLogger.debug("[Engine] Started")
@@ -371,11 +368,13 @@ final class GestureEngine {
         let movingForward = action == .appSwitcherNext
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
-        // Finder's desktop process is always running. Keep Finder only when its AX
-        // catalog contains at least one real standard/dialog window.
+        // Finder's desktop process is always running, so a windowless Finder is the
+        // one app worth hiding from the switcher.
+        let skipFinder = Settings.shared.appSwitcher.skipWindowlessFinder
         let customIndices = systemApps.indices.filter { index in
-            systemApps[index].bundleIdentifier != "com.apple.finder"
-                || !systemWindows[index].isEmpty
+            !(skipFinder
+              && systemApps[index].bundleIdentifier == "com.apple.finder"
+              && systemWindows[index].isEmpty)
         }
         let customApps = customIndices.map { systemApps[$0] }
         let customWindows = customIndices.map { systemWindows[$0] }
@@ -418,10 +417,10 @@ final class GestureEngine {
         }
 
         let finderIndex = systemApps.indices.first { index in
-            systemApps[index].bundleIdentifier == "com.apple.finder"
+            skipFinder
+                && systemApps[index].bundleIdentifier == "com.apple.finder"
                 && systemWindows[index].isEmpty
         }
-        WindowTargeting.shared.refreshFinderWindowCache()
 
         let firstIndex = movingForward ? 1 : systemApps.count - 1
         var nativeIndex = firstIndex

@@ -206,7 +206,18 @@ final class AppSwitcherOverlayController {
         let cardsWidth = CGFloat(visibleCount) * 128 + CGFloat(max(0, visibleCount - 1)) * 4
         let overflowWidth: CGFloat = apps.count > visibleCount ? 84 : 0
         let panelWidth = min(screen.frame.width, max(520, cardsWidth + overflowWidth + 192))
-        let panelHeight = min(screen.frame.height, 900)
+        // The mask blurs the whole panel every rendered frame, so its cost scales with
+        // panel area. The app rail is centred on the panel, which means the window
+        // teardrop hanging below it needs twice its own height in panel space —  hence
+        // the tall default. When no app in this session has more than one window the
+        // teardrop can never appear, so the rail is the entire layout and the panel can
+        // collapse to it. Decided once per open, so the panel never resizes mid-gesture.
+        let mayShowWindowSection = windowsByApp.contains { $0.count > 1 }
+        let railBlockHeight: CGFloat = 117 + 28 * 2   // card height, plus appRail's vertical padding
+        let panelHeight = min(
+            screen.frame.height,
+            mayShowWindowSection ? 900 : railBlockHeight
+        )
         let panelFrame = NSRect(
             x: screen.frame.midX - panelWidth / 2,
             y: screen.frame.midY - panelHeight / 2,

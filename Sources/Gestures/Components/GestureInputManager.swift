@@ -33,7 +33,8 @@ final class GestureInputManager {
     func setupTaps() {
         setupSuppressionTap()
         setupClickObservationTap()
-        setupTrackPointTap()
+        // The TrackPoint tap is created by setTrackPointSuppression the first time
+        // the stick engages — most users never own an event tap they never use.
     }
 
     func teardownTaps() {

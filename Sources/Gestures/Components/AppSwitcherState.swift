@@ -6,6 +6,7 @@ final class AppSwitcherState {
 
     private var mruAppOrder: [pid_t] = []
     private var mruObserver: Any?
+    private var launchObserver: Any?
 
     private init() {}
 
@@ -30,13 +31,23 @@ final class AppSwitcherState {
             self.mruAppOrder.removeAll { $0 == pid }
             self.mruAppOrder.insert(pid, at: 0)
         }
+        WindowTargeting.shared.warmAccessibilityConnections()
+        launchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil, queue: .main
+        ) { notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.activationPolicy == .regular else { return }
+            WindowTargeting.shared.warmAccessibilityConnection(for: app.processIdentifier)
+        }
     }
 
     func stopMRUTracking() {
-        if let observer = mruObserver {
+        for observer in [mruObserver, launchObserver].compactMap({ $0 }) {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
-            mruObserver = nil
         }
+        mruObserver = nil
+        launchObserver = nil
     }
 
     func getOrderedApps() -> [NSRunningApplication] {

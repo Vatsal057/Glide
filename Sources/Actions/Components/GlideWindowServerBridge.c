@@ -14,7 +14,6 @@ typedef int32_t (*GLDWGetProcessForPID)(pid_t, GLDWProcessSerialNumber *);
 typedef CGError (*GLDWSetFrontProcess)(GLDWProcessSerialNumber *, uint32_t, uint32_t);
 typedef CGError (*GLDWPostEventRecord)(GLDWProcessSerialNumber *, uint8_t *);
 typedef int (*GLDWMainConnectionID)(void);
-typedef CGError (*GLDWGetConnectionIDForPSN)(int, GLDWProcessSerialNumber *, int *);
 typedef CFArrayRef (*GLDWCopyManagedDisplaySpaces)(int);
 typedef CFArrayRef (*GLDWCopyWindowsWithOptionsAndTags)(int, uint32_t, CFArrayRef, uint32_t, uint64_t *, uint64_t *);
 
@@ -25,7 +24,6 @@ static GLDWGetProcessForPID fn_get_process = NULL;
 static GLDWSetFrontProcess fn_set_front = NULL;
 static GLDWPostEventRecord fn_post_event = NULL;
 static GLDWMainConnectionID fn_main_connection = NULL;
-static GLDWGetConnectionIDForPSN fn_get_connection = NULL;
 static GLDWCopyManagedDisplaySpaces fn_copy_display_spaces = NULL;
 static GLDWCopyWindowsWithOptionsAndTags fn_copy_windows = NULL;
 
@@ -40,7 +38,6 @@ static void init_bridge_symbols(void) {
     fn_set_front = (GLDWSetFrontProcess)dlsym(handle, "_SLPSSetFrontProcessWithOptions");
     fn_post_event = (GLDWPostEventRecord)dlsym(handle, "SLPSPostEventRecordTo");
     fn_main_connection = (GLDWMainConnectionID)dlsym(handle, "SLSMainConnectionID");
-    fn_get_connection = (GLDWGetConnectionIDForPSN)dlsym(handle, "SLSGetConnectionIDForPSN");
     fn_copy_display_spaces = (GLDWCopyManagedDisplaySpaces)dlsym(handle, "SLSCopyManagedDisplaySpaces");
     fn_copy_windows = (GLDWCopyWindowsWithOptionsAndTags)dlsym(handle, "SLSCopyWindowsWithOptionsAndTags");
 }
@@ -88,26 +85,22 @@ bool GLDWFocusWindow(pid_t process_id, uint32_t window_id) {
     return made_key;
 }
 
-CFArrayRef GLDWCopyWindowIDsForProcess(pid_t process_id) {
-    if (process_id <= 0) {
-        return NULL;
+static void append_space_id(CFMutableArrayRef spaces, CFDictionaryRef space) {
+    if (space == NULL || CFGetTypeID(space) != CFDictionaryGetTypeID()) return;
+    CFNumberRef space_id = CFDictionaryGetValue(space, CFSTR("id64"));
+    if (space_id != NULL && CFGetTypeID(space_id) == CFNumberGetTypeID()) {
+        CFArrayAppendValue(spaces, space_id);
     }
+}
 
+CFArrayRef GLDWCopyWindowIDs(bool current_space_only, bool ordered_in_only) {
     pthread_once(&bridge_init_once, init_bridge_symbols);
-    if (fn_get_process == NULL || fn_main_connection == NULL || fn_get_connection == NULL
-        || fn_copy_display_spaces == NULL || fn_copy_windows == NULL) {
-        return NULL;
-    }
-
-    GLDWProcessSerialNumber process = {0};
-    if (fn_get_process(process_id, &process) != 0) {
+    if (fn_main_connection == NULL || fn_copy_display_spaces == NULL || fn_copy_windows == NULL) {
         return NULL;
     }
 
     int connection = fn_main_connection();
-    int process_connection = 0;
-    if (connection == 0 || fn_get_connection(connection, &process, &process_connection) != kCGErrorSuccess
-        || process_connection == 0) {
+    if (connection == 0) {
         return NULL;
     }
 
@@ -121,17 +114,16 @@ CFArrayRef GLDWCopyWindowIDsForProcess(pid_t process_id) {
     for (CFIndex i = 0; i < display_count; ++i) {
         CFDictionaryRef display = (CFDictionaryRef)CFArrayGetValueAtIndex(display_spaces, i);
         if (display == NULL || CFGetTypeID(display) != CFDictionaryGetTypeID()) continue;
+
+        if (current_space_only) {
+            append_space_id(spaces, CFDictionaryGetValue(display, CFSTR("Current Space")));
+            continue;
+        }
         CFArrayRef display_space_list = CFDictionaryGetValue(display, CFSTR("Spaces"));
         if (display_space_list == NULL || CFGetTypeID(display_space_list) != CFArrayGetTypeID()) continue;
-
         CFIndex space_count = CFArrayGetCount(display_space_list);
         for (CFIndex j = 0; j < space_count; ++j) {
-            CFDictionaryRef space = (CFDictionaryRef)CFArrayGetValueAtIndex(display_space_list, j);
-            if (space == NULL || CFGetTypeID(space) != CFDictionaryGetTypeID()) continue;
-            CFNumberRef space_id = CFDictionaryGetValue(space, CFSTR("id64"));
-            if (space_id != NULL && CFGetTypeID(space_id) == CFNumberGetTypeID()) {
-                CFArrayAppendValue(spaces, space_id);
-            }
+            append_space_id(spaces, (CFDictionaryRef)CFArrayGetValueAtIndex(display_space_list, j));
         }
     }
 
@@ -139,8 +131,11 @@ CFArrayRef GLDWCopyWindowIDsForProcess(pid_t process_id) {
     uint64_t clear_tags = 0;
     CFArrayRef windows = NULL;
     if (CFArrayGetCount(spaces) > 0) {
-        // 0x7 includes minimized windows as well as ordered-in windows.
-        windows = fn_copy_windows(connection, (uint32_t)process_connection, spaces, 0x7, &set_tags, &clear_tags);
+        // Owner connection 0 means "every process". 0x7 also reports windows that
+        // are ordered out (minimized, or belonging to a hidden application);
+        // 0x2 reports only the ordered-in ones.
+        uint32_t options = ordered_in_only ? 0x2 : 0x7;
+        windows = fn_copy_windows(connection, 0, spaces, options, &set_tags, &clear_tags);
     }
     CFRelease(spaces);
     CFRelease(display_spaces);

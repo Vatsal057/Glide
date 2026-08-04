@@ -139,6 +139,10 @@ final class EngineBridge: ObservableObject {
                 engine.inputManager.checkHealth()
             }
         }
+        // A repeating timer with no slack forces its own wake-up every five
+        // seconds forever; slack lets macOS fold it into a wake it was making
+        // anyway, which is most of the idle battery cost of a check this cheap.
+        tapHealthTimer?.tolerance = 2.0
     }
 
     private func startAccessibilityMonitoring() {

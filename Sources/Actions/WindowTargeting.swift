@@ -6,9 +6,6 @@ import IOKit.pwr_mgt
 @_silgen_name("_AXUIElementGetWindow")
 func _AXUIElementGetWindow(_ element: AXUIElement, _ idOut: inout UInt32) -> AXError
 
-@_silgen_name("_AXUIElementCreateWithRemoteToken")
-func _AXUIElementCreateWithRemoteToken(_ token: CFData) -> AXUIElement?
-
 // ─────────────────────────────────────────────
 // MARK: - ActionExecutor
 // ─────────────────────────────────────────────
@@ -25,19 +22,6 @@ final class WindowTargeting {
     }
 
     private var savedFrames: [WindowKey: CGRect] = [:]
-
-    // macOS omits AX references for windows outside the active Space. Cache the
-    // recovered references by WindowServer id so the switcher only pays the
-    // private-token lookup cost when an application creates a new window.
-    private var remoteAXWindows: [pid_t: [CGWindowID: AXUIElement]] = [:]
-    private var unresolvedRemoteWindowIDs: [pid_t: Set<CGWindowID>] = [:]
-    private var unresolvedRemoteWindowCacheDates: [pid_t: TimeInterval] = [:]
-
-    private func pruneSwitcherCaches(runningPIDs: Set<pid_t>) {
-        remoteAXWindows = remoteAXWindows.filter { runningPIDs.contains($0.key) }
-        unresolvedRemoteWindowIDs = unresolvedRemoteWindowIDs.filter { runningPIDs.contains($0.key) }
-        unresolvedRemoteWindowCacheDates = unresolvedRemoteWindowCacheDates.filter { runningPIDs.contains($0.key) }
-    }
 
     /// Prunes savedFrames entries for PIDs that are no longer running.
     /// Only runs when the dict exceeds 20 entries to avoid background overhead.
@@ -525,6 +509,24 @@ final class WindowTargeting {
         return WindowKey(pid: pid, identity: Int(CFHash(w)))
     }
 
+    /// The first Accessibility request to a process pays a one-off connection
+    /// handshake — measured at ~40ms per application, ~250ms across a typical set.
+    /// Paying that on the first switcher open is exactly the quarter-second stall
+    /// the panel must not have, so it is paid in the background ahead of time.
+    /// Every later request to the same process costs well under a millisecond.
+    func warmAccessibilityConnection(for pid: pid_t) {
+        DispatchQueue.global(qos: .utility).async { _ = self.windows(for: pid) }
+    }
+
+    func warmAccessibilityConnections() {
+        let pids = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .map(\.processIdentifier)
+        DispatchQueue.global(qos: .utility).async {
+            for pid in pids { _ = self.windows(for: pid) }
+        }
+    }
+
     func windows(for pid: pid_t) -> [AXUIElement] {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.1)
@@ -534,152 +536,86 @@ final class WindowTargeting {
         return wins
     }
 
-    struct AppWindowSummary {
-        let totalCount: Int
-        let minimizedCount: Int
-
-        var allMinimized: Bool { totalCount > 0 && minimizedCount == totalCount }
+    /// One pass over the window manager, shared by every application in a switcher
+    /// open. Accessibility only ever describes windows on the active Space, so the
+    /// set of windows that exist — and whether each is on this Space or merely
+    /// ordered out — comes from the WindowServer instead.
+    private struct WindowServerSnapshot {
+        /// Front-to-back, per owning process. Layer 0 and at least 40×40, so menus,
+        /// tooltips, shadows and status items never reach the switcher.
+        var idsByProcess: [pid_t: [CGWindowID]] = [:]
+        var sizes: [CGWindowID: CGSize] = [:]
+        var titles: [CGWindowID: String] = [:]
+        var onCurrentSpace: Set<CGWindowID> = []
+        var orderedIn: Set<CGWindowID> = []
     }
 
-    func windowSummary(for pid: pid_t) -> AppWindowSummary {
-        let realWindows = windows(for: pid).filter(isRealWindow)
-        let minimized = realWindows.reduce(into: 0) { count, window in
-            if axBool(window, attribute: kAXMinimizedAttribute as CFString) == true { count += 1 }
-        }
-        return AppWindowSummary(totalCount: realWindows.count, minimizedCount: minimized)
+    private func copyWindowServerIDs(currentSpaceOnly: Bool, orderedInOnly: Bool) -> Set<CGWindowID>? {
+        guard let unmanaged = GLDWCopyWindowIDs(currentSpaceOnly, orderedInOnly) else { return nil }
+        let ids = unmanaged.takeRetainedValue() as NSArray
+        return Set(ids.compactMap { ($0 as? NSNumber).map { CGWindowID($0.uint32Value) } })
     }
 
-    func hasRealWindow(for pid: pid_t) -> Bool {
-        windows(for: pid).contains(where: isRealWindow)
-    }
+    private func windowServerSnapshot() -> WindowServerSnapshot {
+        var snapshot = WindowServerSnapshot()
+        // nil means the private symbols are gone (a future macOS). Everything then
+        // falls back to the on-screen flag, which only sees the active Space —
+        // the old behaviour, rather than an empty switcher.
+        let managed = copyWindowServerIDs(currentSpaceOnly: false, orderedInOnly: false)
+        let current = copyWindowServerIDs(currentSpaceOnly: true, orderedInOnly: false)
+        let ordered = copyWindowServerIDs(currentSpaceOnly: false, orderedInOnly: true)
+        // An empty answer is treated as no answer: reporting every window as
+        // "another Space" would be worse than the pre-Spaces heuristic.
+        let useOnscreenFlag = managed == nil || current?.isEmpty != false
+        snapshot.onCurrentSpace = current ?? []
+        snapshot.orderedIn = ordered ?? []
 
-    /// A WindowServer window is present even when Accessibility hides it because
-    /// it belongs to another Space or a full-screen Space. Keep this small, public
-    /// Core Graphics representation separate from AX so switcher presentation does
-    /// not depend on the active Space.
-    private struct WindowServerWindow {
-        let isOnCurrentSpace: Bool
-    }
-
-    private func windowServerWindowsByProcess() -> [pid_t: [CGWindowID: WindowServerWindow]] {
         guard let info = CGWindowListCopyWindowInfo(
             [.optionAll, .excludeDesktopElements],
             kCGNullWindowID
-        ) as? [[String: Any]] else { return [:] }
+        ) as? [[String: Any]] else { return snapshot }
 
-        var windowsByProcess: [pid_t: [CGWindowID: WindowServerWindow]] = [:]
         for row in info {
             guard let pidNumber = row[kCGWindowOwnerPID as String] as? NSNumber,
                   let layerNumber = row[kCGWindowLayer as String] as? NSNumber,
                   layerNumber.intValue == 0,
                   let idNumber = row[kCGWindowNumber as String] as? NSNumber,
-                  let bounds = row[kCGWindowBounds as String] as? [String: Any],
-                  let widthNumber = bounds["Width"] as? NSNumber,
-                  let heightNumber = bounds["Height"] as? NSNumber,
-                  widthNumber.doubleValue >= 40,
-                  heightNumber.doubleValue >= 40 else { continue }
+                  let bounds = row[kCGWindowBounds as String] as? [String: Any] else { continue }
+            let size = CGSize(
+                width: (bounds["Width"] as? NSNumber)?.doubleValue ?? 0,
+                height: (bounds["Height"] as? NSNumber)?.doubleValue ?? 0
+            )
+            guard size.width >= 40, size.height >= 40 else { continue }
 
             let id = CGWindowID(idNumber.uint32Value)
-            let isOnCurrentSpace = (row[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false
-            windowsByProcess[pidNumber.int32Value, default: [:]][id] = WindowServerWindow(
-                isOnCurrentSpace: isOnCurrentSpace
-            )
-        }
-        return windowsByProcess
-    }
-
-    private func allWindowIDs(for pid: pid_t, fallback: Set<CGWindowID>) -> Set<CGWindowID> {
-        guard let unmanagedWindowIDs = GLDWCopyWindowIDsForProcess(pid) else {
-            return fallback
-        }
-        let windowIDs = unmanagedWindowIDs.takeRetainedValue() as NSArray
-        let ids = Set(windowIDs.compactMap { ($0 as? NSNumber).map { CGWindowID($0.uint32Value) } })
-        return ids.isEmpty ? fallback : ids
-    }
-
-    /// Returns AX references for every WindowServer candidate owned by an app.
-    /// `AXWindows` only exposes the active Space, so missing references are
-    /// reconstructed from the app's remote AX tokens. The final role/subrole
-    /// decision is therefore identical for current, minimized, full-screen, and
-    /// inactive-Space windows.
-    private func switcherAXWindows(
-        for pid: pid_t,
-        candidateIDs: Set<CGWindowID>
-    ) -> [AXUIElement] {
-        let visibleAXWindows = windows(for: pid)
-        var windowsByID: [CGWindowID: AXUIElement] = [:]
-        for window in visibleAXWindows {
-            if let id = cgWindowID(for: window) {
-                windowsByID[id] = window
+            // The window manager knows which of an application's surfaces are real
+            // windows; Core Graphics also lists hidden scratch windows that no
+            // switcher should offer.
+            if let managed, !managed.contains(id) { continue }
+            if useOnscreenFlag,
+               (row[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == true {
+                snapshot.onCurrentSpace.insert(id)
+            }
+            if ordered == nil { snapshot.orderedIn.insert(id) }
+            snapshot.idsByProcess[pidNumber.int32Value, default: []].append(id)
+            snapshot.sizes[id] = size
+            // Only populated when the user has granted Screen Recording; used as a
+            // title of last resort for windows Accessibility cannot describe.
+            if let name = row[kCGWindowName as String] as? String, !name.isEmpty {
+                snapshot.titles[id] = name
             }
         }
-
-        let now = ProcessInfo.processInfo.systemUptime
-        if var cached = remoteAXWindows[pid] {
-            cached = cached.filter { candidateIDs.contains($0.key) }
-            remoteAXWindows[pid] = cached.isEmpty ? nil : cached
-        }
-        if now - (unresolvedRemoteWindowCacheDates[pid] ?? 0) > 10 {
-            unresolvedRemoteWindowIDs[pid] = nil
-            unresolvedRemoteWindowCacheDates[pid] = nil
-        } else if var unresolved = unresolvedRemoteWindowIDs[pid] {
-            unresolved.formIntersection(candidateIDs)
-            unresolvedRemoteWindowIDs[pid] = unresolved.isEmpty ? nil : unresolved
-        }
-
-        var missingIDs = candidateIDs.subtracting(Set(windowsByID.keys))
-        if let cached = remoteAXWindows[pid] {
-            for id in missingIDs {
-                if let window = cached[id] {
-                    windowsByID[id] = window
-                }
-            }
-            missingIDs.subtract(cached.keys)
-        }
-        missingIDs.subtract(unresolvedRemoteWindowIDs[pid] ?? [])
-        guard !missingIDs.isEmpty else { return Array(windowsByID.values) }
-
-        var recovered = remoteAXWindows[pid] ?? [:]
-        // Remote AX window element IDs in macOS apps are assigned sequentially
-        // for top-level windows (typically 0..64). Capping at 128 avoids thousands
-        // of failing IPC calls for non-AX WindowServer window IDs (popups, tooltips, etc.).
-        let maxElementID = 128
-        for elementID in 0..<maxElementID {
-            guard let window = remoteAXWindow(pid: pid, elementID: UInt64(elementID)),
-                  axRole(window) == (kAXWindowRole as String),
-                  let windowID = cgWindowID(for: window),
-                  missingIDs.contains(windowID) else { continue }
-            recovered[windowID] = window
-            windowsByID[windowID] = window
-            missingIDs.remove(windowID)
-            if missingIDs.isEmpty { break }
-        }
-        remoteAXWindows[pid] = recovered
-        if !missingIDs.isEmpty {
-            unresolvedRemoteWindowIDs[pid, default: []].formUnion(missingIDs)
-            unresolvedRemoteWindowCacheDates[pid] = now
-        }
-        return Array(windowsByID.values)
-    }
-
-    private func remoteAXWindow(pid: pid_t, elementID: UInt64) -> AXUIElement? {
-        var tokenBytes = [UInt8](repeating: 0, count: 0x14)
-        tokenBytes.withUnsafeMutableBytes { bytes in
-            bytes.storeBytes(of: UInt32(bitPattern: Int32(pid)), toByteOffset: 0, as: UInt32.self)
-            bytes.storeBytes(of: UInt32(0x636f636f), toByteOffset: 8, as: UInt32.self)
-            bytes.storeBytes(of: elementID, toByteOffset: 12, as: UInt64.self)
-        }
-        guard let element = _AXUIElementCreateWithRemoteToken(Data(tokenBytes) as CFData) else { return nil }
-        AXUIElementSetMessagingTimeout(element, 0.05)
-        return element
+        return snapshot
     }
 
     func switcherWindows(for apps: [NSRunningApplication]) -> [[AppSwitcherWindow]] {
-        pruneSwitcherCaches(runningPIDs: Set(apps.map(\.processIdentifier)))
-        let serverWindowsByProcess = windowServerWindowsByProcess()
+        let snapshot = windowServerSnapshot()
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
         return apps.map { app in
+            let windowIDs = snapshot.idsByProcess[app.processIdentifier] ?? []
+            guard !windowIDs.isEmpty else { return [] }
+
             let appElement = AXUIElementCreateApplication(app.processIdentifier)
             AXUIElementSetMessagingTimeout(appElement, 0.1)
             var focusedRef: CFTypeRef?
@@ -693,27 +629,34 @@ final class WindowTargeting {
             }()
             let focusedID = focusedWindow.flatMap(cgWindowID)
 
-            let serverWindows = serverWindowsByProcess[app.processIdentifier] ?? [:]
-            let accessibilityWindows = switcherAXWindows(
-                for: app.processIdentifier,
-                candidateIDs: allWindowIDs(
-                    for: app.processIdentifier,
-                    fallback: Set(serverWindows.keys)
-                )
-            )
-            var result = accessibilityWindows.filter(isSwitcherWindow).map { window in
-                let windowID = cgWindowID(for: window)
-                let rawTitle = axString(window, attribute: kAXTitleAttribute as CFString)?
+            var elementsByID: [CGWindowID: AXUIElement] = [:]
+            for window in windows(for: app.processIdentifier) {
+                if let id = cgWindowID(for: window) { elementsByID[id] = window }
+            }
+
+            var result = windowIDs.compactMap { windowID -> AppSwitcherWindow? in
+                let element = elementsByID[windowID]
+                let isOrderedIn = snapshot.orderedIn.contains(windowID)
+                guard isSwitcherWindow(
+                    element,
+                    isOrderedIn: isOrderedIn,
+                    size: snapshot.sizes[windowID] ?? .zero
+                ) else { return nil }
+                let axTitle = element
+                    .flatMap { axString($0, attribute: kAXTitleAttribute as CFString) }?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                let serverWindow = windowID.flatMap { serverWindows[$0] }
+                let title = [axTitle, snapshot.titles[windowID], app.localizedName]
+                    .compactMap { $0 }
+                    .first { !$0.isEmpty }
                 return AppSwitcherWindow(
-                    id: windowID.map(Int.init) ?? Int(CFHash(window)),
+                    id: Int(windowID),
                     processIdentifier: app.processIdentifier,
                     windowID: windowID,
-                    element: window,
-                    title: rawTitle?.isEmpty == false ? rawTitle! : "Untitled Window",
-                    isMinimized: axBool(window, attribute: kAXMinimizedAttribute as CFString) == true,
-                    isOnCurrentSpace: serverWindow?.isOnCurrentSpace ?? false,
+                    element: element,
+                    title: title ?? "Untitled Window",
+                    isMinimized: element.map { axBool($0, attribute: kAXMinimizedAttribute as CFString) == true }
+                        ?? false,
+                    isOnCurrentSpace: snapshot.onCurrentSpace.contains(windowID),
                     isApplicationHidden: app.isHidden
                 )
             }
@@ -784,82 +727,25 @@ final class WindowTargeting {
         return ref as? String
     }
 
-    private func isRealWindow(_ window: AXUIElement) -> Bool {
-        guard axRole(window) == (kAXWindowRole as String) else { return false }
-        if let subrole = axSubrole(window) {
-            return subrole == (kAXStandardWindowSubrole as String)
-                || subrole == (kAXDialogSubrole as String)
-                || subrole == (kAXSystemDialogSubrole as String)
-        }
-        guard let frame = axFrame(window), frame.width >= 40, frame.height >= 40 else { return false }
-        return true
-    }
-
     /// The switcher represents document-style windows, not sheets, dialogs, or
-    /// floating panels. Keep the wider `isRealWindow` predicate for window
-    /// management actions that legitimately operate on dialogs.
-    private func isSwitcherWindow(_ window: AXUIElement) -> Bool {
+    /// floating panels. Window management actions are deliberately more permissive,
+    /// since they legitimately operate on dialogs.
+    ///
+    /// A window with no AX element lives on another Space (or its application
+    /// refuses Accessibility): the WindowServer is then the only witness, and it
+    /// only vouches for windows that are ordered in.
+    private func isSwitcherWindow(_ window: AXUIElement?, isOrderedIn: Bool, size: CGSize) -> Bool {
+        guard let window else {
+            // Nothing can report a subrole here, so shape stands in for it. A
+            // full-screen Space adds a display-wide title strip alongside the real
+            // window; no document window is that letterboxed.
+            return isOrderedIn && size.width >= 200 && size.height >= 100
+        }
         guard axRole(window) == (kAXWindowRole as String) else { return false }
-        if let subrole = axSubrole(window) {
-            return subrole == (kAXStandardWindowSubrole as String)
-        }
-        guard let frame = axFrame(window), frame.width >= 40, frame.height >= 40 else { return false }
-        return true
-    }
-
-    // ── Finder window cache ──
-    //
-    // The app switcher wants to know if Finder has any window (skipWindowlessFinder).
-    // The reliable answer needs an Apple Event to Finder, but a SYNCHRONOUS Apple
-    // Event in the gesture path is poison: the first-ever call shows the Automation
-    // consent dialog, and Finder doesn't answer at all while it's busy servicing a
-    // drag — exactly when the switcher is opened mid-drag. So the switcher reads a
-    // cached answer and the refresh runs as a background osascript process.
-
-    /// Last known "Finder has a window" answer. Defaults to true so a cold cache
-    /// never skips Finder (skipping is the cosmetic optimization, not skipping is safe).
-    private(set) var finderLikelyHasWindows = true
-    private var finderCacheRefreshInFlight = false
-
-    /// Refreshes the cache off the main thread. Call after reading the cache —
-    /// the current switcher open uses the last answer, the next one is fresh.
-    func refreshFinderWindowCache() {
-        guard !finderCacheRefreshInFlight else { return }
-        finderCacheRefreshInFlight = true
-        DispatchQueue.global(qos: .utility).async {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-            process.arguments = ["-e", "tell application \"Finder\" to return count of windows"]
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
-            var hasWindows: Bool?
-            do {
-                try process.run()
-                process.waitUntilExit()
-                if process.terminationStatus == 0,
-                   let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                       .trimmingCharacters(in: .whitespacesAndNewlines),
-                   let count = Int(out) {
-                    hasWindows = count > 0
-                }
-            } catch {
-                AppLogger.debug("[Finder] osascript window count failed: \(error.localizedDescription)")
-            }
-            DispatchQueue.main.async {
-                // ponytail: AX fallback only sees the current Space — good enough
-                // for a skip heuristic when Automation permission is denied.
-                self.finderLikelyHasWindows = hasWindows ?? self.hasRealWindowForFinderFallback()
-                self.finderCacheRefreshInFlight = false
-            }
-        }
-    }
-
-    private func hasRealWindowForFinderFallback() -> Bool {
-        guard let finder = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) else {
-            return false
-        }
-        return hasRealWindow(for: finder.processIdentifier)
+        // Subrole degrades to AXDialog while a window is ordered out — minimized,
+        // or its application hidden — so it only means anything while ordered in.
+        guard isOrderedIn, let subrole = axSubrole(window) else { return true }
+        return subrole == (kAXStandardWindowSubrole as String)
     }
 
     private func shouldMinimizeWindow(_ window: AXUIElement) -> Bool {
@@ -898,12 +784,6 @@ final class WindowTargeting {
             minimizeAllSession = nil
         } else {
             minimizeAllSession = session
-        }
-    }
-
-    func isApplicationMinimized(_ app: NSRunningApplication) -> Bool {
-        windows(for: app.processIdentifier).contains {
-            axBool($0, attribute: kAXMinimizedAttribute as CFString) == true
         }
     }
 
