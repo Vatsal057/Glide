@@ -7,6 +7,79 @@ private enum GlideSwitcherPalette {
     static let motionViolet = Color(red: 148 / 255, green: 129 / 255, blue: 201 / 255)
 }
 
+/// Curvature and rim values, following the two rules macOS applies to Liquid Glass
+/// surfaces (AltTab's App Icons style follows the same ones):
+///
+///   1. Nested shapes are concentric: an outer radius equals its inner radius plus
+///      the padding between them, so every corner in the stack traces one curve.
+///      A glass panel at 32pt around a 32pt plate reads as a mistake; the same
+///      panel at 62pt reads as a single moulded object.
+///   2. The plate behind an app icon uses the icon's own squircle proportion, so it
+///      hugs the icon instead of cutting across it. AltTab lands at ~0.29 of the
+///      plate height at every one of its sizes.
+private enum GlideSwitcherMetrics {
+    /// AltTab sizes an icon cell as `icon + edgeInsets * 2` and lets the selection
+    /// plate fill that whole cell, which leaves the rim clear of the icon artwork.
+    /// Getting this backwards — a plate smaller than the icon — buries the rim under
+    /// the icon and its shadow.
+    ///
+    /// The absolute values are AltTab's App Icons "large" size, which is what its
+    /// default resolves to: icon 150 in a 162 cell, cells 1pt apart, 28pt of panel
+    /// padding. Big icons that nearly touch are most of why that panel reads like
+    /// the system Cmd-Tab; 116pt icons with 4pt gaps read as a generic HUD.
+    static let iconEdgeInset: CGFloat = 6
+    static let railIconSize: CGFloat = 150
+    static let railCardSize = railIconSize + iconEdgeInset * 2          // 162
+    static let railCardSpacing: CGFloat = 1
+    static let railCardStep = railCardSize + railCardSpacing            // 163
+    static let railPadding: CGFloat = 28
+    /// AltTab's large cell radius. Sits at 0.28 of the cell, the app-icon squircle
+    /// proportion, and lands the slab on AltTab's own 75pt panel radius.
+    static let selectionRadius: CGFloat = 45
+    static let railSlabRadius = selectionRadius + railPadding           // 73
+
+    static let cardInset: CGFloat = 10
+    static let thumbnailTopRadius: CGFloat = 10
+    static let thumbnailBottomRadius: CGFloat = 22
+    static let cardTopRadius = thumbnailTopRadius + cardInset           // 20
+    static let cardBottomRadius = thumbnailBottomRadius + cardInset     // 32
+    static let shelfPadding: CGFloat = 20
+    static let shelfSlabRadius = cardBottomRadius + shelfPadding        // 52
+
+    /// AltTab's highlight border width for icon-sized cells. A solid rim, not a
+    /// luminance wash, is what marks selection on glass — the fill stays quiet.
+    static let selectionBorderWidth: CGFloat = 3
+    static let selectionFillOpacity: CGFloat = 0.22
+
+    /// Tight and low, so icons sit on the glass instead of hovering above it.
+    /// Matches AltTab's app-icon shadow (offset 1pt, 2pt blur, ~32% black).
+    static let iconShadowOpacity: CGFloat = 0.32
+    static let iconShadowRadius: CGFloat = 1
+    static let iconShadowOffsetY: CGFloat = 1
+
+    static let railBlockHeight = railCardSize + railPadding * 2         // 218
+
+    /// Tallest the window shelf gets: three stacked cards plus its header and
+    /// padding. Measured off the rendered view rather than derived, so round up.
+    static let maxShelfHeight: CGFloat = 340
+
+    /// Width of `n` rail cards including the gaps between them. Both the panel
+    /// sizing in the controller and the selected-card centring in the view derive
+    /// from this, so the two can't drift apart.
+    static func railWidth(forVisibleCards n: Int) -> CGFloat {
+        CGFloat(n) * railCardSize + CGFloat(max(0, n - 1)) * railCardSpacing
+    }
+
+    /// The rail is centred in the panel and the shelf hangs below it, so the panel
+    /// needs twice the shelf's height plus the rail. Screens shorter than that clamp,
+    /// which used to clip the bottom of the shelf; this is how far the rail has to
+    /// move up to keep it whole. Depends only on panel height, so it is constant for
+    /// a session and the rail never shifts under the user's fingers.
+    static func railCenterBias(panelHeight: CGFloat) -> CGFloat {
+        max(0, maxShelfHeight - (panelHeight - railBlockHeight) / 2)
+    }
+}
+
 private struct AppSwitcherWindowItem: Identifiable {
     let id: Int
     let windowID: CGWindowID?
@@ -143,17 +216,32 @@ private final class AppSwitcherOverlayModel: ObservableObject {
         selectedWindowIndex = 0
     }
 }
+/// macOS renders the Liquid Glass specular rim — the bright line that traces the
+/// panel's edge and gives it depth — only for the *key* window. A panel that never
+/// takes key gets a flat fill instead, which is what made the switcher read as a
+/// plain dark slab next to the system's own glass surfaces. Borderless windows
+/// refuse key by default, so it has to be opted into.
+///
+/// The style mask stays `.nonactivatingPanel`, so taking key does not activate
+/// Glide: the frontmost app stays active and only loses key while the switcher is
+/// up, exactly as it does under the system switcher. `ignoresMouseEvents` still
+/// applies, so the panel remains click-through.
+private final class AppSwitcherPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 final class AppSwitcherOverlayController {
     static let shared = AppSwitcherOverlayController()
 
     private let model = AppSwitcherOverlayModel()
+    private let backdrop = LiquidGlassBackdropView(frame: .zero)
     private var captureGeneration = UUID()
     private var captureTask: AppSwitcherPreviewCaptureTask?
     private var captureRequest: DispatchWorkItem?
     private var windowsByApp: [[AppSwitcherWindow]] = []
 
     private lazy var panel: NSPanel = {
-        let panel = NSPanel(
+        let panel = AppSwitcherPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -166,7 +254,10 @@ final class AppSwitcherOverlayController {
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.animationBehavior = .none
-        panel.contentView = NSHostingView(rootView: AppSwitcherOverlayView(model: model))
+        // The glass slabs live in their own layer underneath the SwiftUI content, so the
+        // container that fuses them can never lift glass on top of the icons and titles.
+        let hosting = NSHostingView(rootView: AppSwitcherOverlayView(model: model, backdrop: backdrop))
+        panel.contentView = LiquidGlassPanelContentView(backdrop: backdrop, content: hosting)
         return panel
     }()
 
@@ -189,8 +280,7 @@ final class AppSwitcherOverlayController {
         captureGeneration = generation
         self.windowsByApp = windowsByApp
 
-        let itemWidth: CGFloat = 148
-        let widthCapacity = max(3, Int((screen.frame.width - 240) / itemWidth))
+        let widthCapacity = max(3, Int((screen.frame.width - 240) / GlideSwitcherMetrics.railCardStep))
         let appCapacity = min(apps.count, min(7, widthCapacity))
 
         model.configure(
@@ -203,20 +293,21 @@ final class AppSwitcherOverlayController {
         )
 
         let visibleCount = min(appCapacity, apps.count)
-        let cardsWidth = CGFloat(visibleCount) * 128 + CGFloat(max(0, visibleCount - 1)) * 4
+        let cardsWidth = GlideSwitcherMetrics.railWidth(forVisibleCards: visibleCount)
         let overflowWidth: CGFloat = apps.count > visibleCount ? 84 : 0
         let panelWidth = min(screen.frame.width, max(520, cardsWidth + overflowWidth + 192))
-        // The mask blurs the whole panel every rendered frame, so its cost scales with
-        // panel area. The app rail is centred on the panel, which means the window
-        // teardrop hanging below it needs twice its own height in panel space —  hence
-        // the tall default. When no app in this session has more than one window the
-        // teardrop can never appear, so the rail is the entire layout and the panel can
-        // collapse to it. Decided once per open, so the panel never resizes mid-gesture.
+        // Panel height only reserves layout room; each glass slab covers just its own
+        // block, so leftover panel area costs nothing to render. The app rail is centred
+        // on the panel, which means the window shelf hanging below it needs twice its own
+        // height in panel space — hence the tall default. When no app in this session has
+        // more than one window the shelf can never appear, so the rail is the entire
+        // layout and the panel can collapse to it. Decided once per open, so the panel
+        // never resizes mid-gesture.
         let mayShowWindowSection = windowsByApp.contains { $0.count > 1 }
-        let railBlockHeight: CGFloat = 117 + 28 * 2   // card height, plus appRail's vertical padding
+        let withShelfHeight = GlideSwitcherMetrics.railBlockHeight + GlideSwitcherMetrics.maxShelfHeight * 2
         let panelHeight = min(
             screen.frame.height,
-            mayShowWindowSection ? 900 : railBlockHeight
+            mayShowWindowSection ? withShelfHeight : GlideSwitcherMetrics.railBlockHeight
         )
         let panelFrame = NSRect(
             x: screen.frame.midX - panelWidth / 2,
@@ -225,7 +316,16 @@ final class AppSwitcherOverlayController {
             height: panelHeight
         )
         panel.setFrame(panelFrame, display: true)
-        panel.orderFrontRegardless()
+        // Vibrant appearance is what lets labels, secondary text and the low-opacity
+        // fills blend with the glass behind them rather than sit flatly on top. Set per
+        // show so the panel follows a theme change made while the app was running.
+        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        panel.appearance = NSAppearance(named: isDark ? .vibrantDark : .vibrantLight)
+        // Resolve the SwiftUI layout now so the glass slabs are already positioned when
+        // the panel first hits the screen, instead of a frame later.
+        panel.contentView?.layoutSubtreeIfNeeded()
+        // Key, not just ordered front: that is what earns the glass its specular rim.
+        panel.makeKeyAndOrderFront(nil)
         scheduleVisibleCapture(generation: generation, delay: 0)
         return true
     }
@@ -248,6 +348,7 @@ final class AppSwitcherOverlayController {
         windowsByApp = []
         panel.orderOut(nil)
         model.clear()
+        backdrop.clear()
     }
 
     private func scheduleVisibleCapture(generation: UUID, delay: TimeInterval) {
@@ -310,7 +411,7 @@ private struct TeardropShape: Shape {
     var neckOffset: CGFloat = 0
     var neckWidth: CGFloat = 16
     var neckHeight: CGFloat = 20
-    var cornerRadius: CGFloat = 28
+    var cornerRadius: CGFloat = GlideSwitcherMetrics.shelfSlabRadius
 
     var animatableData: CGFloat {
         get { neckOffset }
@@ -371,34 +472,47 @@ private struct TeardropShape: Shape {
 
 private struct AppSwitcherOverlayView: View {
     @ObservedObject var model: AppSwitcherOverlayModel
+    let backdrop: LiquidGlassBackdropView
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    /// macOS 26 and later draw the switcher's surface with real Liquid Glass, placed
+    /// behind this view by `backdrop`. Older systems keep the SwiftUI material and its
+    /// metaball mask, so nothing about them changes.
+    private let usesNativeGlass = LiquidGlass.isAvailable
+    private static let panelSpace = "glideSwitcherPanel"
 
     var body: some View {
         Group {
             if !model.items.isEmpty {
                 GeometryReader { geo in
                     ZStack {
-                        panelBackground
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .mask {
-                                Canvas { context, size in
-                                    context.addFilter(.alphaThreshold(min: 0.5, color: .black))
-                                    context.addFilter(.blur(radius: 24))
-                                    context.drawLayer { ctx in
-                                        if let resolved = context.resolveSymbol(id: "layout") {
-                                            ctx.draw(resolved, at: CGPoint(x: size.width / 2, y: size.height / 2))
+                        if !usesNativeGlass {
+                            panelBackground
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .mask {
+                                    Canvas { context, size in
+                                        context.addFilter(.alphaThreshold(min: 0.5, color: .black))
+                                        context.addFilter(.blur(radius: 24))
+                                        context.drawLayer { ctx in
+                                            if let resolved = context.resolveSymbol(id: "layout") {
+                                                ctx.draw(resolved, at: CGPoint(x: size.width / 2, y: size.height / 2))
+                                            }
                                         }
+                                    } symbols: {
+                                        layoutStructure(isMask: true)
+                                            .frame(width: geo.size.width, height: geo.size.height)
+                                            .tag("layout")
                                     }
-                                } symbols: {
-                                    layoutStructure(isMask: true)
-                                        .frame(width: geo.size.width, height: geo.size.height)
-                                        .tag("layout")
                                 }
-                            }
+                        }
 
                         layoutStructure(isMask: false)
                             .frame(width: geo.size.width, height: geo.size.height)
+                    }
+                    .coordinateSpace(name: Self.panelSpace)
+                    .onPreferenceChange(GlassSlabPreferenceKey.self) { slabs in
+                        backdrop.apply(glassSlabsInAppKitCoordinates(slabs, panelHeight: geo.size.height))
                     }
                 }
                 .animation(reduceMotion ? nil : .interactiveSpring(response: 0.4, dampingFraction: 0.7), value: model.selectedApp?.windows.count)
@@ -411,14 +525,14 @@ private struct AppSwitcherOverlayView: View {
         let selIndex = model.selectedAppIndex
         guard let posInVisible = visible.firstIndex(of: selIndex) else { return 0 }
         
-        let cardStep: CGFloat = 132
-        let cardsTotalWidth = CGFloat(visible.count) * 128 + CGFloat(max(0, visible.count - 1)) * 4
+        let cardStep = GlideSwitcherMetrics.railCardStep
+        let cardsTotalWidth = GlideSwitcherMetrics.railWidth(forVisibleCards: visible.count)
         let badgeLeftWidth: CGFloat = model.hiddenAppsBefore > 0 ? 46 : 0
         let badgeRightWidth: CGFloat = model.hiddenAppsAfter > 0 ? 46 : 0
         let railTotalWidth = cardsTotalWidth + badgeLeftWidth + badgeRightWidth
-        
+
         let cardLeftInRail = badgeLeftWidth + CGFloat(posInVisible) * cardStep
-        let cardCenterInRail = cardLeftInRail + 64
+        let cardCenterInRail = cardLeftInRail + GlideSwitcherMetrics.railCardSize / 2
         let railCenter = railTotalWidth / 2.0
         
         return cardCenterInRail - railCenter
@@ -429,7 +543,10 @@ private struct AppSwitcherOverlayView: View {
         ZStack(alignment: Alignment(horizontal: .center, vertical: .appSwitcherRailCenter)) {
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .alignmentGuide(.appSwitcherRailCenter) { d in d[VerticalAlignment.center] }
+                .alignmentGuide(.appSwitcherRailCenter) { d in
+                    d[VerticalAlignment.center]
+                        - GlideSwitcherMetrics.railCenterBias(panelHeight: d.height)
+                }
 
             VStack(spacing: 0) {
                 VStack(spacing: 0) {
@@ -439,13 +556,20 @@ private struct AppSwitcherOverlayView: View {
                         appRail
                     }
                 }
-                .padding(.horizontal, 26)
-                .padding(.vertical, 28)
+                .padding(GlideSwitcherMetrics.railPadding)
                 .background {
                     if isMask {
-                        Color.black.clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+                        Color.black.clipShape(
+                            RoundedRectangle(cornerRadius: GlideSwitcherMetrics.railSlabRadius, style: .continuous)
+                        )
                     }
                 }
+                .glassSlab(
+                    id: 0,
+                    cornerRadius: GlideSwitcherMetrics.railSlabRadius,
+                    in: Self.panelSpace,
+                    enabled: usesNativeGlass && !isMask
+                )
                 .alignmentGuide(.appSwitcherRailCenter) { d in d[VerticalAlignment.center] }
 
                 if (model.selectedApp?.windows.count ?? 0) > 1 {
@@ -457,8 +581,8 @@ private struct AppSwitcherOverlayView: View {
                         }
                     }
                     .padding(.top, 24)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
+                    .padding(.horizontal, GlideSwitcherMetrics.shelfPadding)
+                    .padding(.bottom, GlideSwitcherMetrics.shelfPadding)
                     .background {
                         if isMask {
                             Color.black.clipShape(TeardropShape(neckOffset: 0))
@@ -471,13 +595,21 @@ private struct AppSwitcherOverlayView: View {
                             removal: .opacity.combined(with: .scale(scale: 0.6, anchor: .top))
                         )
                     )
+                    // Reported after the offset so the slab tracks the shelf as it slides
+                    // under the selected app; the container fuses it with the rail above.
+                    .glassSlab(
+                        id: 1,
+                        cornerRadius: GlideSwitcherMetrics.shelfSlabRadius,
+                        in: Self.panelSpace,
+                        enabled: usesNativeGlass && !isMask
+                    )
                 }
             }
         }
     }
 
     private var appRail: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: GlideSwitcherMetrics.railCardSpacing) {
             appOverflowBadge(model.hiddenAppsBefore, symbol: "chevron.left")
             ForEach(model.visibleAppIndices, id: \.self) { index in
                 AppRailCard(
@@ -575,27 +707,51 @@ private struct AppRailCard: View {
     let isSelected: Bool
     let reduceMotion: Bool
 
+    private var plate: RoundedRectangle {
+        RoundedRectangle(cornerRadius: GlideSwitcherMetrics.selectionRadius, style: .continuous)
+    }
+
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .fill(isSelected ? Color.primary.opacity(0.60) : Color.clear)
-                .frame(width: 118, height: 117)
+            if isSelected {
+                // The violet rim marks selection; the lilac fill only supports it. A
+                // bright luminance wash was doing that job before, which reads as a
+                // milky blob on clear glass and buries whatever is behind the panel.
+                // `strokeBorder` keeps the stroke inside the plate, so the plate stays
+                // concentric with the glass corner behind it.
+                plate
+                    .fill(GlideSwitcherPalette.touchLilac.opacity(GlideSwitcherMetrics.selectionFillOpacity))
+                    .overlay {
+                        plate.strokeBorder(
+                            GlideSwitcherPalette.motionViolet,
+                            lineWidth: GlideSwitcherMetrics.selectionBorderWidth
+                        )
+                    }
+                    .frame(width: GlideSwitcherMetrics.railCardSize,
+                           height: GlideSwitcherMetrics.railCardSize)
+            }
 
             Image(nsImage: item.icon)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 128, height: 128)
-                .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
+                .frame(width: GlideSwitcherMetrics.railIconSize, height: GlideSwitcherMetrics.railIconSize)
+                .shadow(
+                    color: .black.opacity(GlideSwitcherMetrics.iconShadowOpacity),
+                    radius: GlideSwitcherMetrics.iconShadowRadius,
+                    y: GlideSwitcherMetrics.iconShadowOffsetY
+                )
         }
-        .frame(width: 128, height: 117)
+        .frame(width: GlideSwitcherMetrics.railCardSize, height: GlideSwitcherMetrics.railCardSize)
         .overlay(alignment: .bottom) {
             if isSelected {
                 Text(item.name)
-                    .font(.system(size: 13, weight: .medium))
+                    // Semibold, as macOS 26 uses for icon-grid labels: on clear glass a
+                    // medium weight loses its edges against whatever is behind the panel.
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: 118)
+                    .frame(maxWidth: GlideSwitcherMetrics.railCardSize - 10)
                     .offset(y: 18)
             }
         }
@@ -662,6 +818,16 @@ private struct WindowSelectionCard: View {
     let isSelected: Bool
     let reduceMotion: Bool
 
+    /// Concentric with the thumbnail inside it: each radius is the thumbnail's plus
+    /// the card inset.
+    private static let cardShape = UnevenRoundedRectangle(
+        topLeadingRadius: GlideSwitcherMetrics.cardTopRadius,
+        bottomLeadingRadius: GlideSwitcherMetrics.cardBottomRadius,
+        bottomTrailingRadius: GlideSwitcherMetrics.cardBottomRadius,
+        topTrailingRadius: GlideSwitcherMetrics.cardTopRadius,
+        style: .continuous
+    )
+
     var body: some View {
         VStack(spacing: 8) {
             Group {
@@ -683,10 +849,10 @@ private struct WindowSelectionCard: View {
             .frame(width: 192, height: 108)
             .clipShape(
                 UnevenRoundedRectangle(
-                    topLeadingRadius: 10,
-                    bottomLeadingRadius: 22,
-                    bottomTrailingRadius: 22,
-                    topTrailingRadius: 10,
+                    topLeadingRadius: GlideSwitcherMetrics.thumbnailTopRadius,
+                    bottomLeadingRadius: GlideSwitcherMetrics.thumbnailBottomRadius,
+                    bottomTrailingRadius: GlideSwitcherMetrics.thumbnailBottomRadius,
+                    topTrailingRadius: GlideSwitcherMetrics.thumbnailTopRadius,
                     style: .continuous
                 )
             )
@@ -719,32 +885,24 @@ private struct WindowSelectionCard: View {
             }
             .padding(.horizontal, 4)
         }
-        .padding(10)
+        .padding(GlideSwitcherMetrics.cardInset)
         .frame(width: 212)
         .background {
-            let shape = UnevenRoundedRectangle(
-                topLeadingRadius: 14,
-                bottomLeadingRadius: 28,
-                bottomTrailingRadius: 28,
-                topTrailingRadius: 14,
-                style: .continuous
+            Self.cardShape.fill(Color(nsColor: .windowBackgroundColor))
+            Self.cardShape.fill(
+                isSelected
+                ? GlideSwitcherPalette.touchLilac.opacity(GlideSwitcherMetrics.selectionFillOpacity)
+                : Color.primary.opacity(0.04)
             )
-            shape.fill(Color(nsColor: .windowBackgroundColor))
-            shape.fill(isSelected ? GlideSwitcherPalette.touchLilac.opacity(0.22) : Color.primary.opacity(0.04))
         }
         .overlay {
-            UnevenRoundedRectangle(
-                topLeadingRadius: 14,
-                bottomLeadingRadius: 28,
-                bottomTrailingRadius: 28,
-                topTrailingRadius: 14,
-                style: .continuous
-            )
-            .stroke(
+            // strokeBorder, so the rim sits inside the card edge and keeps the same
+            // curve as the thumbnail corner one inset in.
+            Self.cardShape.strokeBorder(
                 isSelected
                 ? AnyShapeStyle(GlideSwitcherPalette.motionViolet)
                 : AnyShapeStyle(Color.primary.opacity(0.08)),
-                lineWidth: isSelected ? 2.5 : 1
+                lineWidth: isSelected ? GlideSwitcherMetrics.selectionBorderWidth : 1
             )
         }
         .scaleEffect(isSelected ? 1.03 : 1)
