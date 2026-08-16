@@ -22,21 +22,20 @@ private enum GlideSwitcherMetrics {
     /// plate fill that whole cell, which leaves the rim clear of the icon artwork.
     /// Getting this backwards — a plate smaller than the icon — buries the rim under
     /// the icon and its shadow.
-    ///
-    /// The absolute values are AltTab's App Icons "large" size, which is what its
-    /// default resolves to: icon 150 in a 162 cell, cells 1pt apart, 28pt of panel
-    /// padding. Big icons that nearly touch are most of why that panel reads like
-    /// the system Cmd-Tab; 116pt icons with 4pt gaps read as a generic HUD.
-    static let iconEdgeInset: CGFloat = 6
-    static let railIconSize: CGFloat = 150
-    static let railCardSize = railIconSize + iconEdgeInset * 2          // 162
-    static let railCardSpacing: CGFloat = 1
-    static let railCardStep = railCardSize + railCardSpacing            // 163
-    static let railPadding: CGFloat = 28
-    /// AltTab's large cell radius. Sits at 0.28 of the cell, the app-icon squircle
-    /// proportion, and lands the slab on AltTab's own 75pt panel radius.
-    static let selectionRadius: CGFloat = 45
-    static let railSlabRadius = selectionRadius + railPadding           // 73
+       static let railIconSize: CGFloat = 128
+    static let selectionWidth: CGFloat = 118
+    static let selectionHeight: CGFloat = 117
+    static let railCellWidth: CGFloat = 128
+    static let railCellHeight: CGFloat = 117
+    
+    static let railCardSpacing: CGFloat = 4
+    static let railCardStep = railCellWidth + railCardSpacing           // 132
+    
+    static let railPaddingHorizontal: CGFloat = 26
+    static let railPaddingVertical: CGFloat = 28
+    
+    static let selectionRadius: CGFloat = 35
+    static let railSlabRadius = selectionRadius + railPaddingVertical - 5
 
     static let cardInset: CGFloat = 10
     static let thumbnailTopRadius: CGFloat = 10
@@ -46,18 +45,14 @@ private enum GlideSwitcherMetrics {
     static let shelfPadding: CGFloat = 20
     static let shelfSlabRadius = cardBottomRadius + shelfPadding        // 52
 
-    /// AltTab's highlight border width for icon-sized cells. A solid rim, not a
-    /// luminance wash, is what marks selection on glass — the fill stays quiet.
     static let selectionBorderWidth: CGFloat = 3
     static let selectionFillOpacity: CGFloat = 0.22
 
-    /// Tight and low, so icons sit on the glass instead of hovering above it.
-    /// Matches AltTab's app-icon shadow (offset 1pt, 2pt blur, ~32% black).
-    static let iconShadowOpacity: CGFloat = 0.32
-    static let iconShadowRadius: CGFloat = 1
-    static let iconShadowOffsetY: CGFloat = 1
+    static let iconShadowOpacity: CGFloat = 0.25
+    static let iconShadowRadius: CGFloat = 6
+    static let iconShadowOffsetY: CGFloat = 3
 
-    static let railBlockHeight = railCardSize + railPadding * 2         // 218
+    static let railBlockHeight = railCellHeight + railPaddingVertical * 2 // 173
 
     /// Tallest the window shelf gets: three stacked cards plus its header and
     /// padding. Measured off the rendered view rather than derived, so round up.
@@ -67,7 +62,7 @@ private enum GlideSwitcherMetrics {
     /// sizing in the controller and the selected-card centring in the view derive
     /// from this, so the two can't drift apart.
     static func railWidth(forVisibleCards n: Int) -> CGFloat {
-        CGFloat(n) * railCardSize + CGFloat(max(0, n - 1)) * railCardSpacing
+        CGFloat(n) * railCellWidth + CGFloat(max(0, n - 1)) * railCardSpacing
     }
 
     /// The rail is centred in the panel and the shelf hangs below it, so the panel
@@ -287,7 +282,7 @@ final class AppSwitcherOverlayController {
         self.windowsByApp = windowsByApp
 
         let widthCapacity = max(3, Int((screen.frame.width - 240) / GlideSwitcherMetrics.railCardStep))
-        let appCapacity = min(apps.count, min(7, widthCapacity))
+        let appCapacity = min(apps.count, widthCapacity)
 
         model.configure(
             apps: apps,
@@ -538,7 +533,7 @@ private struct AppSwitcherOverlayView: View {
         let railTotalWidth = cardsTotalWidth + badgeLeftWidth + badgeRightWidth
 
         let cardLeftInRail = badgeLeftWidth + CGFloat(posInVisible) * cardStep
-        let cardCenterInRail = cardLeftInRail + GlideSwitcherMetrics.railCardSize / 2
+        let cardCenterInRail = cardLeftInRail + GlideSwitcherMetrics.railCellWidth / 2
         let railCenter = railTotalWidth / 2.0
         
         return cardCenterInRail - railCenter
@@ -562,7 +557,8 @@ private struct AppSwitcherOverlayView: View {
                         appRail
                     }
                 }
-                .padding(GlideSwitcherMetrics.railPadding)
+                .padding(.horizontal, GlideSwitcherMetrics.railPaddingHorizontal)
+                .padding(.vertical, GlideSwitcherMetrics.railPaddingVertical)
                 .background {
                     if isMask {
                         Color.black.clipShape(
@@ -715,29 +711,11 @@ private struct AppRailCard: View {
     let isSelected: Bool
     let reduceMotion: Bool
 
-    private var plate: RoundedRectangle {
-        RoundedRectangle(cornerRadius: GlideSwitcherMetrics.selectionRadius, style: .continuous)
-    }
-
     var body: some View {
         ZStack {
-            if isSelected {
-                // The violet rim marks selection; the lilac fill only supports it. A
-                // bright luminance wash was doing that job before, which reads as a
-                // milky blob on clear glass and buries whatever is behind the panel.
-                // `strokeBorder` keeps the stroke inside the plate, so the plate stays
-                // concentric with the glass corner behind it.
-                plate
-                    .fill(GlideSwitcherPalette.touchLilac.opacity(GlideSwitcherMetrics.selectionFillOpacity))
-                    .overlay {
-                        plate.strokeBorder(
-                            GlideSwitcherPalette.motionViolet,
-                            lineWidth: GlideSwitcherMetrics.selectionBorderWidth
-                        )
-                    }
-                    .frame(width: GlideSwitcherMetrics.railCardSize,
-                           height: GlideSwitcherMetrics.railCardSize)
-            }
+            RoundedRectangle(cornerRadius: GlideSwitcherMetrics.selectionRadius, style: .continuous)
+                .fill(isSelected ? Color.primary.opacity(0.25) : Color.clear)
+                .frame(width: GlideSwitcherMetrics.selectionWidth, height: GlideSwitcherMetrics.selectionHeight)
 
             Image(nsImage: item.icon)
                 .resizable()
@@ -749,17 +727,15 @@ private struct AppRailCard: View {
                     y: GlideSwitcherMetrics.iconShadowOffsetY
                 )
         }
-        .frame(width: GlideSwitcherMetrics.railCardSize, height: GlideSwitcherMetrics.railCardSize)
+        .frame(width: GlideSwitcherMetrics.railCellWidth, height: GlideSwitcherMetrics.railCellHeight)
         .overlay(alignment: .bottom) {
             if isSelected {
                 Text(item.name)
-                    // Semibold, as macOS 26 uses for icon-grid labels: on clear glass a
-                    // medium weight loses its edges against whatever is behind the panel.
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: GlideSwitcherMetrics.railCardSize - 10)
+                    .frame(maxWidth: GlideSwitcherMetrics.selectionWidth)
                     .offset(y: 18)
             }
         }
