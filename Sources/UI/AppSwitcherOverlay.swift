@@ -72,11 +72,17 @@ private enum GlideSwitcherMetrics {
 
     /// The rail is centred in the panel and the shelf hangs below it, so the panel
     /// needs twice the shelf's height plus the rail. Screens shorter than that clamp,
-    /// which used to clip the bottom of the shelf; this is how far the rail has to
-    /// move up to keep it whole. Depends only on panel height, so it is constant for
-    /// a session and the rail never shifts under the user's fingers.
+    /// which would clip the bottom of the shelf; this is how far the rail has to move
+    /// up to keep it whole. Depends only on panel height, so it is constant for a
+    /// session and the rail never shifts under the user's fingers.
+    ///
+    /// `room` is the space below a centred rail. It is zero when no app in the session
+    /// has multiple windows, because the panel then collapses to exactly the rail —
+    /// there is no shelf to make space for, and no room to move into either. Clamping
+    /// to `room` covers both that case and a screen too short to hold the full shelf.
     static func railCenterBias(panelHeight: CGFloat) -> CGFloat {
-        max(0, maxShelfHeight - (panelHeight - railBlockHeight) / 2)
+        let room = max(0, (panelHeight - railBlockHeight) / 2)
+        return min(room, max(0, maxShelfHeight - room))
     }
 }
 
@@ -588,20 +594,22 @@ private struct AppSwitcherOverlayView: View {
                             Color.black.clipShape(TeardropShape(neckOffset: 0))
                         }
                     }
+                    // Inside the offset, not outside it. `.offset` translates rendering
+                    // without changing layout, and a `.background` attached after it
+                    // composes outside the translation — so a slab reported there sits
+                    // at the panel's centre while the shelf itself slides away from it.
+                    .glassSlab(
+                        id: 1,
+                        cornerRadius: GlideSwitcherMetrics.shelfSlabRadius,
+                        in: Self.panelSpace,
+                        enabled: usesNativeGlass && !isMask
+                    )
                     .offset(x: selectedAppOffset)
                     .transition(
                         .asymmetric(
                             insertion: .opacity.combined(with: .scale(scale: 0.4, anchor: .top)),
                             removal: .opacity.combined(with: .scale(scale: 0.6, anchor: .top))
                         )
-                    )
-                    // Reported after the offset so the slab tracks the shelf as it slides
-                    // under the selected app; the container fuses it with the rail above.
-                    .glassSlab(
-                        id: 1,
-                        cornerRadius: GlideSwitcherMetrics.shelfSlabRadius,
-                        in: Self.panelSpace,
-                        enabled: usesNativeGlass && !isMask
                     )
                 }
             }
