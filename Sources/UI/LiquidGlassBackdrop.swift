@@ -115,6 +115,15 @@ final class LiquidGlassBackdropView: NSView {
     /// down and building another.
     func apply(_ slabs: [GlassSlab]) {
         guard slabs != appliedSlabs else { return }
+        SwitcherDiagnostics.bump(.slabApplies)
+        // Full precision on purpose: the guard above is exact float equality, so
+        // frames that only differ in the low bits read as "changed" forever. A
+        // report showing digits churning far to the right of the decimal point is
+        // that loop; one showing whole-point movement is a real animation.
+        SwitcherDiagnostics.noteSlabs(
+            slabs.map { "#\($0.id) \($0.frame.origin.x),\($0.frame.origin.y) \($0.frame.width)x\($0.frame.height)" }
+                .joined(separator: " | ")
+        )
         appliedSlabs = slabs
 
         withoutImplicitAnimations {
@@ -125,9 +134,14 @@ final class LiquidGlassBackdropView: NSView {
             }
             for slab in slabs {
                 let view = slabViews[slab.id] ?? makeSlabView(id: slab.id)
-                view.frame = slab.frame
+                if view.frame != slab.frame { view.frame = slab.frame }
                 if #available(macOS 26.0, *), let glass = view as? NSGlassEffectView {
-                    glass.cornerRadius = slab.cornerRadius
+                    // Assigning the radius makes the WindowServer rebuild the glass,
+                    // and the shelf reports one every layout pass while it animates.
+                    // The radius is a constant per slab, so it is set at most once.
+                    if glass.cornerRadius != slab.cornerRadius {
+                        glass.cornerRadius = slab.cornerRadius
+                    }
                 }
             }
         }
@@ -194,6 +208,7 @@ extension View {
         background {
             if enabled {
                 GeometryReader { proxy in
+                    let _ = SwitcherDiagnostics.bump(.slabReports)
                     Color.clear.preference(
                         key: GlassSlabPreferenceKey.self,
                         value: [GlassSlab(

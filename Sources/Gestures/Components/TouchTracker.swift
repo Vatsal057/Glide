@@ -257,9 +257,12 @@ let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
             TouchTracker._fingerFirstSeen[touch.identifier] = nowTs
         }
     }
+    // Mutating the dictionary while iterating its own `keys` view forces a copy of
+    // the storage mid-loop, on the multitouch thread, every frame a finger lifts.
+    // Filtering in place says the same thing without one.
     if TouchTracker._fingerFirstSeen.count != activeTouches.count {
-        for key in TouchTracker._fingerFirstSeen.keys where !activeTouches.contains(where: { $0.identifier == key }) {
-            TouchTracker._fingerFirstSeen.removeValue(forKey: key)
+        TouchTracker._fingerFirstSeen = TouchTracker._fingerFirstSeen.filter { entry in
+            activeTouches.contains { $0.identifier == entry.key }
         }
     }
     if let oldest = TouchTracker._fingerFirstSeen.values.min(),

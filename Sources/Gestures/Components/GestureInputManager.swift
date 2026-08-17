@@ -90,7 +90,11 @@ final class GestureInputManager {
 
         if let tap = suppressionTap {
             suppressionSource = CFMachPortCreateRunLoopSource(nil, tap, 0)
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), suppressionSource, .commonModes)
+            // The main run loop explicitly, not "the current one". Every caller is
+            // already on main, so this changes nothing today — but a teardown that
+            // resolved a different run loop than its setup would strand the source
+            // on main forever, and `checkHealth` tears these down and rebuilds them.
+            CFRunLoopAddSource(CFRunLoopGetMain(), suppressionSource, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: false)
         }
     }
@@ -103,7 +107,12 @@ final class GestureInputManager {
 
     func teardownSuppressionTap() {
         if let tap = suppressionTap { CGEvent.tapEnable(tap: tap, enable: false) }
-        if let src = suppressionSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), src, .commonModes) }
+        if let src = suppressionSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes) }
+        // Dropping the last Swift reference is not enough to take the tap down: the
+        // Mach port has to be invalidated or the tap stays registered with the
+        // WindowServer, which keeps handing it events nobody reads. `checkHealth`
+        // rebuilds these on every failure, so each rebuild leaked one live tap.
+        if let tap = suppressionTap { CFMachPortInvalidate(tap) }
         suppressionTap    = nil
         suppressionSource = nil
         suppressionEnabled = false
@@ -170,6 +179,7 @@ final class GestureInputManager {
     func teardownTrackPointTap() {
         if let tap = trackPointTap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let src = trackPointSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes) }
+        if let tap = trackPointTap { CFMachPortInvalidate(tap) }
         trackPointTap    = nil
         trackPointSource = nil
         trackPointSuppressionEnabled = false
@@ -213,6 +223,7 @@ final class GestureInputManager {
     func teardownClickObservationTap() {
         if let tap = clickObservationTap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let src = clickObservationSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes) }
+        if let tap = clickObservationTap { CFMachPortInvalidate(tap) }
         clickObservationTap    = nil
         clickObservationSource = nil
         clickTapInstalled      = false

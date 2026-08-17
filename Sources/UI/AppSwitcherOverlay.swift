@@ -81,14 +81,13 @@ private enum GlideSwitcherMetrics {
     }
 }
 
-private struct AppSwitcherWindowItem: Identifiable {
+private struct AppSwitcherWindowItem: Identifiable, Equatable {
     let id: Int
     let windowID: CGWindowID?
     let title: String
     let isMinimized: Bool
     let isOnCurrentSpace: Bool
     let isApplicationHidden: Bool
-    var thumbnail: NSImage?
 
     var status: (label: String, symbol: String)? {
         if isMinimized { return ("Minimized", "minus.square.fill") }
@@ -101,16 +100,121 @@ private struct AppSwitcherWindowItem: Identifiable {
 private struct AppSwitcherItem: Identifiable {
     let id: pid_t
     let name: String
+    /// Kept for the two places that draw the icon small: the shelf header and the
+    /// placeholder behind a window with no thumbnail yet.
     let icon: NSImage
-    var windows: [AppSwitcherWindowItem]
+    /// The rail's artwork, already rasterized at the pixel size it will occupy.
+    let railIcon: Image?
+    let windows: [AppSwitcherWindowItem]
+}
+
+/// Pre-rasterizes the icon each rail card draws.
+///
+/// Handing SwiftUI an `NSImage` makes it choose a representation and resample on
+/// every render pass, and a SwiftUI `.shadow` costs an offscreen blur pass per
+/// card per pass. Neither depends on anything that changes while the panel is up,
+/// yet both were being paid for every visible card every time the selection
+/// stepped — with a spring animation running, that is once per display frame.
+///
+/// So both are paid once, here: the icon is drawn — shadow included — into a
+/// bitmap sized for exactly the pixels it will cover, and the rail then only
+/// blits it. `padding` is the room the blurred shadow needs; the artwork itself
+/// stays `railIconSize`, so the cell reads exactly as it did before.
+private enum SwitcherRailIcon {
+    static let padding: CGFloat = 16
+    static let canvasSide = GlideSwitcherMetrics.railIconSize + padding * 2
+
+    static func render(_ icon: NSImage, scale: CGFloat) -> Image? {
+        let pixels = Int((canvasSide * scale).rounded())
+        guard pixels > 0, let context = CGContext(
+            data: nil,
+            width: pixels,
+            height: pixels,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            // Native premultiplied BGRA: the layout the compositor wants, so the
+            // bitmap reaches the screen without a format conversion.
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+
+        context.scaleBy(x: scale, y: scale)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(GlideSwitcherMetrics.iconShadowOpacity)
+        // A SwiftUI shadow radius is half the Core Graphics blur that matches it.
+        shadow.shadowBlurRadius = GlideSwitcherMetrics.iconShadowRadius * 2
+        // SwiftUI's positive shadow y points down, an NSShadow's points up.
+        shadow.shadowOffset = NSSize(width: 0, height: -GlideSwitcherMetrics.iconShadowOffsetY)
+        shadow.set()
+        icon.draw(
+            in: NSRect(
+                x: padding,
+                y: padding,
+                width: GlideSwitcherMetrics.railIconSize,
+                height: GlideSwitcherMetrics.railIconSize
+            ),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: false,
+            hints: [.interpolation: NSImageInterpolation.high]
+        )
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let bitmap = context.makeImage() else { return nil }
+        return Image(decorative: bitmap, scale: scale)
+    }
+}
+
+/// Window previews, kept apart from `AppSwitcherOverlayModel` on purpose.
+///
+/// Thumbnails used to live inside each window item, so one arriving preview
+/// republished the whole `items` array and re-rendered every card in the app rail
+/// — dozens of icons redrawn to show a picture in the shelf. Only
+/// `TeardropWindowGrid` observes this, so an arriving preview now invalidates the
+/// three cards that can display it and nothing else.
+private final class SwitcherThumbnailStore: ObservableObject {
+    @Published private(set) var images: [CGWindowID: NSImage] = [:]
+
+    func merge(_ incoming: [CGWindowID: NSImage]) {
+        guard !incoming.isEmpty else { return }
+        var next = images
+        var changed = false
+        for (windowID, image) in incoming where next[windowID] !== image {
+            next[windowID] = image
+            changed = true
+        }
+        if changed { images = next }
+    }
+
+    func clear() {
+        guard !images.isEmpty else { return }
+        images = [:]
+    }
 }
 
 private final class AppSwitcherOverlayModel: ObservableObject {
     @Published private(set) var items: [AppSwitcherItem] = []
     @Published private(set) var selectedAppIndex = 0
     @Published private(set) var selectedWindowIndex = 0
-    @Published private(set) var visibleAppCapacity = 1
-    private var thumbnailLocations: [CGWindowID: (appIndex: Int, windowIndex: Int)] = [:]
+
+    /// Derived from the selection, and stored rather than computed. The rail reads
+    /// each of these several times per render pass, and every read used to build a
+    /// fresh array; they can only change when the selection or the item list does,
+    /// so they are recomputed there instead. Deliberately not `@Published`: every
+    /// assignment happens in the same call that publishes `items` or the selection,
+    /// so SwiftUI already re-reads them.
+    private(set) var visibleAppIndices: [Int] = []
+    private(set) var visibleWindowIndices: [Int] = []
+    private(set) var hiddenAppsBefore = 0
+    private(set) var hiddenAppsAfter = 0
+    private(set) var hiddenWindowsBefore = 0
+    private(set) var hiddenWindowsAfter = 0
+
+    private var visibleAppCapacity = 1
 
     var selectedApp: AppSwitcherItem? {
         items.indices.contains(selectedAppIndex) ? items[selectedAppIndex] : nil
@@ -121,45 +225,24 @@ private final class AppSwitcherOverlayModel: ObservableObject {
         return selectedApp.windows[selectedWindowIndex]
     }
 
-    var visibleAppIndices: [Int] {
-        guard !items.isEmpty else { return [] }
-        let count = min(visibleAppCapacity, items.count)
-        let start = min(max(0, selectedAppIndex - count / 2), items.count - count)
-        return Array(start..<(start + count))
-    }
-    var hiddenAppsBefore: Int { visibleAppIndices.first ?? 0 }
-    var hiddenAppsAfter: Int {
-        guard let last = visibleAppIndices.last else { return 0 }
-        return max(0, items.count - last - 1)
-    }
-
-    var visibleWindowIndices: [Int] {
-        guard let windows = selectedApp?.windows, !windows.isEmpty else { return [] }
-        let start = selectedWindowIndex
-        let count = min(3, windows.count - start)
-        return Array(start..<(start + count))
-    }
-
-    var hiddenWindowsBefore: Int { visibleWindowIndices.first ?? 0 }
-    var hiddenWindowsAfter: Int {
-        guard let windows = selectedApp?.windows, let last = visibleWindowIndices.last else { return 0 }
-        return max(0, windows.count - last - 1)
-    }
-
     func configure(
         apps: [NSRunningApplication],
         windowsByApp: [[AppSwitcherWindow]],
         selectedAppIndex: Int,
         selectedWindowIndex: Int,
         visibleAppCapacity: Int,
-        cachedThumbnails: [CGWindowID: NSImage]
+        iconScale: CGFloat
     ) {
         items = apps.enumerated().map { index, app in
             let windows = windowsByApp.indices.contains(index) ? windowsByApp[index] : []
+            let icon = app.icon
+                ?? NSImage(systemSymbolName: "app.fill", accessibilityDescription: nil)
+                ?? NSImage()
             return AppSwitcherItem(
                 id: app.processIdentifier,
                 name: app.localizedName ?? app.bundleIdentifier ?? "Application",
-                icon: app.icon ?? NSImage(systemSymbolName: "app.fill", accessibilityDescription: nil) ?? NSImage(),
+                icon: icon,
+                railIcon: SwitcherRailIcon.render(icon, scale: iconScale),
                 windows: windows.map { window in
                     AppSwitcherWindowItem(
                         id: window.id,
@@ -167,19 +250,10 @@ private final class AppSwitcherOverlayModel: ObservableObject {
                         title: window.title,
                         isMinimized: window.isMinimized,
                         isOnCurrentSpace: window.isOnCurrentSpace,
-                        isApplicationHidden: window.isApplicationHidden,
-                        thumbnail: window.windowID.flatMap { cachedThumbnails[$0] }
+                        isApplicationHidden: window.isApplicationHidden
                     )
                 }
             )
-        }
-        thumbnailLocations.removeAll(keepingCapacity: true)
-        for appIndex in items.indices {
-            for windowIndex in items[appIndex].windows.indices {
-                if let windowID = items[appIndex].windows[windowIndex].windowID {
-                    thumbnailLocations[windowID] = (appIndex, windowIndex)
-                }
-            }
         }
 
         self.selectedAppIndex = min(max(selectedAppIndex, 0), max(items.count - 1, 0))
@@ -187,34 +261,50 @@ private final class AppSwitcherOverlayModel: ObservableObject {
             ? self.items[self.selectedAppIndex].windows.count : 0
         self.selectedWindowIndex = min(max(selectedWindowIndex, 0), max(windowCount - 1, 0))
         self.visibleAppCapacity = max(1, visibleAppCapacity)
+        recomputeVisibility()
     }
 
     func select(appIndex: Int, windowIndex: Int) {
         guard items.indices.contains(appIndex) else { return }
         let nextWindowIndex = min(max(windowIndex, 0), max(items[appIndex].windows.count - 1, 0))
-        if selectedAppIndex != appIndex { selectedAppIndex = appIndex }
-        if selectedWindowIndex != nextWindowIndex { selectedWindowIndex = nextWindowIndex }
-    }
-
-    func updateThumbnails(_ images: [CGWindowID: NSImage]) {
-        guard !images.isEmpty else { return }
-        var updated = items
-        var changed = false
-        for (windowID, image) in images {
-            guard let location = thumbnailLocations[windowID],
-                  updated.indices.contains(location.appIndex),
-                  updated[location.appIndex].windows.indices.contains(location.windowIndex) else { continue }
-            updated[location.appIndex].windows[location.windowIndex].thumbnail = image
-            changed = true
-        }
-        if changed { items = updated }
+        guard appIndex != selectedAppIndex || nextWindowIndex != selectedWindowIndex else { return }
+        selectedAppIndex = appIndex
+        selectedWindowIndex = nextWindowIndex
+        recomputeVisibility()
     }
 
     func clear() {
         items = []
-        thumbnailLocations.removeAll(keepingCapacity: true)
         selectedAppIndex = 0
         selectedWindowIndex = 0
+        recomputeVisibility()
+    }
+
+    private func recomputeVisibility() {
+        if items.isEmpty {
+            visibleAppIndices = []
+            hiddenAppsBefore = 0
+            hiddenAppsAfter = 0
+        } else {
+            let count = min(max(1, visibleAppCapacity), items.count)
+            let start = min(max(0, selectedAppIndex - count / 2), items.count - count)
+            visibleAppIndices = Array(start..<(start + count))
+            hiddenAppsBefore = start
+            hiddenAppsAfter = max(0, items.count - (start + count))
+        }
+
+        let windows = items.indices.contains(selectedAppIndex) ? items[selectedAppIndex].windows : []
+        if windows.isEmpty {
+            visibleWindowIndices = []
+            hiddenWindowsBefore = 0
+            hiddenWindowsAfter = 0
+        } else {
+            let start = min(max(0, selectedWindowIndex), windows.count - 1)
+            let count = min(3, windows.count - start)
+            visibleWindowIndices = Array(start..<(start + count))
+            hiddenWindowsBefore = start
+            hiddenWindowsAfter = max(0, windows.count - (start + count))
+        }
     }
 }
 /// macOS renders the Liquid Glass specular rim — the bright line that traces the
@@ -234,12 +324,24 @@ private final class AppSwitcherPanel: NSPanel {
 final class AppSwitcherOverlayController {
     static let shared = AppSwitcherOverlayController()
 
+    /// How long the selection has to hold still before its window previews are
+    /// captured. A capture is the most expensive thing the switcher does — a
+    /// full-window composite out of the WindowServer plus a downscale — and while
+    /// the fingers are moving the user is passing through apps, not looking at
+    /// them. Comfortably longer than the step debounce, so a continuous swipe
+    /// costs no captures at all; short enough to be invisible when they stop.
+    private static let captureSettleDelay: TimeInterval = 0.16
+
     private let model = AppSwitcherOverlayModel()
+    private let thumbnails = SwitcherThumbnailStore()
     private let backdrop = LiquidGlassBackdropView(frame: .zero)
     private var captureGeneration = UUID()
     private var captureTask: AppSwitcherPreviewCaptureTask?
     private var captureRequest: DispatchWorkItem?
     private var windowsByApp: [[AppSwitcherWindow]] = []
+    /// Resolved once per open. The check is a cross-process question, and it was
+    /// being asked again on every capture attempt.
+    private var screenCaptureAllowed = false
 
     private lazy var panel: NSPanel = {
         let panel = AppSwitcherPanel(
@@ -257,7 +359,9 @@ final class AppSwitcherOverlayController {
         panel.animationBehavior = .none
         // The glass slabs live in their own layer underneath the SwiftUI content, so the
         // container that fuses them can never lift glass on top of the icons and titles.
-        let hosting = NSHostingView(rootView: AppSwitcherOverlayView(model: model, backdrop: backdrop))
+        let hosting = NSHostingView(
+            rootView: AppSwitcherOverlayView(model: model, thumbnails: thumbnails, backdrop: backdrop)
+        )
         panel.contentView = LiquidGlassPanelContentView(backdrop: backdrop, content: hosting)
         return panel
     }()
@@ -280,6 +384,9 @@ final class AppSwitcherOverlayController {
         let generation = UUID()
         captureGeneration = generation
         self.windowsByApp = windowsByApp
+        screenCaptureAllowed = CGPreflightScreenCaptureAccess()
+        if !screenCaptureAllowed { AppSwitcherPreviewProvider.reset() }
+        thumbnails.clear()
 
         let widthCapacity = max(3, Int((screen.frame.width - 240) / GlideSwitcherMetrics.railCardStep))
         let appCapacity = min(apps.count, widthCapacity)
@@ -290,7 +397,7 @@ final class AppSwitcherOverlayController {
             selectedAppIndex: selectedAppIndex,
             selectedWindowIndex: selectedWindowIndex,
             visibleAppCapacity: appCapacity,
-            cachedThumbnails: [:]
+            iconScale: screen.backingScaleFactor
         )
 
         let visibleCount = min(appCapacity, apps.count)
@@ -327,20 +434,24 @@ final class AppSwitcherOverlayController {
         panel.contentView?.layoutSubtreeIfNeeded()
         // Key, not just ordered front: that is what earns the glass its specular rim.
         panel.makeKeyAndOrderFront(nil)
+        SwitcherDiagnostics.startReporting()
         scheduleVisibleCapture(generation: generation, delay: 0)
         return true
     }
 
     func select(appIndex: Int, windowIndex: Int) {
+        SwitcherDiagnostics.bump(.selectCalls)
         let previousAppIndex = model.selectedAppIndex
         let previousWindowIndex = model.selectedWindowIndex
         model.select(appIndex: appIndex, windowIndex: windowIndex)
         if model.selectedAppIndex != previousAppIndex || model.selectedWindowIndex != previousWindowIndex {
-            scheduleVisibleCapture(generation: captureGeneration, delay: 0.04)
+            SwitcherDiagnostics.bump(.selectChanged)
+            scheduleVisibleCapture(generation: captureGeneration, delay: Self.captureSettleDelay)
         }
     }
 
     func hide() {
+        SwitcherDiagnostics.stopReporting()
         captureRequest?.cancel()
         captureRequest = nil
         captureTask?.cancel()
@@ -349,6 +460,7 @@ final class AppSwitcherOverlayController {
         windowsByApp = []
         panel.orderOut(nil)
         model.clear()
+        thumbnails.clear()
         backdrop.clear()
     }
 
@@ -364,28 +476,31 @@ final class AppSwitcherOverlayController {
     }
 
     private func captureVisibleWindows(generation: UUID) {
+        captureTask = nil
+        guard screenCaptureAllowed else { return }
+
         let appIndex = model.selectedAppIndex
-        guard windowsByApp.indices.contains(appIndex) else {
-            captureTask = nil
-            return
-        }
+        guard windowsByApp.indices.contains(appIndex) else { return }
 
         let appWindows = windowsByApp[appIndex]
+        // The window shelf only appears for an app with more than one window, so a
+        // capture for any other app produces an image nothing can ever display. The
+        // switcher used to pay for one on every single-window app it stepped past.
+        guard appWindows.count > 1 else { return }
+
         let visibleWindows = model.visibleWindowIndices.compactMap { index in
             appWindows.indices.contains(index) ? appWindows[index] : nil
         }
-        guard !visibleWindows.isEmpty else {
-            captureTask = nil
-            return
-        }
+        guard !visibleWindows.isEmpty else { return }
 
-        model.updateThumbnails(AppSwitcherPreviewProvider.cachedImages(for: visibleWindows))
+        SwitcherDiagnostics.bump(.captureRounds)
+        thumbnails.merge(AppSwitcherPreviewProvider.cachedImages(for: visibleWindows))
         captureTask = AppSwitcherPreviewProvider.capture(
             windows: visibleWindows,
             preferredID: model.selectedWindow?.id
         ) { [weak self] images in
             guard let self, self.captureGeneration == generation else { return }
-            self.model.updateThumbnails(images)
+            self.thumbnails.merge(images)
         }
     }
 }
@@ -473,6 +588,9 @@ private struct TeardropShape: Shape {
 
 private struct AppSwitcherOverlayView: View {
     @ObservedObject var model: AppSwitcherOverlayModel
+    /// Held, not observed. Subscribing here would put every arriving preview back
+    /// on the critical path of the whole panel; `TeardropWindowGrid` observes it.
+    let thumbnails: SwitcherThumbnailStore
     let backdrop: LiquidGlassBackdropView
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -484,6 +602,7 @@ private struct AppSwitcherOverlayView: View {
     private static let panelSpace = "glideSwitcherPanel"
 
     var body: some View {
+        let _ = SwitcherDiagnostics.bump(.bodyEvaluations)
         Group {
             if !model.items.isEmpty {
                 GeometryReader { geo in
@@ -621,6 +740,7 @@ private struct AppSwitcherOverlayView: View {
                     isSelected: index == model.selectedAppIndex,
                     reduceMotion: reduceMotion
                 )
+                .equatable()
             }
             appOverflowBadge(model.hiddenAppsAfter, symbol: "chevron.right")
         }
@@ -656,7 +776,8 @@ private struct AppSwitcherOverlayView: View {
                     visibleIndices: model.visibleWindowIndices,
                     appIcon: app.icon,
                     selectedIndex: model.selectedWindowIndex,
-                    reduceMotion: reduceMotion
+                    reduceMotion: reduceMotion,
+                    thumbnails: thumbnails
                 )
             }
             windowOverflowSummary
@@ -706,10 +827,26 @@ private struct AppSwitcherOverlayView: View {
     }
 }
 
-private struct AppRailCard: View {
+private struct AppRailCard: View, Equatable {
     let item: AppSwitcherItem
     let isSelected: Bool
     let reduceMotion: Bool
+
+    /// Stepping the selection changes exactly two cards: the one losing it and the
+    /// one gaining it. Without a way to prove that, SwiftUI has to re-evaluate
+    /// every visible card's body on every step — a dozen or more — and a spring is
+    /// running while it does. `AppSwitcherItem` cannot be `Equatable` (it carries
+    /// an `NSImage` and an `Image`), so the comparison is spelled out over the
+    /// fields this card actually draws. `id` is the process identifier, and the
+    /// icons are derived from it and fixed for the session, so matching ids means
+    /// matching artwork.
+    static func == (lhs: AppRailCard, rhs: AppRailCard) -> Bool {
+        lhs.isSelected == rhs.isSelected
+            && lhs.reduceMotion == rhs.reduceMotion
+            && lhs.item.id == rhs.item.id
+            && lhs.item.name == rhs.item.name
+            && lhs.item.windows.count == rhs.item.windows.count
+    }
 
     var body: some View {
         ZStack {
@@ -717,15 +854,22 @@ private struct AppRailCard: View {
                 .fill(isSelected ? Color.primary.opacity(0.25) : Color.clear)
                 .frame(width: GlideSwitcherMetrics.selectionWidth, height: GlideSwitcherMetrics.selectionHeight)
 
-            Image(nsImage: item.icon)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: GlideSwitcherMetrics.railIconSize, height: GlideSwitcherMetrics.railIconSize)
-                .shadow(
-                    color: .black.opacity(GlideSwitcherMetrics.iconShadowOpacity),
-                    radius: GlideSwitcherMetrics.iconShadowRadius,
-                    y: GlideSwitcherMetrics.iconShadowOffsetY
-                )
+            if let railIcon = item.railIcon {
+                // Already the right pixels, shadow included: drawn at 1:1 with no
+                // resampling and no offscreen blur pass.
+                railIcon
+                    .frame(width: SwitcherRailIcon.canvasSide, height: SwitcherRailIcon.canvasSide)
+            } else {
+                Image(nsImage: item.icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: GlideSwitcherMetrics.railIconSize, height: GlideSwitcherMetrics.railIconSize)
+                    .shadow(
+                        color: .black.opacity(GlideSwitcherMetrics.iconShadowOpacity),
+                        radius: GlideSwitcherMetrics.iconShadowRadius,
+                        y: GlideSwitcherMetrics.iconShadowOffsetY
+                    )
+            }
         }
         .frame(width: GlideSwitcherMetrics.railCellWidth, height: GlideSwitcherMetrics.railCellHeight)
         .overlay(alignment: .bottom) {
@@ -763,6 +907,8 @@ private struct TeardropWindowGrid: View {
     let appIcon: NSImage
     let selectedIndex: Int
     let reduceMotion: Bool
+    /// The one place in the panel that reacts to an arriving preview.
+    @ObservedObject var thumbnails: SwitcherThumbnailStore
 
     @ViewBuilder
     private func card(for index: Int) -> some View {
@@ -770,10 +916,12 @@ private struct TeardropWindowGrid: View {
             let offsetIndex = max(0, index - selectedIndex)
             WindowSelectionCard(
                 item: windows[index],
+                thumbnail: windows[index].windowID.flatMap { thumbnails.images[$0] },
                 appIcon: appIcon,
                 isSelected: index == selectedIndex,
                 reduceMotion: reduceMotion
             )
+            .equatable()
             .scaleEffect(x: 1.0 - CGFloat(offsetIndex) * 0.08, y: 1.0 - CGFloat(offsetIndex) * 0.04)
             .offset(y: CGFloat(offsetIndex * 50))
             .zIndex(Double(-index))
@@ -796,11 +944,23 @@ private struct TeardropWindowGrid: View {
     }
 }
 
-private struct WindowSelectionCard: View {
+private struct WindowSelectionCard: View, Equatable {
     let item: AppSwitcherWindowItem
+    let thumbnail: NSImage?
     let appIcon: NSImage
     let isSelected: Bool
     let reduceMotion: Bool
+
+    /// Same reasoning as `AppRailCard`: an arriving preview must not re-render the
+    /// two cards it does not belong to. Images compare by identity — they are
+    /// cached objects, never rebuilt in place.
+    static func == (lhs: WindowSelectionCard, rhs: WindowSelectionCard) -> Bool {
+        lhs.isSelected == rhs.isSelected
+            && lhs.reduceMotion == rhs.reduceMotion
+            && lhs.item == rhs.item
+            && lhs.thumbnail === rhs.thumbnail
+            && lhs.appIcon === rhs.appIcon
+    }
 
     /// Concentric with the thumbnail inside it: each radius is the thumbnail's plus
     /// the card inset.
@@ -815,7 +975,7 @@ private struct WindowSelectionCard: View {
     var body: some View {
         VStack(spacing: 8) {
             Group {
-                if let thumbnail = item.thumbnail {
+                if let thumbnail {
                     Image(nsImage: thumbnail)
                         .resizable()
                         .interpolation(.medium)
@@ -934,14 +1094,17 @@ private enum AppSwitcherPreviewProvider {
     private static let cacheLock = NSLock()
     private static var cache: [CGWindowID: CacheEntry] = [:]
     private static let cacheLifetime: TimeInterval = 60
-    private static let maximumCacheEntries = 18
+    /// A capture is expensive enough that the cache should outlive one pass over
+    /// the running apps. At the old 18 it did not: browsing a dozen multi-window
+    /// apps evicted the previews from the start of the rail before the user got
+    /// back to them, so every sweep re-captured everything.
+    private static let maximumCacheEntries = 60
+
+    /// Callers gate on Screen Recording access once per switcher open and call
+    /// `reset()` when it is missing, so neither of the hot paths below has to ask.
+    static func reset() { clearCache() }
 
     static func cachedImages(for windows: [AppSwitcherWindow]) -> [CGWindowID: NSImage] {
-        guard CGPreflightScreenCaptureAccess() else {
-            clearCache()
-            return [:]
-        }
-
         let now = ProcessInfo.processInfo.systemUptime
         cacheLock.lock()
         cache = cache.filter { _, entry in now - entry.lastAccess <= cacheLifetime }
@@ -966,12 +1129,6 @@ private enum AppSwitcherPreviewProvider {
         preferredID: Int?,
         completion: @escaping ([CGWindowID: NSImage]) -> Void
     ) -> AppSwitcherPreviewCaptureTask? {
-        guard CGPreflightScreenCaptureAccess() else {
-            clearCache()
-            completion([:])
-            return nil
-        }
-
         var targets = windows.compactMap { window -> Target? in
             guard !window.isMinimized,
                   window.isOnCurrentSpace,
@@ -1004,6 +1161,7 @@ private enum AppSwitcherPreviewProvider {
                 guard !task.isCancelled else { return }
                 guard let thumbnail = resized(captured, maximumDimension: 384) else { continue }
                 guard !task.isCancelled else { return }
+                SwitcherDiagnostics.bump(.windowsCaptured)
 
                 let image = NSImage(
                     cgImage: thumbnail,
@@ -1072,14 +1230,24 @@ private enum AppSwitcherPreviewProvider {
         let scale = CGFloat(maximumDimension) / CGFloat(longest)
         let width = max(1, Int((CGFloat(image.width) * scale).rounded()))
         let height = max(1, Int((CGFloat(image.height) * scale).rounded()))
+        // A window capture arrives as premultiplied BGRA in the display's colour
+        // space. Asking for RGBA in device RGB — as this used to — made the
+        // downscale a channel swizzle and a colour conversion as well as a
+        // resample, on the largest image the switcher ever touches. Matching the
+        // source on both counts leaves only the resample.
+        let sourceSpace = image.colorSpace
+        let space = (sourceSpace?.model == .rgb ? sourceSpace : nil)
+            ?? CGColorSpace(name: CGColorSpace.sRGB)
+            ?? CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(
             data: nil,
             width: width,
             height: height,
             bitsPerComponent: 8,
             bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                | CGBitmapInfo.byteOrder32Little.rawValue
         ) else { return nil }
         context.interpolationQuality = .medium
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
