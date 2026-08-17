@@ -57,7 +57,7 @@ EOF
 }
 
 # ── Restart-only: skip the build entirely ────
-if [[ "${1:-}" == "--restart-only" ]]; then
+if [[ "${1:-}" == "rerun" ]]; then
     restart_app
     exit 0
 fi
@@ -294,6 +294,6 @@ echo "  cp -r \"$APP_BUNDLE\" /Applications/"
 echo ""
 
 # ── Optional restart ─────────────────────────
-if [[ "${1:-}" == "--restart" ]]; then
+if [[ "${1:-}" == "restart" ]]; then
     restart_app
 fi
