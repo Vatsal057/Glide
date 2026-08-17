@@ -33,6 +33,7 @@ struct GlideConfig {
 
     struct AppSwitcher {
         var enabled: Bool = true
+        var style: String = "newer"
         var fingers: Int = 3
         var skipWindowlessFinder: Bool = true
         var restoreMinimizedOnCommit: Bool = true
@@ -157,6 +158,7 @@ extension GlideConfig {
         cfg.preferences.autoDisableNativeGestures = s.autoDisableNativeGestures
 
         cfg.appSwitcher.enabled = s.appSwitcher.enabled
+        cfg.appSwitcher.style   = s.appSwitcher.style.rawValue
         cfg.appSwitcher.fingers = s.appSwitcher.fingers
         cfg.appSwitcher.skipWindowlessFinder = s.appSwitcher.skipWindowlessFinder
         cfg.appSwitcher.restoreMinimizedOnCommit = s.appSwitcher.restoreMinimizedOnCommit
@@ -257,6 +259,7 @@ extension GlideConfig {
     func toAppSwitcher() -> AppSwitcherSettings {
         var s = AppSwitcherSettings()
         s.enabled = appSwitcher.enabled
+        s.style = AppSwitcherStyle(rawValue: appSwitcher.style) ?? .newer
         s.fingers = appSwitcher.fingers
         s.skipWindowlessFinder = appSwitcher.skipWindowlessFinder
         s.restoreMinimizedOnCommit = appSwitcher.restoreMinimizedOnCommit
@@ -443,6 +446,7 @@ enum GlideConfigSerializer {
             "  # ── App Switcher (hold + swipe to browse, release to confirm) ──",
             "  app_switcher:",
             "    enabled: \(config.appSwitcher.enabled ? "true" : "false")",
+            "    style: \(config.appSwitcher.style)",
             "    fingers: \(config.appSwitcher.fingers)",
             "    skip_windowless_finder: \(config.appSwitcher.skipWindowlessFinder ? "true" : "false")",
             "    restore_minimized_on_commit: \(config.appSwitcher.restoreMinimizedOnCommit ? "true" : "false")",
@@ -724,6 +728,7 @@ enum GlideConfigParser {
             if ind <= parentIndent { return }
             switch key {
             case "enabled": switcher.enabled = boolVal(val) ?? switcher.enabled
+            case "style": switcher.style = stringVal(val) ?? switcher.style
             case "fingers": switcher.fingers = intVal(val) ?? switcher.fingers
             case "skip_windowless_finder": switcher.skipWindowlessFinder = boolVal(val) ?? switcher.skipWindowlessFinder
             case "restore_minimized_on_commit": switcher.restoreMinimizedOnCommit = boolVal(val) ?? switcher.restoreMinimizedOnCommit

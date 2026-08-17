@@ -393,7 +393,8 @@ final class GestureEngine {
         clearReciprocalToken()
         Haptic.switcherOpen()
 
-        if AppSwitcherOverlayController.shared.show(
+        if Settings.shared.appSwitcher.style == .newer,
+           AppSwitcherOverlayController.shared.show(
             apps: customApps,
             windowsByApp: customWindows,
             selectedAppIndex: customIndex,

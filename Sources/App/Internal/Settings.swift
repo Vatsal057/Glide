@@ -559,15 +559,55 @@ struct EdgeMargin: Codable, Equatable {
     static let range: ClosedRange<Float> = 0.0...0.20
 }
 
+enum AppSwitcherStyle: String, Codable, CaseIterable, Identifiable {
+    case newer = "newer"
+    case legacy = "legacy"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .newer:
+            return "Newer (App Switcher UI)"
+        case .legacy:
+            return "Legacy (Keyboard Shortcuts)"
+        }
+    }
+}
+
 /// Hold-to-browse app switcher with Glide overlay and native fallback. Separate from the gesture rule list.
 struct AppSwitcherSettings: Codable, Equatable {
     var enabled: Bool = true
+    var style: AppSwitcherStyle = .newer
     /// Always 3 — horizontal swipes with three fingers are reserved for the switcher.
     var fingers: Int = 3
     /// Skip Finder in the switcher when it has no open windows.
     var skipWindowlessFinder: Bool = true
     /// Unminimize windows of the selected app when you release the gesture.
     var restoreMinimizedOnCommit: Bool = true
+
+    init(
+        enabled: Bool = true,
+        style: AppSwitcherStyle = .newer,
+        fingers: Int = 3,
+        skipWindowlessFinder: Bool = true,
+        restoreMinimizedOnCommit: Bool = true
+    ) {
+        self.enabled = enabled
+        self.style = style
+        self.fingers = fingers
+        self.skipWindowlessFinder = skipWindowlessFinder
+        self.restoreMinimizedOnCommit = restoreMinimizedOnCommit
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        style = try c.decodeIfPresent(AppSwitcherStyle.self, forKey: .style) ?? .newer
+        fingers = try c.decodeIfPresent(Int.self, forKey: .fingers) ?? 3
+        skipWindowlessFinder = try c.decodeIfPresent(Bool.self, forKey: .skipWindowlessFinder) ?? true
+        restoreMinimizedOnCommit = try c.decodeIfPresent(Bool.self, forKey: .restoreMinimizedOnCommit) ?? true
+    }
 
     static func normalized(_ s: AppSwitcherSettings) -> AppSwitcherSettings {
         var n = s
