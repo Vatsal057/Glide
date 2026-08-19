@@ -192,19 +192,7 @@ struct GesturesTab: View {
 struct TriggerBadge: View {
     let rule: GestureRule
     
-    private var directionIcon: String {
-        switch rule.direction {
-        case .click: return "hand.point.up.left"
-        case .forceClick: return "hand.point.up.left.fill"
-        case .tapHold: return "hand.tap.fill"
-        case .swipeLeftRight: return "arrow.left.and.right"
-        case .swipeUpDown: return "arrow.up.and.down"
-        case .swipeLeft: return "arrow.left"
-        case .swipeRight: return "arrow.right"
-        case .swipeUp: return "arrow.up"
-        case .swipeDown: return "arrow.down"
-        }
-    }
+    private var directionIcon: String { rule.direction.iconName }
     
     private var modifierSymbol: String? {
         guard rule.modifierFilter.requiresModifierHeld else { return nil }
@@ -336,6 +324,7 @@ struct RuleEditor: View {
     var onDuplicate: () -> Void = {}
     @EnvironmentObject var store: PreferencesStore
     @State private var showMenuPicker = false
+    @State private var showConditions = false
 
     private var autoName: String {
         var copy = rule
@@ -369,91 +358,86 @@ struct RuleEditor: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+        VStack(spacing: 0) {
 
-                // ── Header: glyph + editable name + actions ──
-                HStack(spacing: 12) {
-                    Image(systemName: rule.action.iconName)
-                        .font(.title)
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 30)
+            // ── Header toolbar ──
+            HStack(spacing: 12) {
+                Image(systemName: rule.action.iconName)
+                    .font(.title2)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 26)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        TextField(autoName, text: Binding(
-                            get: { rule.name ?? "" },
-                            set: { newValue in
-                                let trimmed = newValue.trimmingCharacters(in: .whitespaces)
-                                rule.name = trimmed.isEmpty ? nil : newValue
-                            }
-                        ))
-                        .textFieldStyle(.plain)
-                        .font(.title2.bold())
+                VStack(alignment: .leading, spacing: 1) {
+                    TextField(autoName, text: Binding(
+                        get: { rule.name ?? "" },
+                        set: { newValue in
+                            let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+                            rule.name = trimmed.isEmpty ? nil : newValue
+                        }
+                    ))
+                    .textFieldStyle(.plain)
+                    .font(.headline)
 
-                        Text(rule.name == nil ? "Type to name this gesture" : autoName)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-
-                    Spacer()
-
-                    if store.isRuleShadowed(rule) {
-                        Text("Overridden by another rule")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-
-                    Button {
-                        onDuplicate()
-                    } label: {
-                        Image(systemName: "plus.square.on.square")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Duplicate gesture")
-
-                    Button(role: .destructive) {
-                        onDelete()
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Delete gesture")
+                    Text(rule.name == nil ? "Type to name this gesture" : autoName)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
-                .padding()
-                .background(.quinary)
 
+                Spacer()
+
+                if store.isRuleShadowed(rule) {
+                    Label("Overridden", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
+                Button { onDuplicate() } label: {
+                    Image(systemName: "square.on.square")
+                }
+                .buttonStyle(.borderless)
+                .help("Duplicate gesture")
+
+                Button(role: .destructive) { onDelete() } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Delete gesture")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            // ── Reserved banner ──
+            if let banner = reservedBanner,
+               store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction,
+                                                      modifierFilter: rule.modifierFilter) {
+                HStack(spacing: 8) {
+                    Image(systemName: "rectangle.2.swap").foregroundStyle(.orange)
+                    Text(banner).font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.07))
                 Divider()
+            }
 
-                if let banner = reservedBanner,
-                   store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction,
-                                                          modifierFilter: rule.modifierFilter) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "rectangle.2.swap")
-                            .foregroundStyle(.orange)
-                        Text(banner)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 12)
-                }
+            // ── Main form ──
+            Form {
 
-                VStack(alignment: .leading, spacing: 20) {
-
-                    // Trigger section
-                    EditorSection(title: "Trigger") {
-                      if rule.isKeyboardBinding {
-                        EditorRow(label: "Shortcut") {
-                            VStack(alignment: .leading, spacing: 6) {
+                // WHEN
+                Section {
+                    if rule.isKeyboardBinding {
+                        LabeledContent("Shortcut") {
+                            VStack(alignment: .leading, spacing: 5) {
                                 ShortcutRecorderView(shortcut: $rule.triggerShortcut)
                                 if rule.triggerShortcut != nil && !rule.triggerIsRegisterable {
-                                    Text("Choose a key together with at least one modifier (⌘ ⌥ ⌃ ⇧).")
-                                        .font(.caption)
-                                        .foregroundStyle(.orange)
+                                    Text("Include at least one modifier key (⌘ ⌥ ⌃ ⇧).")
+                                        .font(.caption).foregroundStyle(.orange)
                                 } else {
-                                    Text("Press this combination anywhere to run the action. It's captured globally, so avoid combos other apps rely on.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                    Text("Captured globally — avoid combos other apps rely on.")
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -462,276 +446,207 @@ struct RuleEditor: View {
                                 store.markRuleConfigured(rule.id)
                             }
                         }
-                      } else {
-                        EditorRow(label: "Fingers") {
-                            Picker("", selection: $rule.fingers) {
-                                ForEach(3...5, id: \.self) { f in
-                                    Text("\(f) Fingers").tag(f)
+                    } else {
+                        let availableDirections = GestureDirection.allCases.filter {
+                            !store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: $0,
+                                                                    modifierFilter: rule.modifierFilter)
+                        }
+
+                        Picker("Fingers", selection: $rule.fingers) {
+                            ForEach(3...5, id: \.self) { f in Text("\(f)").tag(f) }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: rule.fingers) { _ in
+                            if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction,
+                                                                      modifierFilter: rule.modifierFilter),
+                               let fallback = availableDirections.first { rule.direction = fallback }
+                        }
+
+                        Picker("Gesture", selection: $rule.direction) {
+                            ForEach(availableDirections, id: \.self) { dir in
+                                Label(dir.rawValue, systemImage: dir.iconName).tag(dir)
+                            }
+                        }
+                        .onChange(of: rule.modifierFilter) { _ in
+                            if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction,
+                                                                      modifierFilter: rule.modifierFilter),
+                               let fallback = availableDirections.first { rule.direction = fallback }
+                        }
+                        .onChange(of: rule.direction) { _ in
+                            if !supportsContinuousGestures { rule.continuous = false }
+                        }
+
+                        Picker("Modifier", selection: $rule.modifierFilter) {
+                            ForEach(ModifierFilter.allCases, id: \.self) { m in
+                                Text(m.rawValue).tag(m)
+                            }
+                        }
+
+                        if rule.direction.hasSpeed {
+                            Picker("Speed", selection: $rule.speed) {
+                                ForEach(GestureSpeed.allCases, id: \.self) { s in
+                                    Text(s.rawValue.capitalized).tag(s)
                                 }
                             }
                             .pickerStyle(.segmented)
-                            .frame(maxWidth: 280)
-                        }
-
-                        EditorRow(label: "Gesture") {
-                            let availableDirections = GestureDirection.allCases.filter {
-                                !store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: $0,
-                                                                      modifierFilter: rule.modifierFilter)
-                            }
-                            Picker("", selection: $rule.direction) {
-                                ForEach(availableDirections, id: \.self) { t in
-                                    Text(t.rawValue.capitalized).tag(t)
-                                }
-                            }
-                            .frame(maxWidth: 200)
-                            .onChange(of: rule.fingers) { _ in
-                                if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction,
-                                                                          modifierFilter: rule.modifierFilter),
-                                   let fallback = availableDirections.first {
-                                    rule.direction = fallback
-                                }
-                            }
-                            .onChange(of: rule.modifierFilter) { _ in
-                                if store.isDirectionReservedByAppSwitcher(fingers: rule.fingers, direction: rule.direction,
-                                                                          modifierFilter: rule.modifierFilter),
-                                   let fallback = availableDirections.first {
-                                    rule.direction = fallback
-                                }
-                            }
-                            .onChange(of: rule.direction) { _ in
-                                if !supportsContinuousGestures {
-                                    rule.continuous = false
-                                }
-                            }
-                        }
-
-                        if rule.direction.hasSpeed {
-                            EditorRow(label: "Speed") {
-                                Picker("", selection: $rule.speed) {
-                                    ForEach(GestureSpeed.allCases, id: \.self) { s in
-                                        Text(s.rawValue.capitalized).tag(s)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                                .frame(maxWidth: 240)
-                            }
                         }
 
                         if rule.direction == .forceClick {
-                            EditorRow(label: "Trackpad Zone") {
-                                Picker("", selection: $rule.zone) {
-                                    ForEach(TrackpadZone.allCases, id: \.self) { z in
-                                        Text(z.rawValue).tag(z)
-                                    }
-                                }
-                                .frame(maxWidth: 200)
-                            }
-                        }
-                      }
-                    }
-
-                    // Action section
-                    EditorSection(title: "Action") {
-                        if rule.continuous && supportsContinuousGestures {
-                            EditorRow(label: "Action") {
-                                Text("Configured in Continuous Gestures")
-                                    .foregroundStyle(.secondary)
-                            }
-                        } else {
-                            primaryActionEditor(label: "Action")
-                        }
-
-                        if supportsContinuousGestures {
-                            EditorRow(label: "Continuous Gestures") {
-                                Toggle("Continuous gestures", isOn: $rule.continuous)
-                                    .onChange(of: rule.continuous) { enabled in
-                                        if enabled {
-                                            rule.reciprocalEnabled = false
-                                            rule.reciprocalAction = nil
-                                        }
-                                    }
-                            }
-                        }
-
-                        EditorRow(label: "Haptic") {
-                            Picker("", selection: Binding<HapticPattern?>(
-                                get: { rule.hapticPattern },
-                                set: { newValue in
-                                    rule.hapticPattern = newValue
-                                    if let p = newValue { HapticEngine.shared.play(p) }
-                                })) {
-                                Text("Automatic (by action)").tag(HapticPattern?.none)
-                                Divider()
-                                ForEach(HapticPattern.allCases, id: \.self) { pattern in
-                                    Text(pattern.displayName).tag(HapticPattern?.some(pattern))
+                            Picker("Trackpad Zone", selection: $rule.zone) {
+                                ForEach(TrackpadZone.allCases, id: \.self) { z in
+                                    Text(z.rawValue).tag(z)
                                 }
                             }
-                            .frame(maxWidth: 200)
                         }
                     }
+                } header: {
+                    Text("When")
+                }
 
+                // DO
+                Section {
                     if rule.continuous && supportsContinuousGestures {
-                        EditorSection(title: "Continuous Gestures") {
-                            primaryActionEditor(label: "Begin Action")
+                        LabeledContent("Action") {
+                            Text("See Continuous Gestures below").foregroundStyle(.secondary)
+                        }
+                    } else {
+                        primaryActionRows
+                    }
 
-                            phaseActionEditor(
-                                label: "Update + Action",
-                                action: $rule.continuousPositiveAction,
-                                shortcut: $rule.continuousPositiveShortcut,
-                                keyboard: $rule.continuousPositiveKeyboard
-                            )
-
-                            phaseActionEditor(
-                                label: "Update - Action",
-                                action: $rule.continuousNegativeAction,
-                                shortcut: $rule.continuousNegativeShortcut,
-                                keyboard: $rule.continuousNegativeKeyboard
-                            )
-
-                            phaseActionEditor(
-                                label: "End Action",
-                                action: $rule.continuousEndAction,
-                                shortcut: $rule.continuousEndShortcut,
-                                keyboard: $rule.continuousEndKeyboard
-                            )
+                    Picker("Haptic", selection: Binding<HapticPattern?>(
+                        get: { rule.hapticPattern },
+                        set: { newValue in
+                            rule.hapticPattern = newValue
+                            if let p = newValue { HapticEngine.shared.play(p) }
+                        })) {
+                        Text("Automatic (by action)").tag(HapticPattern?.none)
+                        Divider()
+                        ForEach(HapticPattern.allCases, id: \.self) { pattern in
+                            Text(pattern.displayName).tag(HapticPattern?.some(pattern))
                         }
                     }
 
-                    // Conditions section
-                    EditorSection(title: "Conditions") {
-                        EditorRow(label: "Modifier Key") {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Picker("", selection: $rule.modifierFilter) {
-                                    ForEach(ModifierFilter.allCases, id: \.self) { m in
-                                        Text(m.rawValue).tag(m)
-                                    }
-                                }
-                                .frame(maxWidth: 200)
-                                if !rule.direction.isClickLike {
-                                    Text("Hold this modifier when starting the gesture. Example: Shift + 3-finger swipe right → Cycle Windows (⌘`).")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                    if supportsContinuousGestures {
+                        Toggle("Continuous Gestures", isOn: $rule.continuous)
+                            .onChange(of: rule.continuous) { enabled in
+                                if enabled { rule.reciprocalEnabled = false; rule.reciprocalAction = nil }
+                            }
+                    }
+                } header: {
+                    Text("Do")
+                }
+
+                // CONTINUOUS detail (only when toggled on)
+                if rule.continuous && supportsContinuousGestures {
+                    Section {
+                        primaryActionRows
+
+                        phaseActionRow(label: "Swiping Forward",
+                                       action: $rule.continuousPositiveAction,
+                                       shortcut: $rule.continuousPositiveShortcut,
+                                       keyboard: $rule.continuousPositiveKeyboard)
+
+                        phaseActionRow(label: "Swiping Back",
+                                       action: $rule.continuousNegativeAction,
+                                       shortcut: $rule.continuousNegativeShortcut,
+                                       keyboard: $rule.continuousNegativeKeyboard)
+
+                        phaseActionRow(label: "On Release",
+                                       action: $rule.continuousEndAction,
+                                       shortcut: $rule.continuousEndShortcut,
+                                       keyboard: $rule.continuousEndKeyboard)
+                    } header: {
+                        Text("Continuous Gestures")
+                    }
+                }
+
+                // CONDITIONS (collapsed by default)
+                Section {
+                    DisclosureGroup("Conditions", isExpanded: $showConditions) {
+                        Picker("App", selection: $rule.appFilter) {
+                            Text("Any App").tag(String?.none)
+                            Divider()
+                            ForEach(store.runningApps()) { app in
+                                Text(app.name).tag(String?.some(app.bundleID))
                             }
                         }
 
-                        EditorRow(label: "Window State") {
-                            Picker("", selection: $rule.windowStateFilter) {
-                                ForEach(WindowStateFilter.allCases, id: \.self) { w in
-                                    Text(w.rawValue).tag(w)
-                                }
+                        Picker("Window State", selection: $rule.windowStateFilter) {
+                            ForEach(WindowStateFilter.allCases, id: \.self) { w in
+                                Text(w.rawValue).tag(w)
                             }
-                            .frame(maxWidth: 200)
                         }
 
-                        EditorRow(label: "App Filter") {
-                            Picker("", selection: $rule.appFilter) {
-                                Text("Any App").tag(String?.none)
-                                Divider()
-                                ForEach(store.runningApps()) { app in
-                                    Text(app.name).tag(String?.some(app.bundleID))
-                                }
-                            }
-                            .frame(maxWidth: 200)
-                        }
+                        if rule.direction.hasSpeed && !rule.continuous {
+                            Toggle("Reverse Gesture Undoes Action", isOn: $rule.reciprocalEnabled)
 
-                        if rule.direction.hasSpeed {
-                            if !rule.continuous {
-                                EditorRow(label: "Reciprocal") {
-                                    Toggle("Reverse gesture undoes this action", isOn: $rule.reciprocalEnabled)
-                                }
-
-                                if rule.reciprocalEnabled {
-                                    EditorRow(label: "Reverse Action") {
-                                        Picker("", selection: Binding<GestureAction>(
-                                            get: { rule.reciprocalAction ?? rule.action.inverseAction ?? .doNothing },
-                                            set: { rule.reciprocalAction = $0 }
-                                        )) {
-                                            ForEach(categorizedActions, id: \.0) { cat, actions in
-                                                Section(cat) {
-                                                    ForEach(actions, id: \.self) { action in
-                                                        Label(action.rawValue, systemImage: action.iconName)
-                                                            .tag(action)
-                                                    }
-                                                }
+                            if rule.reciprocalEnabled {
+                                Picker("Reverse Action", selection: Binding<GestureAction>(
+                                    get: { rule.reciprocalAction ?? rule.action.inverseAction ?? .doNothing },
+                                    set: { rule.reciprocalAction = $0 }
+                                )) {
+                                    ForEach(categorizedActions, id: \.0) { cat, actions in
+                                        Section(cat) {
+                                            ForEach(actions, id: \.self) { action in
+                                                Label(action.rawValue, systemImage: action.iconName).tag(action)
                                             }
                                         }
-                                        .frame(maxWidth: 260)
                                     }
                                 }
                             }
                         }
                     }
+                }
 
-                } // VStack inside scroll
-                .padding()
-            } // outer VStack
-        } // ScrollView
+            }
+            .formStyle(.grouped)
+        }
     }
 
+    // MARK: - Action sub-editors
+
     @ViewBuilder
-    private func primaryActionEditor(label: String) -> some View {
-        EditorRow(label: label) {
-            Picker("", selection: $rule.action) {
-                ForEach(categorizedActions, id: \.0) { cat, actions in
-                    Section(cat) {
-                        ForEach(actions, id: \.self) { action in
-                            Label(action.rawValue, systemImage: action.iconName)
-                                .tag(action)
-                        }
+    private var primaryActionRows: some View {
+        Picker("Action", selection: $rule.action) {
+            ForEach(categorizedActions, id: \.0) { cat, actions in
+                Section(cat) {
+                    ForEach(actions, id: \.self) { action in
+                        Label(action.rawValue, systemImage: action.iconName).tag(action)
                     }
                 }
             }
-            .frame(maxWidth: 260)
-            .onChange(of: rule.action) { newValue in
-                if newValue == .customMenuItem {
-                    rule.menuItemPath = nil
-                }
-                if newValue == .customShortcut {
-                    rule.customShortcut = nil
-                }
-                if newValue == .advancedKeyboard {
-                    rule.advancedKeyboard = []
-                }
-                if newValue == .runShortcut {
-                    rule.shortcutName = nil
-                }
-                if newValue == .runShellCommand || newValue == .runAppleScript {
-                    rule.script = nil
-                }
-                if rule.isDraft && newValue != .doNothing
-                    && newValue != .customMenuItem && newValue != .customShortcut && newValue != .advancedKeyboard
-                    && newValue != .runShortcut && newValue != .runShellCommand && newValue != .runAppleScript {
-                    store.markRuleConfigured(rule.id)
-                }
+        }
+        .onChange(of: rule.action) { newValue in
+            if newValue == .customMenuItem  { rule.menuItemPath = nil }
+            if newValue == .customShortcut  { rule.customShortcut = nil }
+            if newValue == .advancedKeyboard { rule.advancedKeyboard = [] }
+            if newValue == .runShortcut     { rule.shortcutName = nil }
+            if newValue == .runShellCommand || newValue == .runAppleScript { rule.script = nil }
+            if rule.isDraft && newValue != .doNothing
+                && newValue != .customMenuItem && newValue != .customShortcut
+                && newValue != .advancedKeyboard && newValue != .runShortcut
+                && newValue != .runShellCommand && newValue != .runAppleScript {
+                store.markRuleConfigured(rule.id)
             }
         }
 
         if rule.action == .customMenuItem {
-            EditorRow(label: "Target App") {
-                Picker("", selection: Binding<String?>(
-                    get: { rule.appFilter },
-                    set: { rule.appFilter = $0 }
-                )) {
-                    Text("Frontmost App").tag(String?.none)
-                    Divider()
-                    ForEach(store.runningApps()) { app in
-                        Text(app.name).tag(String?.some(app.bundleID))
-                    }
+            Picker("Target App", selection: Binding<String?>(
+                get: { rule.appFilter }, set: { rule.appFilter = $0 }
+            )) {
+                Text("Frontmost App").tag(String?.none)
+                Divider()
+                ForEach(store.runningApps()) { app in
+                    Text(app.name).tag(String?.some(app.bundleID))
                 }
-                .frame(maxWidth: 260)
             }
 
-            EditorRow(label: "Menu Item") {
-                VStack(alignment: .leading, spacing: 8) {
+            LabeledContent("Menu Item") {
+                HStack {
                     Text(rule.menuItemLabel ?? "Not selected")
                         .foregroundStyle(rule.menuItemPath == nil ? .secondary : .primary)
-                    Button("Choose Menu Item…") {
-                        showMenuPicker = true
-                    }
-                    Text("The app must be running. Glide reads its menu bar, like assigning shortcuts in System Settings.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Button("Choose…") { showMenuPicker = true }
+                        .buttonStyle(.link)
                 }
             }
             .sheet(isPresented: $showMenuPicker) {
@@ -740,63 +655,51 @@ struct RuleEditor: View {
                     targetLabel: store.menuItemTargetLabel(bundleID: rule.appFilter),
                     selectedPath: $rule.menuItemPath
                 )
-                .onDisappear {
-                    if rule.menuItemPath != nil {
-                        store.markRuleConfigured(rule.id)
-                    }
-                }
+                .onDisappear { if rule.menuItemPath != nil { store.markRuleConfigured(rule.id) } }
             }
         }
 
         if rule.action == .openApp {
-            EditorRow(label: "App") {
+            LabeledContent("App") {
                 HStack {
                     Text(store.appLabel(for: rule.appPath))
                         .foregroundStyle(rule.appPath == nil ? .secondary : .primary)
-                    Button("Choose…") {
-                        store.chooseApp(for: rule.id)
-                    }
+                    Button("Choose…") { store.chooseApp(for: rule.id) }
+                        .buttonStyle(.link)
                 }
             }
         }
 
         if rule.action == .customShortcut {
-            EditorRow(label: "Shortcut") {
-                VStack(alignment: .leading, spacing: 8) {
+            LabeledContent("Shortcut") {
+                VStack(alignment: .leading, spacing: 5) {
                     ShortcutRecorderView(shortcut: $rule.customShortcut)
-                    Text("Records the key combination Glide will send when this gesture fires.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text("Records the key combination Glide sends when this gesture fires.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             .onChange(of: rule.customShortcut) { _ in
-                if rule.customShortcut?.isValid == true {
-                    store.markRuleConfigured(rule.id)
-                }
+                if rule.customShortcut?.isValid == true { store.markRuleConfigured(rule.id) }
             }
         }
 
         if rule.action == .advancedKeyboard {
-            EditorRow(label: "Advanced Keyboard") {
+            LabeledContent("Keyboard Steps") {
                 KeyboardSequenceEditor(steps: $rule.advancedKeyboard)
             }
         }
 
         if rule.action == .runShortcut {
-            EditorRow(label: "Shortcut Name") {
-                VStack(alignment: .leading, spacing: 6) {
+            LabeledContent("Shortcut Name") {
+                VStack(alignment: .leading, spacing: 5) {
                     TextField("Exact name from Shortcuts.app", text: Binding(
                         get: { rule.shortcutName ?? "" },
                         set: { rule.shortcutName = $0.isEmpty ? nil : $0 }
                     ))
                     .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 320)
-                    .onSubmit {
-                        if rule.shortcutName != nil { store.markRuleConfigured(rule.id) }
-                    }
+                    .onSubmit { if rule.shortcutName != nil { store.markRuleConfigured(rule.id) } }
                     Text("Runs the shortcut via Shortcuts.app when the gesture fires.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             .onChange(of: rule.shortcutName) { _ in
@@ -805,20 +708,19 @@ struct RuleEditor: View {
         }
 
         if rule.action == .runShellCommand || rule.action == .runAppleScript {
-            EditorRow(label: rule.action == .runShellCommand ? "Command" : "Script") {
-                VStack(alignment: .leading, spacing: 6) {
+            LabeledContent(rule.action == .runShellCommand ? "Command" : "Script") {
+                VStack(alignment: .leading, spacing: 5) {
                     TextEditor(text: Binding(
                         get: { rule.script ?? "" },
                         set: { rule.script = $0.isEmpty ? nil : $0 }
                     ))
                     .font(.system(.body, design: .monospaced))
-                    .frame(maxWidth: 380, minHeight: 60, maxHeight: 120)
+                    .frame(minHeight: 60, maxHeight: 120)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                     Text(rule.action == .runShellCommand
                          ? "Runs with /bin/zsh -c in the background."
                          : "Runs with osascript in the background.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             .onChange(of: rule.script) { _ in
@@ -827,33 +729,30 @@ struct RuleEditor: View {
         }
     }
 
-    private func phaseActionEditor(
+    @ViewBuilder
+    private func phaseActionRow(
         label: String,
         action: Binding<GestureAction>,
         shortcut: Binding<KeyboardShortcut?>,
         keyboard: Binding<[KeyboardInputStep]>
     ) -> some View {
-        EditorRow(label: label) {
-            VStack(alignment: .leading, spacing: 8) {
-                Picker("", selection: action) {
-                    ForEach(continuousActions, id: \.0) { cat, actions in
-                        Section(cat) {
-                            ForEach(actions, id: \.self) { action in
-                                Label(action.rawValue, systemImage: action.iconName)
-                                    .tag(action)
-                            }
-                        }
+        Picker(label, selection: action) {
+            ForEach(continuousActions, id: \.0) { cat, actions in
+                Section(cat) {
+                    ForEach(actions, id: \.self) { a in
+                        Label(a.rawValue, systemImage: a.iconName).tag(a)
                     }
                 }
-                .frame(maxWidth: 260)
-
-                if action.wrappedValue == .customShortcut {
-                    ShortcutRecorderView(shortcut: shortcut)
-                }
-
-                if action.wrappedValue == .advancedKeyboard {
-                    KeyboardSequenceEditor(steps: keyboard)
-                }
+            }
+        }
+        if action.wrappedValue == .customShortcut {
+            LabeledContent("\(label) Shortcut") {
+                ShortcutRecorderView(shortcut: shortcut)
+            }
+        }
+        if action.wrappedValue == .advancedKeyboard {
+            LabeledContent("\(label) Keys") {
+                KeyboardSequenceEditor(steps: keyboard)
             }
         }
     }
@@ -1027,42 +926,6 @@ struct MenuItemPickerSheet: View {
     }
 }
 
-// MARK: - Helpers
-
-struct EditorSection<Content: View>: View {
-    let title: String
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.headline)
-                .padding(.bottom, 4)
-            GroupBox {
-                VStack(alignment: .leading, spacing: 0) {
-                    content()
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-}
-
-struct EditorRow<Content: View>: View {
-    let label: String
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        HStack(alignment: .center) {
-            Text(label)
-                .foregroundStyle(.secondary)
-                .frame(width: 110, alignment: .trailing)
-            content()
-            Spacer()
-        }
-        .padding(.vertical, 8)
-    }
-}
 
 // Add an extension for icon names based on GestureAction.
 extension GestureAction {
@@ -1137,3 +1000,19 @@ extension GestureAction {
         }
     }
 }
+extension GestureDirection {
+    var iconName: String {
+        switch self {
+        case .click: return "hand.point.up.left"
+        case .forceClick: return "hand.point.up.left.fill"
+        case .tapHold: return "hand.tap.fill"
+        case .swipeLeftRight: return "arrow.left.and.right"
+        case .swipeUpDown: return "arrow.up.and.down"
+        case .swipeLeft: return "arrow.left"
+        case .swipeRight: return "arrow.right"
+        case .swipeUp: return "arrow.up"
+        case .swipeDown: return "arrow.down"
+        }
+    }
+}
+
