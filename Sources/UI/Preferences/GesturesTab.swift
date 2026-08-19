@@ -85,7 +85,7 @@ struct GesturesTab: View {
                         .padding(8)
                 }
             }
-            .frame(minWidth: 280, maxWidth: 340)
+            .frame(minWidth: 320, maxWidth: 400)
 
             // ── Right: rule editor ──
             Group {
@@ -189,20 +189,86 @@ struct GesturesTab: View {
 
 // MARK: - Rule Row
 
+struct TriggerBadge: View {
+    let rule: GestureRule
+    
+    private var directionIcon: String {
+        switch rule.direction {
+        case .click: return "hand.point.up.left"
+        case .forceClick: return "hand.point.up.left.fill"
+        case .tapHold: return "hand.tap.fill"
+        case .swipeLeftRight: return "arrow.left.and.right"
+        case .swipeUpDown: return "arrow.up.and.down"
+        case .swipeLeft: return "arrow.left"
+        case .swipeRight: return "arrow.right"
+        case .swipeUp: return "arrow.up"
+        case .swipeDown: return "arrow.down"
+        }
+    }
+    
+    private var modifierSymbol: String? {
+        guard rule.modifierFilter.requiresModifierHeld else { return nil }
+        switch rule.modifierFilter {
+        case .shiftHeld: return "⇧"
+        case .controlHeld: return "⌃"
+        case .optionHeld: return "⌥"
+        case .commandHeld: return "⌘"
+        default: return nil
+        }
+    }
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            if let mod = modifierSymbol {
+                Text(mod)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .frame(minWidth: 22, minHeight: 22)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(Color(nsColor: .controlBackgroundColor))
+                            .shadow(color: .black.opacity(0.2), radius: 0.5, y: 0.5)
+                    )
+            }
+            
+            HStack(spacing: 4) {
+                if rule.isKeyboardBinding {
+                    if let shortcut = rule.triggerShortcut {
+                        Text(shortcut.displayString)
+                            .font(.system(size: 11, weight: .bold))
+                    } else {
+                        Text("Not Set")
+                            .font(.system(size: 11, weight: .bold))
+                    }
+                } else {
+                    Image(systemName: directionIcon)
+                        .font(.system(size: 11, weight: .bold))
+                    Text(rule.direction.rawValue)
+                        .font(.system(size: 11, weight: .bold))
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .fill(Color.accentColor.opacity(0.15))
+            )
+            .foregroundStyle(Color.accentColor)
+        }
+    }
+}
+
 struct RuleRow: View {
     let rule: GestureRule
     @EnvironmentObject var store: PreferencesStore
 
     private var subtitle: String {
-        var parts: [String] = [rule.direction.rawValue]
+        var parts: [String] = []
         if rule.direction == .forceClick && rule.zone != .any {
             parts.append(rule.zone.rawValue)
         }
         if rule.direction.hasSpeed && rule.speed != .any {
             parts.append(rule.speed.rawValue)
-        }
-        if rule.modifierFilter.requiresModifierHeld {
-            parts.append(rule.modifierFilter.rawValue)
         }
         if rule.appFilter != nil {
             parts.append(store.appFilterLabel(for: rule.appFilter))
@@ -211,37 +277,53 @@ struct RuleRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: rule.action.iconName)
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 20)
+        HStack(spacing: 12) {
+            TriggerBadge(rule: rule)
+                .frame(width: 125, alignment: .leading)
+            
+            Image(systemName: "arrow.right")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.tertiary)
+            
+            HStack(spacing: 8) {
+                Image(systemName: rule.action.iconName)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 20)
+                    .font(.system(size: 14))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(rule.displayName)
-                    .font(.body.weight(.medium))
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(rule.displayName)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
             }
 
             Spacer()
 
-            if store.isRuleShadowed(rule) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.caption)
-                    .help("Overridden by another gesture with the same trigger")
-            }
-            if !rule.isActive {
-                Image(systemName: "pause.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-                    .help(rule.isDraft ? "Not configured yet" : "Inactive")
+            HStack(spacing: 8) {
+                if store.isRuleShadowed(rule) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                        .help("Overridden by another gesture with the same trigger")
+                }
+                if !rule.isActive {
+                    Image(systemName: "pause.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                        .help(rule.isDraft ? "Not configured yet" : "Inactive")
+                }
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
         .opacity(rule.isActive ? 1 : 0.55)
     }
 }
