@@ -27,6 +27,12 @@ Glide works in the background and intercepts your trackpad movements, translatin
 
 **Building from source:** clone the repo and run `./build.sh` (needs Xcode Command Line Tools). Add `--dmg` to also produce a DMG.
 
+### Updating
+
+You only do the steps above once. From then on Glide updates itself: open **Preferences → General** and click **Check for Updates**, or use **Check for Updates…** in the menu bar.
+
+Glide downloads the new version, verifies it against the checksum published with the release, installs it over itself, and relaunches. Nothing to mount or drag, and no Gatekeeper warning to clear — that warning comes from the quarantine flag a browser attaches to downloads, and an in-app download doesn't get one.
+
 ---
 
 ## Table of Contents
@@ -176,6 +182,7 @@ Glide's general settings menu lets you configure how the app behaves globally:
 *   **Debug Logging:** Prints technical details of your trackpad inputs to the system Console for troubleshooting.
 *   **Launch at Login:** Automatically opens Glide every time you boot up your Mac.
 *   **Stats Dashboard:** Displays live statistics, including how many gestures you have configured, how many finger sets are in use, and if any app-launch gestures are missing their target applications.
+*   **Updates:** The About card checks GitHub for a newer release and, when there is one, downloads and installs it in place — with a progress bar, a checksum check, and a **Relaunch Now** button when it's done. If Glide is somewhere it can't write to (so it can't replace itself), it hands you the disk image it already downloaded instead.
 
 ---
 
