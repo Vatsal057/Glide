@@ -2,6 +2,7 @@
 
 #include <CoreGraphics/CoreGraphics.h>
 #include <dlfcn.h>
+#include <pthread.h>
 #include <string.h>
 
 typedef struct {
@@ -12,9 +13,34 @@ typedef struct {
 typedef int32_t (*GLDWGetProcessForPID)(pid_t, GLDWProcessSerialNumber *);
 typedef CGError (*GLDWSetFrontProcess)(GLDWProcessSerialNumber *, uint32_t, uint32_t);
 typedef CGError (*GLDWPostEventRecord)(GLDWProcessSerialNumber *, uint8_t *);
+typedef int (*GLDWMainConnectionID)(void);
+typedef CFArrayRef (*GLDWCopyManagedDisplaySpaces)(int);
+typedef CFArrayRef (*GLDWCopyWindowsWithOptionsAndTags)(int, uint32_t, CFArrayRef, uint32_t, uint64_t *, uint64_t *);
 
 static const char *skylight_path =
     "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight";
+
+static GLDWGetProcessForPID fn_get_process = NULL;
+static GLDWSetFrontProcess fn_set_front = NULL;
+static GLDWPostEventRecord fn_post_event = NULL;
+static GLDWMainConnectionID fn_main_connection = NULL;
+static GLDWCopyManagedDisplaySpaces fn_copy_display_spaces = NULL;
+static GLDWCopyWindowsWithOptionsAndTags fn_copy_windows = NULL;
+
+static pthread_once_t bridge_init_once = PTHREAD_ONCE_INIT;
+
+static void init_bridge_symbols(void) {
+    void *handle = dlopen(skylight_path, RTLD_LAZY | RTLD_GLOBAL);
+    if (handle == NULL) {
+        return;
+    }
+    fn_get_process = (GLDWGetProcessForPID)dlsym(RTLD_DEFAULT, "GetProcessForPID");
+    fn_set_front = (GLDWSetFrontProcess)dlsym(handle, "_SLPSSetFrontProcessWithOptions");
+    fn_post_event = (GLDWPostEventRecord)dlsym(handle, "SLPSPostEventRecordTo");
+    fn_main_connection = (GLDWMainConnectionID)dlsym(handle, "SLSMainConnectionID");
+    fn_copy_display_spaces = (GLDWCopyManagedDisplaySpaces)dlsym(handle, "SLSCopyManagedDisplaySpaces");
+    fn_copy_windows = (GLDWCopyWindowsWithOptionsAndTags)dlsym(handle, "SLSCopyWindowsWithOptionsAndTags");
+}
 
 static bool post_key_window_event(
     GLDWPostEventRecord post_event,
@@ -42,32 +68,77 @@ bool GLDWFocusWindow(pid_t process_id, uint32_t window_id) {
         return false;
     }
 
-    void *handle = dlopen(skylight_path, RTLD_LAZY | RTLD_LOCAL);
-    if (handle == NULL) {
-        return false;
-    }
-
-    GLDWGetProcessForPID get_process =
-        (GLDWGetProcessForPID)dlsym(RTLD_DEFAULT, "GetProcessForPID");
-    GLDWSetFrontProcess set_front =
-        (GLDWSetFrontProcess)dlsym(handle, "_SLPSSetFrontProcessWithOptions");
-    GLDWPostEventRecord post_event =
-        (GLDWPostEventRecord)dlsym(handle, "SLPSPostEventRecordTo");
-    if (get_process == NULL || set_front == NULL || post_event == NULL) {
-        dlclose(handle);
+    pthread_once(&bridge_init_once, init_bridge_symbols);
+    if (fn_get_process == NULL || fn_set_front == NULL || fn_post_event == NULL) {
         return false;
     }
 
     GLDWProcessSerialNumber process = {0};
-    if (get_process(process_id, &process) != 0) {
-        dlclose(handle);
+    if (fn_get_process(process_id, &process) != 0) {
         return false;
     }
 
     // 0x200 marks the request as user-generated and, unlike 0x100, does not raise all windows.
-    CGError front = set_front(&process, window_id, 0x200);
+    CGError front = fn_set_front(&process, window_id, 0x200);
     bool made_key = front == kCGErrorSuccess
-        && post_key_window_event(post_event, &process, window_id);
-    dlclose(handle);
+        && post_key_window_event(fn_post_event, &process, window_id);
     return made_key;
 }
+
+static void append_space_id(CFMutableArrayRef spaces, CFDictionaryRef space) {
+    if (space == NULL || CFGetTypeID(space) != CFDictionaryGetTypeID()) return;
+    CFNumberRef space_id = CFDictionaryGetValue(space, CFSTR("id64"));
+    if (space_id != NULL && CFGetTypeID(space_id) == CFNumberGetTypeID()) {
+        CFArrayAppendValue(spaces, space_id);
+    }
+}
+
+CFArrayRef GLDWCopyWindowIDs(bool current_space_only, bool ordered_in_only) {
+    pthread_once(&bridge_init_once, init_bridge_symbols);
+    if (fn_main_connection == NULL || fn_copy_display_spaces == NULL || fn_copy_windows == NULL) {
+        return NULL;
+    }
+
+    int connection = fn_main_connection();
+    if (connection == 0) {
+        return NULL;
+    }
+
+    CFArrayRef display_spaces = fn_copy_display_spaces(connection);
+    if (display_spaces == NULL) {
+        return NULL;
+    }
+
+    CFMutableArrayRef spaces = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+    CFIndex display_count = CFArrayGetCount(display_spaces);
+    for (CFIndex i = 0; i < display_count; ++i) {
+        CFDictionaryRef display = (CFDictionaryRef)CFArrayGetValueAtIndex(display_spaces, i);
+        if (display == NULL || CFGetTypeID(display) != CFDictionaryGetTypeID()) continue;
+
+        if (current_space_only) {
+            append_space_id(spaces, CFDictionaryGetValue(display, CFSTR("Current Space")));
+            continue;
+        }
+        CFArrayRef display_space_list = CFDictionaryGetValue(display, CFSTR("Spaces"));
+        if (display_space_list == NULL || CFGetTypeID(display_space_list) != CFArrayGetTypeID()) continue;
+        CFIndex space_count = CFArrayGetCount(display_space_list);
+        for (CFIndex j = 0; j < space_count; ++j) {
+            append_space_id(spaces, (CFDictionaryRef)CFArrayGetValueAtIndex(display_space_list, j));
+        }
+    }
+
+    uint64_t set_tags = 0;
+    uint64_t clear_tags = 0;
+    CFArrayRef windows = NULL;
+    if (CFArrayGetCount(spaces) > 0) {
+        // Owner connection 0 means "every process". 0x7 also reports windows that
+        // are ordered out (minimized, or belonging to a hidden application);
+        // 0x2 reports only the ordered-in ones.
+        uint32_t options = ordered_in_only ? 0x2 : 0x7;
+        windows = fn_copy_windows(connection, 0, spaces, options, &set_tags, &clear_tags);
+    }
+    CFRelease(spaces);
+    CFRelease(display_spaces);
+    return windows;
+}
+

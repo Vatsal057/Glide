@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.glide.app</string>
     <key>CFBundleVersion</key>
-    <string>2.0</string>
+    <string>2.1.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0</string>
+    <string>2.1.0</string>
     <key>CFBundleExecutable</key>
     <string>Glide</string>
     <key>CFBundlePackageType</key>
@@ -31,6 +31,6 @@
     <key>NSAccessibilityUsageDescription</key>
     <string>Glide requires Accessibility access to detect gestures and control windows.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Glide controls Finder to detect whether it has open windows, so it can skip a windowless Finder in the app switcher.</string>
+    <string>Glide runs the AppleScript actions you configure, and reads app menus so you can assign menu items to gestures.</string>
 </dict>
 </plist>

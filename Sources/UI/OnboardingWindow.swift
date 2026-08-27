@@ -247,7 +247,9 @@ private struct OnboardingView: View {
 
 private struct PermissionStepView: View {
     @State private var granted = AXIsProcessTrusted()
-    private let poll = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
+    // Tolerance lets macOS coalesce this wakeup with others instead of scheduling
+    // its own. A permission check has no deadline, so drift is free.
+    private let poll = Timer.publish(every: 1.0, tolerance: 0.25, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 20) {
@@ -290,6 +292,7 @@ private struct PermissionStepView: View {
         }
         .padding(.horizontal, 40)
         .onReceive(poll) { _ in
+            guard !granted else { return }
             let now = AXIsProcessTrusted()
             if now != granted {
                 withAnimation { granted = now }
@@ -339,7 +342,7 @@ struct TrackpadDemoView: View {
     @State private var demoIndex = 0
     @State private var progress: CGFloat = 0   // 0 → 1 finger travel
     @State private var pressed = false
-    private let tick = Timer.publish(every: 2.4, on: .main, in: .common).autoconnect()
+    private let tick = Timer.publish(every: 2.4, tolerance: 0.3, on: .main, in: .common).autoconnect()
 
     var body: some View {
         let demo = demos[demoIndex]

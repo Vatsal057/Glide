@@ -17,6 +17,10 @@ final class GestureInputManager {
     var clickObservationSource: CFRunLoopSource?
     var clickTapInstalled = false
 
+    var trackPointTap: CFMachPort?
+    var trackPointSource: CFRunLoopSource?
+    private(set) var trackPointSuppressionEnabled = false
+
     var interactionMonitors: [Any] = []
     var pressureMonitor: Any?
     var lastForceClickTime: TimeInterval = 0
@@ -29,11 +33,14 @@ final class GestureInputManager {
     func setupTaps() {
         setupSuppressionTap()
         setupClickObservationTap()
+        // The TrackPoint tap is created by setTrackPointSuppression the first time
+        // the stick engages — most users never own an event tap they never use.
     }
 
     func teardownTaps() {
         teardownSuppressionTap()
         teardownClickObservationTap()
+        teardownTrackPointTap()
     }
 
     func setupSuppressionTap() {
@@ -83,7 +90,11 @@ final class GestureInputManager {
 
         if let tap = suppressionTap {
             suppressionSource = CFMachPortCreateRunLoopSource(nil, tap, 0)
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), suppressionSource, .commonModes)
+            // The main run loop explicitly, not "the current one". Every caller is
+            // already on main, so this changes nothing today — but a teardown that
+            // resolved a different run loop than its setup would strand the source
+            // on main forever, and `checkHealth` tears these down and rebuilds them.
+            CFRunLoopAddSource(CFRunLoopGetMain(), suppressionSource, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: false)
         }
     }
@@ -96,10 +107,82 @@ final class GestureInputManager {
 
     func teardownSuppressionTap() {
         if let tap = suppressionTap { CGEvent.tapEnable(tap: tap, enable: false) }
-        if let src = suppressionSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), src, .commonModes) }
+        if let src = suppressionSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes) }
+        // Dropping the last Swift reference is not enough to take the tap down: the
+        // Mach port has to be invalidated or the tap stays registered with the
+        // WindowServer, which keeps handing it events nobody reads. `checkHealth`
+        // rebuilds these on every failure, so each rebuild leaked one live tap.
+        if let tap = suppressionTap { CFMachPortInvalidate(tap) }
         suppressionTap    = nil
         suppressionSource = nil
         suppressionEnabled = false
+    }
+
+    // MARK: - TrackPoint suppression
+    //
+    // While the corner TrackPoint drives the cursor, the finger holding the
+    // stick is still a finger on the trackpad — macOS reads its drift as
+    // ordinary pointer movement and fights the synthetic motion. This tap
+    // swallows native pointer movement for the duration, passing only the
+    // events CursorDriver posts (identified by their source user data).
+    //
+    // Scroll is suppressed for the same reason: a second resting finger is what
+    // puts the stick into scroll mode, and macOS reads that same pair of contacts
+    // as a two-finger scroll. Left unsuppressed, every stick scroll would arrive
+    // twice. Below two contacts macOS emits no scroll anyway, so covering it
+    // costs the pointer mode nothing.
+
+    func setupTrackPointTap() {
+        let mask = UInt64(1 << CGEventType.mouseMoved.rawValue)
+                 | UInt64(1 << CGEventType.leftMouseDragged.rawValue)
+                 | UInt64(1 << CGEventType.rightMouseDragged.rawValue)
+                 | UInt64(1 << CGEventType.otherMouseDragged.rawValue)
+                 | UInt64(1 << CGEventType.scrollWheel.rawValue)
+
+        trackPointTap = CGEvent.tapCreate(
+            tap: .cghidEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: { _, type, cgEvent, _ in
+                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                    if GestureEngine.shared.inputManager.trackPointSuppressionEnabled,
+                       let tap = GestureEngine.shared.inputManager.trackPointTap {
+                        AppLogger.debug("[Input] TrackPoint tap timed out — re-enabling")
+                        CGEvent.tapEnable(tap: tap, enable: true)
+                    }
+                    return nil
+                }
+                if cgEvent.getIntegerValueField(.eventSourceUserData) == CursorDriver.syntheticMarker {
+                    return Unmanaged.passUnretained(cgEvent)
+                }
+                return nil
+            },
+            userInfo: nil)
+
+        if let tap = trackPointTap {
+            trackPointSource = CFMachPortCreateRunLoopSource(nil, tap, 0)
+            CFRunLoopAddSource(CFRunLoopGetMain(), trackPointSource, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: false)
+        }
+    }
+
+    func setTrackPointSuppression(_ active: Bool) {
+        guard active != trackPointSuppressionEnabled else { return }
+        // Create on demand: the tap only exists once the feature is used.
+        if active && trackPointTap == nil { setupTrackPointTap() }
+        guard let tap = trackPointTap else { return }
+        trackPointSuppressionEnabled = active
+        CGEvent.tapEnable(tap: tap, enable: active)
+    }
+
+    func teardownTrackPointTap() {
+        if let tap = trackPointTap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let src = trackPointSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes) }
+        if let tap = trackPointTap { CFMachPortInvalidate(tap) }
+        trackPointTap    = nil
+        trackPointSource = nil
+        trackPointSuppressionEnabled = false
     }
 
     func setupClickObservationTap() {
@@ -140,6 +223,7 @@ final class GestureInputManager {
     func teardownClickObservationTap() {
         if let tap = clickObservationTap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let src = clickObservationSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes) }
+        if let tap = clickObservationTap { CFMachPortInvalidate(tap) }
         clickObservationTap    = nil
         clickObservationSource = nil
         clickTapInstalled      = false
@@ -197,6 +281,15 @@ final class GestureInputManager {
             if !CFMachPortIsValid(tap) {
                 teardownClickObservationTap(); setupClickObservationTap()
             } else if !CGEvent.tapIsEnabled(tap: tap) {
+                CGEvent.tapEnable(tap: tap, enable: true)
+            }
+        }
+        if let tap = trackPointTap {
+            if !CFMachPortIsValid(tap) {
+                let wasSuppressing = trackPointSuppressionEnabled
+                teardownTrackPointTap(); setupTrackPointTap()
+                if wasSuppressing { setTrackPointSuppression(true) }
+            } else if !CGEvent.tapIsEnabled(tap: tap) && trackPointSuppressionEnabled {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
         }

@@ -15,6 +15,8 @@ final class GestureEngine {
     // MARK: - State
     private(set) var phase: GesturePhase = .idle
     private var reciprocalToken: ReciprocalToken?
+    private var escapeMonitorLocal: Any?
+    private var escapeMonitorGlobal: Any?
     /// Direction + finger count of the most recently fired swipe rule.
     /// Used to detect back-to-back same-direction gestures (toggles) so we don't
     /// leave a stale reciprocal token pointing the other way.
@@ -49,6 +51,8 @@ final class GestureEngine {
     /// Pending Tap & Hold — fires when fingers rest motionless past tapHoldDuration.
     private var holdWorkItem: DispatchWorkItem?
     private var holdArmedFingerCount = 0
+    private var holdStartCentroid: (x: Float, y: Float)?
+    private var holdMaxMovement: Float = 0
 
     // MARK: - Observable state
     private(set) var currentPhaseName: String = "Idle"
@@ -77,20 +81,21 @@ final class GestureEngine {
         TouchTracker.resetGlobalMTState()
         phase = .idle
         reciprocalToken = nil
+        removeEscapeMonitors()
         lastFiredSwipe = nil
         pendingClickTimeout?.cancel(); pendingClickTimeout = nil; pendingClick = nil
         cancelHoldTimer()
         touchSessionStart = nil; touchSessionMovement = 0
         lastThreeFingerTapEnd = 0; isSystemZoomSession = false
 
+        TouchTracker.updateTuningCache(edgeMarginEnabled: Settings.shared.tuning.edgeMarginEnabled,
+                                        edgeMargin: Settings.shared.tuning.edgeMargin)
+        TrackPointController.shared.applySettings()
         inputManager.setupTaps()
         MultitouchBridge.shared.start(callback: glideMTCallback)
         inputManager.installMonitors()
         AppSwitcherState.shared.startMRUTracking()
-        if Settings.shared.appSwitcher.skipWindowlessFinder {
-            WindowTargeting.shared.refreshFinderWindowCache()   // warm before first switcher open
-        }
-        
+
         isRunning = true
         updateObservableState()
         AppLogger.debug("[Engine] Started")
@@ -100,12 +105,14 @@ final class GestureEngine {
         guard isRunning else { return }
 
         finishIfNeeded()
+        TrackPointController.shared.engineWillStop()
         MultitouchBridge.shared.stop()
         inputManager.teardownTaps()
         inputManager.removeMonitors()
 
         TouchTracker.resetGlobalMTState()
         reciprocalToken = nil
+        removeEscapeMonitors()
         lastStepTime = 0
         pendingClickTimeout?.cancel(); pendingClickTimeout = nil; pendingClick = nil
         cancelHoldTimer()
@@ -157,7 +164,20 @@ final class GestureEngine {
 
         // Tap & Hold: (re)arm whenever the resting finger count changes, cancel on lift.
         if frame.count >= 3 {
-            if Int(frame.count) != holdArmedFingerCount { armHoldTimer(fingerCount: Int(frame.count)) }
+            if Int(frame.count) != holdArmedFingerCount {
+                if TouchTracker.areClickTouchesSimultaneous() {
+                    armHoldTimer(fingerCount: Int(frame.count), cx: frame.cx, cy: frame.cy)
+                } else {
+                    cancelHoldTimer()
+                }
+            } else if holdArmedFingerCount > 0, let start = holdStartCentroid {
+                let dx = frame.cx - start.x
+                let dy = frame.cy - start.y
+                holdMaxMovement = max(holdMaxMovement, (dx * dx + dy * dy).squareRoot())
+                if holdMaxMovement >= tapMaxMovement {
+                    cancelHoldTimer()
+                }
+            }
         } else {
             cancelHoldTimer()
         }
@@ -182,10 +202,12 @@ final class GestureEngine {
 
     // MARK: - Tap & Hold
 
-    private func armHoldTimer(fingerCount n: Int) {
+    private func armHoldTimer(fingerCount n: Int, cx: Float, cy: Float) {
         holdWorkItem?.cancel()
         holdWorkItem = nil
         holdArmedFingerCount = n
+        holdStartCentroid = (x: cx, y: cy)
+        holdMaxMovement = 0
         guard GestureRuleResolver.hasHoldRule(fingers: n) else { return }
         let work = DispatchWorkItem { [weak self] in self?.fireHoldIfStillValid(fingerCount: n) }
         holdWorkItem = work
@@ -196,6 +218,7 @@ final class GestureEngine {
         holdWorkItem?.cancel()
         holdWorkItem = nil
         holdArmedFingerCount = 0
+        holdStartCentroid = nil
     }
 
     private func fireHoldIfStillValid(fingerCount n: Int) {
@@ -205,7 +228,7 @@ final class GestureEngine {
               TouchTracker.glideClickFingerCount == 0,
               NSEvent.pressedMouseButtons & 1 == 0,   // physical press → click/force-click path
               !isSystemZoomSession,
-              touchSessionMovement < tapMaxMovement else { return }
+              holdMaxMovement < tapMaxMovement else { return }
         switch phase {
         case .fired, .switchingApps, .continuousSwipe, .lockedSwipe: return
         default: break
@@ -284,7 +307,7 @@ final class GestureEngine {
         let modifiers = captureModifiers()
         guard let rule = GestureRuleResolver.forceClickRule(
                 fingers: n, cx: currentCentroidX, cy: currentCentroidY,
-                margin: Settings.shared.tuning.forceClickCornerMargin, modifiers: modifiers) else { return }
+                margin: Settings.shared.tuning.forceClickMargin, modifiers: modifiers) else { return }
 
         // Matched — the deep press supersedes any pending normal click.
         pendingClickTimeout?.cancel()
@@ -332,70 +355,178 @@ final class GestureEngine {
 
     // MARK: - App Switcher logic
 
-    func beginAppSwitcher(for action: GestureAction, refX: Float, fingerCount: Int) -> SwitcherData? {
-        let apps = AppSwitcherState.shared.getOrderedApps()
-        guard apps.count > 1 else { return nil }
+    func beginAppSwitcher(
+        for action: GestureAction,
+        refX: Float,
+        refY: Float,
+        fingerCount: Int
+    ) -> SwitcherData? {
+        let systemApps = AppSwitcherState.shared.getOrderedApps()
+        guard systemApps.count > 1 else { return nil }
+        let systemWindows = WindowTargeting.shared.switcherWindows(for: systemApps)
+
+        let movingForward = action == .appSwitcherNext
+        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+
+        // Finder's desktop process is always running, so a windowless Finder is the
+        // one app worth hiding from the switcher.
+        let skipFinder = Settings.shared.appSwitcher.skipWindowlessFinder
+        let customIndices = systemApps.indices.filter { index in
+            !(skipFinder
+              && systemApps[index].bundleIdentifier == "com.apple.finder"
+              && systemWindows[index].isEmpty)
+        }
+        let customApps = customIndices.map { systemApps[$0] }
+        let customWindows = customIndices.map { systemWindows[$0] }
+        guard !customApps.isEmpty else { return nil }
+
+        let customIndex: Int = {
+            guard let frontmostPID,
+                  let frontIndex = customApps.firstIndex(where: { $0.processIdentifier == frontmostPID }) else {
+                return movingForward ? 0 : customApps.count - 1
+            }
+            if movingForward { return frontIndex + 1 < customApps.count ? frontIndex + 1 : 0 }
+            return frontIndex > 0 ? frontIndex - 1 : customApps.count - 1
+        }()
+        guard customApps[customIndex].processIdentifier != frontmostPID else { return nil }
 
         clearReciprocalToken()
-        sendKeyEvent(0x37, down: true, flags: .maskCommand) // kCmd
         Haptic.switcherOpen()
 
-        var currentIndex = 0
-        if action == .appSwitcherNext {
-            sendCmdTab()
-            currentIndex = 1
-        } else {
-            sendCmdShiftTab()
-            currentIndex = apps.count - 1
+        if Settings.shared.appSwitcher.style == .newer,
+           AppSwitcherOverlayController.shared.show(
+            apps: customApps,
+            windowsByApp: customWindows,
+            selectedAppIndex: customIndex,
+            selectedWindowIndex: 0
+        ) {
+            installEscapeMonitors()
+            lastStepTime = ProcessInfo.processInfo.systemUptime
+            return SwitcherData(
+                refX: refX,
+                refY: refY,
+                index: customIndex,
+                windowIndex: 0,
+                fingerCount: fingerCount,
+                apps: customApps,
+                windowsByApp: customWindows,
+                finderIndex: nil,
+                effectiveMin: 0,
+                effectiveMax: customApps.count - 1,
+                usesCustomOverlay: true
+            )
         }
 
-        var finderIndex: Int? = nil
-        if Settings.shared.appSwitcher.skipWindowlessFinder {
-            if let idx = apps.firstIndex(where: { $0.bundleIdentifier == "com.apple.finder" }) {
-                // Cached answer — never a synchronous Apple Event mid-gesture
-                // (Finder can't reply while it's busy, e.g. servicing a drag).
-                if !WindowTargeting.shared.finderLikelyHasWindows {
-                    finderIndex = idx
-                }
-            }
-            WindowTargeting.shared.refreshFinderWindowCache()   // fresh for the next open
+        let finderIndex = systemApps.indices.first { index in
+            skipFinder
+                && systemApps[index].bundleIdentifier == "com.apple.finder"
+                && systemWindows[index].isEmpty
         }
 
-        if let fi = finderIndex, currentIndex == fi {
-            if action == .appSwitcherNext {
-                sendCmdTab()
-                currentIndex += 1
-            } else {
-                sendCmdShiftTab()
-                currentIndex -= 1
-            }
-        }
-
+        let firstIndex = movingForward ? 1 : systemApps.count - 1
+        var nativeIndex = firstIndex
+        if finderIndex == nativeIndex { nativeIndex += movingForward ? 1 : -1 }
         let effectiveMin = (finderIndex == 0) ? 1 : 0
-        let effectiveMax = (finderIndex == apps.count - 1) ? apps.count - 2 : apps.count - 1
+        let effectiveMax = (finderIndex == systemApps.count - 1) ? systemApps.count - 2 : systemApps.count - 1
+        nativeIndex = min(max(nativeIndex, effectiveMin), effectiveMax)
 
-        // The Finder double-skip above can overshoot the bounds (e.g. only two apps,
-        // windowless Finder last). Keep the tracked index in sync with the app the
-        // switcher actually highlighted, or later left/right steps count from wrong.
-        currentIndex = min(max(currentIndex, effectiveMin), effectiveMax)
+        sendKeyEvent(0x37, down: true, flags: .maskCommand) // kCmd
+        if movingForward { sendCmdTab() } else { sendCmdShiftTab() }
+        if finderIndex == firstIndex {
+            if movingForward { sendCmdTab() } else { sendCmdShiftTab() }
+        }
 
+        installEscapeMonitors()
         lastStepTime = ProcessInfo.processInfo.systemUptime
-        return SwitcherData(refX: refX, index: currentIndex, fingerCount: fingerCount, apps: apps,
-                           finderIndex: finderIndex, effectiveMin: effectiveMin, effectiveMax: effectiveMax)
+        return SwitcherData(
+            refX: refX,
+            refY: refY,
+            index: nativeIndex,
+            windowIndex: 0,
+            fingerCount: fingerCount,
+            apps: systemApps,
+            windowsByApp: systemWindows,
+            finderIndex: finderIndex,
+            effectiveMin: effectiveMin,
+            effectiveMax: effectiveMax,
+            usesCustomOverlay: false
+        )
+    }
+
+    func updateAppSwitcherSelection(_ data: SwitcherData) {
+        guard data.usesCustomOverlay else { return }
+        AppSwitcherOverlayController.shared.select(
+            appIndex: data.index,
+            windowIndex: data.windowIndex
+        )
     }
 
     private func commitAppSwitcher(data: SwitcherData) {
+        removeEscapeMonitors()
         Haptic.switcherCommit()
-        sendKeyEvent(0x3A, down: true,  flags: [.maskAlternate]) // kOpt
-        sendKeyEvent(0x37, down: false, flags: [.maskCommand, .maskAlternate]) // kCmd
-        sendKeyEvent(0x3A, down: false, flags: []) // kOpt
-        
-        if Settings.shared.appSwitcher.restoreMinimizedOnCommit {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                guard let front = NSWorkspace.shared.frontmostApplication else { return }
-                WindowTargeting.shared.unminimizeWindows(of: front.processIdentifier)
+        let selectedApp = data.apps.indices.contains(data.index) ? data.apps[data.index] : nil
+
+        if data.usesCustomOverlay {
+            AppSwitcherOverlayController.shared.hide()
+            if let selectedApp,
+               data.windowsByApp.indices.contains(data.index),
+               data.windowsByApp[data.index].indices.contains(data.windowIndex) {
+                WindowTargeting.shared.activateSwitcherWindow(
+                    data.windowsByApp[data.index][data.windowIndex],
+                    in: selectedApp
+                )
+            } else {
+                selectedApp?.unhide()
+                selectedApp?.activate(options: .activateIgnoringOtherApps)
+            }
+        } else {
+            // Releasing Command confirms the selection in the native Cmd+Tab panel.
+            sendKeyEvent(0x3A, down: true,  flags: [.maskAlternate]) // kOpt
+            sendKeyEvent(0x37, down: false, flags: [.maskCommand, .maskAlternate]) // kCmd
+            sendKeyEvent(0x3A, down: false, flags: []) // kOpt
+
+            if Settings.shared.appSwitcher.restoreMinimizedOnCommit {
+                let selectedPID = selectedApp?.processIdentifier
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    guard let pid = selectedPID ?? NSWorkspace.shared.frontmostApplication?.processIdentifier else { return }
+                    WindowTargeting.shared.unminimizeWindows(of: pid)
+                }
             }
         }
+    }
+
+    private func installEscapeMonitors() {
+        guard escapeMonitorLocal == nil else { return }
+        escapeMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 {
+                self?.cancelAppSwitcher()
+                return nil
+            }
+            return event
+        }
+        escapeMonitorGlobal = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 {
+                self?.cancelAppSwitcher()
+            }
+        }
+    }
+
+    private func removeEscapeMonitors() {
+        if let monitor = escapeMonitorLocal { NSEvent.removeMonitor(monitor); escapeMonitorLocal = nil }
+        if let monitor = escapeMonitorGlobal { NSEvent.removeMonitor(monitor); escapeMonitorGlobal = nil }
+    }
+
+    func cancelAppSwitcher() {
+        guard case .switchingApps(let data) = phase else { return }
+        removeEscapeMonitors()
+        if data.usesCustomOverlay {
+            AppSwitcherOverlayController.shared.hide()
+        } else {
+            sendKeyEvent(0x37, down: false, flags: []) // kCmd
+        }
+        phase = .idle
+        lastStepTime = 0
+        updateObservableState()
     }
 
     // MARK: - Reciprocal & Continuous
@@ -492,14 +623,20 @@ final class GestureEngine {
     func captureModifiers() -> CapturedModifiers { CapturedModifiers(NSEvent.modifierFlags) }
 
     private func updateObservableState() {
+        let newPhaseName: String
         switch phase {
-        case .idle: currentPhaseName = "Idle"; case .candidate: currentPhaseName = "Candidate"
-        case .lockedSwipe: currentPhaseName = "Locked (Swipe)"; case .ignored: currentPhaseName = "Ignored"
-        case .fired: currentPhaseName = "Fired"; case .continuousSwipe: currentPhaseName = "Continuous"
-        case .switchingApps: currentPhaseName = "App Switcher"
+        case .idle: newPhaseName = "Idle"; case .candidate: newPhaseName = "Candidate"
+        case .lockedSwipe: newPhaseName = "Locked (Swipe)"; case .ignored: newPhaseName = "Ignored"
+        case .fired: newPhaseName = "Fired"; case .continuousSwipe: newPhaseName = "Continuous"
+        case .switchingApps: newPhaseName = "App Switcher"
         }
-        isReciprocalActive = (reciprocalToken != nil)
-        onStateChange?()
+        let newReciprocal = (reciprocalToken != nil)
+        let stateChanged = (newPhaseName != currentPhaseName) || (newReciprocal != isReciprocalActive)
+        currentPhaseName = newPhaseName
+        isReciprocalActive = newReciprocal
+        if stateChanged {
+            onStateChange?()
+        }
     }
 
     func sendCmdTab() { sendKeyEvent(0x30, down: true, flags: .maskCommand); sendKeyEvent(0x30, down: false, flags: .maskCommand) }

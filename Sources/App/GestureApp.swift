@@ -11,6 +11,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Re-assert on launch — System Settings may have re-enabled native gestures.
         SystemGestureManager.reconcileIfAutoEnabled()
+
+        // One quiet check shortly after launch, so an available update shows up
+        // in the menu bar instead of waiting to be hunted for. Delayed to keep
+        // it off the critical path of getting gestures running.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            UpdateChecker.shared.checkIfDue()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -139,6 +147,10 @@ final class EngineBridge: ObservableObject {
                 engine.inputManager.checkHealth()
             }
         }
+        // A repeating timer with no slack forces its own wake-up every five
+        // seconds forever; slack lets macOS fold it into a wake it was making
+        // anyway, which is most of the idle battery cost of a check this cheap.
+        tapHealthTimer?.tolerance = 2.0
     }
 
     private func startAccessibilityMonitoring() {

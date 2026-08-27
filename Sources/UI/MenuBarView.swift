@@ -4,13 +4,12 @@ import AppKit
 struct MenuBarView: View {
     @EnvironmentObject var preferencesStore: PreferencesStore
     @EnvironmentObject var engineBridge:  EngineBridge
+    @ObservedObject private var updater = UpdateChecker.shared
     @Environment(\.openWindow) var openWindow
 
     var body: some View {
         Button("Open Preferences…") {
-            NSApp.setActivationPolicy(.regular)
-            openWindow(id: "preferences")
-            NSApp.activate(ignoringOtherApps: true)
+            showPreferences()
         }
         .keyboardShortcut(",", modifiers: .command)
 
@@ -32,9 +31,7 @@ struct MenuBarView: View {
 
         Divider()
 
-        Button("Check for Updates…") {
-            NSWorkspace.shared.open(URL(string: "https://github.com/Vatsal057/Glide/releases/latest")!)
-        }
+        updateItem
 
         Text("Glide \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
             .foregroundStyle(.secondary)
@@ -45,5 +42,40 @@ struct MenuBarView: View {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q", modifiers: .command)
+    }
+
+    /// Updates are downloaded and installed inside the app, so every path here
+    /// leads to the General tab rather than out to the browser.
+    @ViewBuilder
+    private var updateItem: some View {
+        switch updater.state {
+        case .available(let update):
+            Button("Install Update \(update.tag)…") {
+                showPreferences(tab: .general)
+                updater.downloadAndInstall(update)
+            }
+
+        case .installed:
+            Button("Relaunch to Finish Update") {
+                updater.relaunch()
+            }
+
+        case .downloading, .installing:
+            Text("Updating Glide…")
+                .foregroundStyle(.secondary)
+
+        case .idle, .checking, .upToDate, .failed, .manualInstall:
+            Button("Check for Updates…") {
+                showPreferences(tab: .general)
+                updater.check()
+            }
+        }
+    }
+
+    private func showPreferences(tab: PrefsTab? = nil) {
+        if let tab { PreferencesNavigator.shared.tab = tab }
+        NSApp.setActivationPolicy(.regular)
+        openWindow(id: "preferences")
+        NSApp.activate(ignoringOtherApps: true)
     }
 }

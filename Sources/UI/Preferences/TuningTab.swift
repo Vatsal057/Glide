@@ -91,7 +91,7 @@ struct TuningTab: View {
                     )
                 }
 
-                TuningSection(title: "Trackpad Edges", icon: "rectangle.inset.filled") {
+                TuningSection(title: "Trackpad Regions", icon: "rectangle.inset.filled") {
                     Toggle("Ignore touches that start near the edges", isOn: tuningBinding(\.edgeMarginEnabled))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -104,16 +104,37 @@ struct TuningTab: View {
                             leftLabel: "Sliver", rightLabel: "Wide",
                             value: edgeSizeBinding
                         )
-                        TrackpadPreview(
-                            marginLeft:   Double(store.tuning.edgeMargin.left),
-                            marginRight:  Double(store.tuning.edgeMargin.right),
-                            marginTop:    Double(store.tuning.edgeMargin.top),
-                            marginBottom: Double(store.tuning.edgeMargin.bottom)
-                        )
-                        .frame(height: 170)
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 8)
                     }
+
+                    Divider().padding(.horizontal, 12).padding(.vertical, 4)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Force-Click Zones")
+                            .font(.body.weight(.medium))
+                        Text("Define the size of the corner/edge zones for zoned force-clicks.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+
+                    marginSlider(label: "Left Zone",   keyPath: \.forceClickMargin.left, range: 15...45, hint: "Left force-click zone reach.")
+                    marginSlider(label: "Right Zone",  keyPath: \.forceClickMargin.right, range: 15...45, hint: "Right force-click zone reach.")
+                    marginSlider(label: "Top Zone",    keyPath: \.forceClickMargin.top, range: 15...45, hint: "Top force-click zone reach.")
+                    marginSlider(label: "Bottom Zone", keyPath: \.forceClickMargin.bottom, range: 15...45, hint: "Bottom force-click zone reach.")
+
+                    TrackpadPreview(
+                        edgeLeft:   store.tuning.edgeMarginEnabled ? Double(store.tuning.edgeMargin.left) : 0,
+                        edgeRight:  store.tuning.edgeMarginEnabled ? Double(store.tuning.edgeMargin.right) : 0,
+                        edgeTop:    store.tuning.edgeMarginEnabled ? Double(store.tuning.edgeMargin.top) : 0,
+                        edgeBottom: store.tuning.edgeMarginEnabled ? Double(store.tuning.edgeMargin.bottom) : 0,
+                        forceLeft:  Double(store.tuning.forceClickMargin.left),
+                        forceRight: Double(store.tuning.forceClickMargin.right),
+                        forceTop:   Double(store.tuning.forceClickMargin.top),
+                        forceBottom: Double(store.tuning.forceClickMargin.bottom)
+                    )
+                    .frame(height: 170)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
                 }
 
                 advancedSection
@@ -350,9 +371,7 @@ struct TuningTab: View {
                     SliderRow(label: "Tap & Hold Duration", value: tuningBinding(\.tapHoldDuration),
                               range: 0.3...3.0, format: "%.2fs",
                               hint: "How long fingers must rest motionless to fire a Tap & Hold.")
-                    SliderRow(label: "Force-Click Corner Size", value: tuningBinding(\.forceClickCornerMargin),
-                              range: 0.15...0.45, format: "%.2f",
-                              hint: "How far each corner reaches for a zoned force-click. Larger = easier to hit.")
+
                     SliderRow(label: "Continuous Step", value: tuningBinding(\.continuousStepThreshold),
                               range: 0.005...0.08, format: "%.3f",
                               hint: "Distance per repeat of a continuous action.")
@@ -376,7 +395,7 @@ struct TuningTab: View {
 
     /// Margin stored as fraction 0.0–0.20, slider displays 0–20 %.
     @ViewBuilder
-    private func marginSlider(label: String, keyPath: WritableKeyPath<GestureTuning, Float>) -> some View {
+    private func marginSlider(label: String, keyPath: WritableKeyPath<GestureTuning, Float>, range: ClosedRange<Double> = 0...20, hint: String = "Ignore touches starting in this edge zone.") -> some View {
         let percentBinding = Binding<Double>(
             get: { Double(store.tuning[keyPath: keyPath]) * 100 },
             set: { newValue in store.updateTuning { $0[keyPath: keyPath] = Float(newValue / 100) } }
@@ -384,9 +403,9 @@ struct TuningTab: View {
         SliderRow(
             label: label,
             value: percentBinding,
-            range: 0...20,
+            range: range,
             format: "%.0f%%",
-            hint: "Ignore touches starting in this edge zone."
+            hint: hint
         )
     }
 }
@@ -639,20 +658,25 @@ struct AngleToleranceCompass: View {
 // MARK: - Trackpad Preview
 
 struct TrackpadPreview: View {
-    /// All values are fractions in 0.0–0.20 (same as EdgeMargin storage).
-    let marginLeft, marginRight, marginTop, marginBottom: Double
+    let edgeLeft, edgeRight, edgeTop, edgeBottom: Double
+    let forceLeft, forceRight, forceTop, forceBottom: Double
 
     @State private var dotPosition: CGPoint? = nil
-    @State private var isHovering = false
 
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let l = w * marginLeft
-            let r = w * marginRight
-            let t = h * marginTop
-            let b = h * marginBottom
+            
+            let el = w * edgeLeft
+            let er = w * edgeRight
+            let et = h * edgeTop
+            let eb = h * edgeBottom
+
+            let fl = w * forceLeft
+            let fr = w * forceRight
+            let ft = h * forceTop
+            let fb = h * forceBottom
 
             ZStack {
                 // Trackpad body — mimics a real glass trackpad
@@ -667,74 +691,84 @@ struct TrackpadPreview: View {
                     )
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.secondary.opacity(0.35), lineWidth: 1))
 
-                // Left margin zone
-                if l > 0 {
+                // Force Click margin zones
+                if fl > 0 {
                     Rectangle()
-                        .fill(Color.orange.opacity(0.18))
-                        .frame(width: l)
+                        .fill(Color.blue.opacity(0.12))
+                        .frame(width: fl)
                         .frame(maxHeight: .infinity)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .overlay(
-                            Rectangle()
-                                .fill(Color.orange.opacity(0.6))
-                                .frame(width: 1)
-                                .frame(maxHeight: .infinity)
-                            , alignment: .trailing
-                        )
+                        .overlay(Rectangle().fill(Color.blue.opacity(0.4)).frame(width: 1).frame(maxHeight: .infinity), alignment: .trailing)
                 }
-                // Right margin zone
-                if r > 0 {
+                if fr > 0 {
                     Rectangle()
-                        .fill(Color.orange.opacity(0.18))
-                        .frame(width: r)
+                        .fill(Color.blue.opacity(0.12))
+                        .frame(width: fr)
                         .frame(maxHeight: .infinity)
                         .frame(maxWidth: .infinity, alignment: .trailing)
-                        .overlay(
-                            Rectangle()
-                                .fill(Color.orange.opacity(0.6))
-                                .frame(width: 1)
-                                .frame(maxHeight: .infinity)
-                            , alignment: .leading
-                        )
+                        .overlay(Rectangle().fill(Color.blue.opacity(0.4)).frame(width: 1).frame(maxHeight: .infinity), alignment: .leading)
                 }
-                // Top margin zone
-                if t > 0 {
+                if ft > 0 {
                     Rectangle()
-                        .fill(Color.orange.opacity(0.18))
-                        .frame(height: t)
+                        .fill(Color.blue.opacity(0.12))
+                        .frame(height: ft)
                         .frame(maxWidth: .infinity)
                         .frame(maxHeight: .infinity, alignment: .top)
-                        .overlay(
-                            Rectangle()
-                                .fill(Color.orange.opacity(0.6))
-                                .frame(height: 1)
-                                .frame(maxWidth: .infinity)
-                            , alignment: .bottom
-                        )
+                        .overlay(Rectangle().fill(Color.blue.opacity(0.4)).frame(height: 1).frame(maxWidth: .infinity), alignment: .bottom)
                 }
-                // Bottom margin zone
-                if b > 0 {
+                if fb > 0 {
                     Rectangle()
-                        .fill(Color.orange.opacity(0.18))
-                        .frame(height: b)
+                        .fill(Color.blue.opacity(0.12))
+                        .frame(height: fb)
                         .frame(maxWidth: .infinity)
                         .frame(maxHeight: .infinity, alignment: .bottom)
-                        .overlay(
-                            Rectangle()
-                                .fill(Color.orange.opacity(0.6))
-                                .frame(height: 1)
-                                .frame(maxWidth: .infinity)
-                            , alignment: .top
-                        )
+                        .overlay(Rectangle().fill(Color.blue.opacity(0.4)).frame(height: 1).frame(maxWidth: .infinity), alignment: .top)
+                }
+
+                // Edge margin zones (drawn over force click zones)
+                if el > 0 {
+                    Rectangle()
+                        .fill(Color.orange.opacity(0.18))
+                        .frame(width: el)
+                        .frame(maxHeight: .infinity)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .overlay(Rectangle().fill(Color.orange.opacity(0.6)).frame(width: 1).frame(maxHeight: .infinity), alignment: .trailing)
+                }
+                if er > 0 {
+                    Rectangle()
+                        .fill(Color.orange.opacity(0.18))
+                        .frame(width: er)
+                        .frame(maxHeight: .infinity)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .overlay(Rectangle().fill(Color.orange.opacity(0.6)).frame(width: 1).frame(maxHeight: .infinity), alignment: .leading)
+                }
+                if et > 0 {
+                    Rectangle()
+                        .fill(Color.orange.opacity(0.18))
+                        .frame(height: et)
+                        .frame(maxWidth: .infinity)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .overlay(Rectangle().fill(Color.orange.opacity(0.6)).frame(height: 1).frame(maxWidth: .infinity), alignment: .bottom)
+                }
+                if eb > 0 {
+                    Rectangle()
+                        .fill(Color.orange.opacity(0.18))
+                        .frame(height: eb)
+                        .frame(maxWidth: .infinity)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .overlay(Rectangle().fill(Color.orange.opacity(0.6)).frame(height: 1).frame(maxWidth: .infinity), alignment: .top)
                 }
 
                 // Hover dot
                 if let pos = dotPosition {
-                    let inMargin = pos.x < l || pos.x > w - r
-                                || pos.y < t || pos.y > h - b
+                    let inEdgeMargin = pos.x < el || pos.x > w - er || pos.y < et || pos.y > h - eb
+                    let inForceZone = pos.x < fl || pos.x > w - fr || pos.y < ft || pos.y > h - fb
+                    
+                    let dotColor = inEdgeMargin ? Color.orange : (inForceZone ? Color.blue : Color.green)
+                    
                     Circle()
-                        .fill(inMargin ? Color.orange : Color.green)
-                        .shadow(color: (inMargin ? Color.orange : Color.green).opacity(0.5), radius: 4)
+                        .fill(dotColor)
+                        .shadow(color: dotColor.opacity(0.5), radius: 4)
                         .frame(width: 12, height: 12)
                         .offset(x: pos.x - w / 2, y: pos.y - h / 2)
                         .animation(.easeOut(duration: 0.05), value: pos)
@@ -742,15 +776,15 @@ struct TrackpadPreview: View {
 
                 // Margin labels
                 Group {
-                    if l > 24 { Text(String(format: "%.0f%%", marginLeft * 100))
+                    if el > 24 { Text(String(format: "%.0f%%", edgeLeft * 100))
                         .font(.system(size: 9)).foregroundStyle(.orange.opacity(0.8))
                         .frame(maxHeight: .infinity, alignment: .center)
-                        .frame(width: l)
+                        .frame(width: el)
                         .frame(maxWidth: .infinity, alignment: .leading) }
-                    if r > 24 { Text(String(format: "%.0f%%", marginRight * 100))
+                    if er > 24 { Text(String(format: "%.0f%%", edgeRight * 100))
                         .font(.system(size: 9)).foregroundStyle(.orange.opacity(0.8))
                         .frame(maxHeight: .infinity, alignment: .center)
-                        .frame(width: r)
+                        .frame(width: er)
                         .frame(maxWidth: .infinity, alignment: .trailing) }
                 }
 

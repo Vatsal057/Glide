@@ -6,10 +6,12 @@ final class AppSwitcherState {
 
     private var mruAppOrder: [pid_t] = []
     private var mruObserver: Any?
+    private var launchObserver: Any?
 
     private init() {}
 
     func startMRUTracking() {
+        stopMRUTracking()
         if let front = NSWorkspace.shared.frontmostApplication {
             mruAppOrder = [front.processIdentifier]
         }
@@ -23,18 +25,29 @@ final class AppSwitcherState {
             object: nil, queue: .main
         ) { [weak self] notification in
             guard let self = self,
-                  let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+                  let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.activationPolicy == .regular else { return }
             let pid = app.processIdentifier
             self.mruAppOrder.removeAll { $0 == pid }
             self.mruAppOrder.insert(pid, at: 0)
         }
+        WindowTargeting.shared.warmAccessibilityConnections()
+        launchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil, queue: .main
+        ) { notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.activationPolicy == .regular else { return }
+            WindowTargeting.shared.warmAccessibilityConnection(for: app.processIdentifier)
+        }
     }
 
     func stopMRUTracking() {
-        if let observer = mruObserver {
+        for observer in [mruObserver, launchObserver].compactMap({ $0 }) {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
-            mruObserver = nil
         }
+        mruObserver = nil
+        launchObserver = nil
     }
 
     func getOrderedApps() -> [NSRunningApplication] {
@@ -43,10 +56,12 @@ final class AppSwitcherState {
         // diverges from it, so MRU is not optional here. Stable tie-break keeps
         // never-activated apps in a deterministic order.
         let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
-        let mru = self.mruAppOrder
+        let runningPIDs = Set(apps.map(\.processIdentifier))
+        mruAppOrder.removeAll { !runningPIDs.contains($0) }
+        let ranks = Dictionary(uniqueKeysWithValues: mruAppOrder.enumerated().map { ($0.element, $0.offset) })
         return apps.enumerated().sorted { a, b in
-            let ai = mru.firstIndex(of: a.element.processIdentifier) ?? Int.max
-            let bi = mru.firstIndex(of: b.element.processIdentifier) ?? Int.max
+            let ai = ranks[a.element.processIdentifier] ?? Int.max
+            let bi = ranks[b.element.processIdentifier] ?? Int.max
             return ai == bi ? a.offset < b.offset : ai < bi
         }.map(\.element)
     }

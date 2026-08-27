@@ -33,9 +33,26 @@ struct GlideConfig {
 
     struct AppSwitcher {
         var enabled: Bool = true
+        var style: String = "newer"
         var fingers: Int = 3
         var skipWindowlessFinder: Bool = true
         var restoreMinimizedOnCommit: Bool = true
+    }
+
+    struct TrackPoint {
+        var enabled: Bool = false
+        var zone: String = "bottom_right"
+        var zoneSize: Float = 0.16
+        var activationDelay: Double = 0.15
+        var activationMovement: Float = 0.012
+        var deadZone: Float = 0.005
+        var pushRange: Float = 0.055
+        var maxSpeed: Float = 1500
+        var acceleration: Float = 2.2
+        var hapticFeedback: Bool = true
+        var scrollEnabled: Bool = true
+        var scrollSpeed: Float = 1200
+        var invertScroll: Bool = false
     }
 
     struct Tuning {
@@ -50,6 +67,10 @@ struct GlideConfig {
         var swipeAngleTolerance: Float = 45.0
         var tapHoldDuration: Double = 0.5
         var forceClickCornerMargin: Float = 0.35
+        var forceClickMarginLeft: Float = 0.35
+        var forceClickMarginRight: Float = 0.35
+        var forceClickMarginTop: Float = 0.35
+        var forceClickMarginBottom: Float = 0.35
         var edgeMarginEnabled: Bool = true
         var edgeMarginLeft: Float = 0.05
         var edgeMarginRight: Float = 0.05
@@ -104,6 +125,7 @@ struct GlideConfig {
     var speed: Speed = Speed()
     var preferences: Preferences = Preferences()
     var appSwitcher: AppSwitcher = AppSwitcher()
+    var trackPoint: TrackPoint = TrackPoint()
     var tuning: Tuning = Tuning()
     /// haptic event rawValue → pattern rawValue (see HapticEvent / HapticPattern)
     var haptics: [String: String] = [:]
@@ -136,9 +158,24 @@ extension GlideConfig {
         cfg.preferences.autoDisableNativeGestures = s.autoDisableNativeGestures
 
         cfg.appSwitcher.enabled = s.appSwitcher.enabled
+        cfg.appSwitcher.style   = s.appSwitcher.style.rawValue
         cfg.appSwitcher.fingers = s.appSwitcher.fingers
         cfg.appSwitcher.skipWindowlessFinder = s.appSwitcher.skipWindowlessFinder
         cfg.appSwitcher.restoreMinimizedOnCommit = s.appSwitcher.restoreMinimizedOnCommit
+
+        cfg.trackPoint.enabled            = s.trackPoint.enabled
+        cfg.trackPoint.zone               = s.trackPoint.zone.yamlValue ?? "bottom_right"
+        cfg.trackPoint.zoneSize           = s.trackPoint.zoneSize
+        cfg.trackPoint.activationDelay    = s.trackPoint.activationDelay
+        cfg.trackPoint.activationMovement = s.trackPoint.activationMovement
+        cfg.trackPoint.deadZone           = s.trackPoint.deadZone
+        cfg.trackPoint.pushRange          = s.trackPoint.pushRange
+        cfg.trackPoint.maxSpeed           = s.trackPoint.maxSpeed
+        cfg.trackPoint.acceleration       = s.trackPoint.acceleration
+        cfg.trackPoint.hapticFeedback     = s.trackPoint.hapticFeedback
+        cfg.trackPoint.scrollEnabled      = s.trackPoint.scrollEnabled
+        cfg.trackPoint.scrollSpeed        = s.trackPoint.scrollSpeed
+        cfg.trackPoint.invertScroll       = s.trackPoint.invertScroll
 
         cfg.tuning.appSwitcherStepThreshold  = t.appSwitcherStepThreshold
         cfg.tuning.appSwitcherDebounce       = t.appSwitcherDebounce
@@ -150,7 +187,10 @@ extension GlideConfig {
         cfg.tuning.swipeCoherenceThreshold   = t.swipeCoherenceThreshold
         cfg.tuning.swipeAngleTolerance       = t.swipeAngleTolerance
         cfg.tuning.tapHoldDuration           = t.tapHoldDuration
-        cfg.tuning.forceClickCornerMargin    = t.forceClickCornerMargin
+        cfg.tuning.forceClickMarginLeft      = t.forceClickMargin.left
+        cfg.tuning.forceClickMarginRight     = t.forceClickMargin.right
+        cfg.tuning.forceClickMarginTop       = t.forceClickMargin.top
+        cfg.tuning.forceClickMarginBottom    = t.forceClickMargin.bottom
         cfg.tuning.edgeMarginEnabled         = t.edgeMarginEnabled
         cfg.tuning.edgeMarginLeft            = t.edgeMargin.left
         cfg.tuning.edgeMarginRight           = t.edgeMargin.right
@@ -219,10 +259,29 @@ extension GlideConfig {
     func toAppSwitcher() -> AppSwitcherSettings {
         var s = AppSwitcherSettings()
         s.enabled = appSwitcher.enabled
+        s.style = AppSwitcherStyle(rawValue: appSwitcher.style) ?? .newer
         s.fingers = appSwitcher.fingers
         s.skipWindowlessFinder = appSwitcher.skipWindowlessFinder
         s.restoreMinimizedOnCommit = appSwitcher.restoreMinimizedOnCommit
         return AppSwitcherSettings.normalized(s)
+    }
+
+    func toTrackPoint() -> TrackPointSettings {
+        var p = TrackPointSettings()
+        p.enabled            = trackPoint.enabled
+        p.zone               = TrackpadZone(yamlValue: trackPoint.zone) ?? .bottomRight
+        p.zoneSize           = trackPoint.zoneSize
+        p.activationDelay    = trackPoint.activationDelay
+        p.activationMovement = trackPoint.activationMovement
+        p.deadZone           = trackPoint.deadZone
+        p.pushRange          = trackPoint.pushRange
+        p.maxSpeed           = trackPoint.maxSpeed
+        p.acceleration       = trackPoint.acceleration
+        p.hapticFeedback     = trackPoint.hapticFeedback
+        p.scrollEnabled      = trackPoint.scrollEnabled
+        p.scrollSpeed        = trackPoint.scrollSpeed
+        p.invertScroll       = trackPoint.invertScroll
+        return TrackPointSettings.normalized(p)
     }
 
     func toTuning() -> GestureTuning {
@@ -241,7 +300,11 @@ extension GlideConfig {
         t.swipeCoherenceThreshold   = tuning.swipeCoherenceThreshold
         t.swipeAngleTolerance       = tuning.swipeAngleTolerance
         t.tapHoldDuration           = tuning.tapHoldDuration
-        t.forceClickCornerMargin    = tuning.forceClickCornerMargin
+        // If a new field was read, use it. Otherwise fall back to the legacy forceClickCornerMargin, which defaults to 0.35.
+        t.forceClickMargin.left     = tuning.forceClickMarginLeft != 0.35 ? tuning.forceClickMarginLeft : tuning.forceClickCornerMargin
+        t.forceClickMargin.right    = tuning.forceClickMarginRight != 0.35 ? tuning.forceClickMarginRight : tuning.forceClickCornerMargin
+        t.forceClickMargin.top      = tuning.forceClickMarginTop != 0.35 ? tuning.forceClickMarginTop : tuning.forceClickCornerMargin
+        t.forceClickMargin.bottom   = tuning.forceClickMarginBottom != 0.35 ? tuning.forceClickMarginBottom : tuning.forceClickCornerMargin
         t.edgeMarginEnabled         = tuning.edgeMarginEnabled
         t.edgeMargin.left           = tuning.edgeMarginLeft
         t.edgeMargin.right          = tuning.edgeMarginRight
@@ -383,9 +446,27 @@ enum GlideConfigSerializer {
             "  # ── App Switcher (hold + swipe to browse, release to confirm) ──",
             "  app_switcher:",
             "    enabled: \(config.appSwitcher.enabled ? "true" : "false")",
+            "    style: \(config.appSwitcher.style)",
             "    fingers: \(config.appSwitcher.fingers)",
             "    skip_windowless_finder: \(config.appSwitcher.skipWindowlessFinder ? "true" : "false")",
             "    restore_minimized_on_commit: \(config.appSwitcher.restoreMinimizedOnCommit ? "true" : "false")",
+            "",
+            "  # ── TrackPoint (corner of the pad as a pointing stick) ──",
+            "  trackpoint:",
+            "    enabled: \(config.trackPoint.enabled ? "true" : "false")",
+            "    zone: \(config.trackPoint.zone)",
+            "    zone_size: \(fmt(config.trackPoint.zoneSize))",
+            "    activation_delay: \(String(format: "%.2f", config.trackPoint.activationDelay))",
+            "    activation_movement: \(fmt(config.trackPoint.activationMovement))",
+            "    dead_zone: \(fmt(config.trackPoint.deadZone))",
+            "    push_range: \(fmt(config.trackPoint.pushRange))",
+            "    max_speed: \(String(format: "%.0f", config.trackPoint.maxSpeed))",
+            "    acceleration: \(String(format: "%.2f", config.trackPoint.acceleration))",
+            "    haptic_feedback: \(config.trackPoint.hapticFeedback ? "true" : "false")",
+            "    # Rest a second finger anywhere on the pad to scroll with the stick.",
+            "    scroll_enabled: \(config.trackPoint.scrollEnabled ? "true" : "false")",
+            "    scroll_speed: \(String(format: "%.0f", config.trackPoint.scrollSpeed))",
+            "    invert_scroll: \(config.trackPoint.invertScroll ? "true" : "false")",
             "",
             "  # ── Tuning ─────────────────────────────────────────",
             "  tuning:",
@@ -399,7 +480,11 @@ enum GlideConfigSerializer {
             "    swipe_coherence_threshold: \(fmt(config.tuning.swipeCoherenceThreshold))",
             "    swipe_angle_tolerance: \(String(format: "%.1f", config.tuning.swipeAngleTolerance))",
             "    tap_hold_duration: \(String(format: "%.2f", config.tuning.tapHoldDuration))",
-            "    force_click_corner_margin: \(String(format: "%.2f", config.tuning.forceClickCornerMargin))",
+            "    force_click_margin:",
+            "      left: \(fmt(config.tuning.forceClickMarginLeft))",
+            "      right: \(fmt(config.tuning.forceClickMarginRight))",
+            "      top: \(fmt(config.tuning.forceClickMarginTop))",
+            "      bottom: \(fmt(config.tuning.forceClickMarginBottom))",
             "",
             "    edge_margin:",
             "      enabled: \(config.tuning.edgeMarginEnabled ? "true" : "false")",
@@ -576,6 +661,7 @@ enum GlideConfigParser {
             case "preferences":  i += 1; parsePreferences(lines, from: &i, parentIndent: indent, into: &cfg.preferences)
             case "haptics":     i += 1; parseHaptics(lines, from: &i, parentIndent: indent, into: &cfg.haptics)
             case "app_switcher": i += 1; parseAppSwitcher(lines, from: &i, parentIndent: indent, into: &cfg.appSwitcher)
+            case "trackpoint":   i += 1; parseTrackPoint(lines, from: &i, parentIndent: indent, into: &cfg.trackPoint)
             case "tuning":       i += 1; parseTuning(lines, from: &i, parentIndent: indent, into: &cfg.tuning)
             case "gestures":    i += 1; parseGestures(lines, from: &i, parentIndent: indent, into: &cfg.gestures)
             default:            i += 1
@@ -642,9 +728,37 @@ enum GlideConfigParser {
             if ind <= parentIndent { return }
             switch key {
             case "enabled": switcher.enabled = boolVal(val) ?? switcher.enabled
+            case "style": switcher.style = stringVal(val) ?? switcher.style
             case "fingers": switcher.fingers = intVal(val) ?? switcher.fingers
             case "skip_windowless_finder": switcher.skipWindowlessFinder = boolVal(val) ?? switcher.skipWindowlessFinder
             case "restore_minimized_on_commit": switcher.restoreMinimizedOnCommit = boolVal(val) ?? switcher.restoreMinimizedOnCommit
+            default: break
+            }
+            i += 1
+        }
+    }
+
+    private static func parseTrackPoint(_ lines: [String], from i: inout Int, parentIndent: Int, into point: inout GlideConfig.TrackPoint) {
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
+            switch key {
+            case "enabled":             point.enabled            = boolVal(val)   ?? point.enabled
+            case "zone":                point.zone               = stringVal(val) ?? point.zone
+            case "zone_size":           point.zoneSize           = floatVal(val)  ?? point.zoneSize
+            case "activation_delay":    point.activationDelay    = doubleVal(val) ?? point.activationDelay
+            case "activation_movement": point.activationMovement = floatVal(val)  ?? point.activationMovement
+            case "dead_zone":           point.deadZone           = floatVal(val)  ?? point.deadZone
+            case "push_range":          point.pushRange          = floatVal(val)  ?? point.pushRange
+            case "max_speed":           point.maxSpeed           = floatVal(val)  ?? point.maxSpeed
+            case "acceleration":        point.acceleration       = floatVal(val)  ?? point.acceleration
+            case "haptic_feedback":     point.hapticFeedback     = boolVal(val)   ?? point.hapticFeedback
+            case "scroll_enabled":      point.scrollEnabled      = boolVal(val)   ?? point.scrollEnabled
+            case "scroll_speed":        point.scrollSpeed        = floatVal(val)  ?? point.scrollSpeed
+            case "invert_scroll":       point.invertScroll       = boolVal(val)   ?? point.invertScroll
             default: break
             }
             i += 1
@@ -670,11 +784,34 @@ enum GlideConfigParser {
             case "swipe_angle_tolerance":        tuning.swipeAngleTolerance       = floatVal(val)  ?? tuning.swipeAngleTolerance
             case "tap_hold_duration":            tuning.tapHoldDuration           = doubleVal(val) ?? tuning.tapHoldDuration
             case "force_click_corner_margin":    tuning.forceClickCornerMargin    = floatVal(val)  ?? tuning.forceClickCornerMargin
+            case "force_click_margin":
+                let marginIndent = ind
+                i += 1
+                parseForceClickMargin(lines, from: &i, parentIndent: marginIndent, into: &tuning)
+                continue
             case "edge_margin":
                 let marginIndent = ind
                 i += 1
                 parseEdgeMargin(lines, from: &i, parentIndent: marginIndent, into: &tuning)
                 continue
+            default: break
+            }
+            i += 1
+        }
+    }
+
+    private static func parseForceClickMargin(_ lines: [String], from i: inout Int, parentIndent: Int, into tuning: inout GlideConfig.Tuning) {
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
+            switch key {
+            case "left":    tuning.forceClickMarginLeft    = floatVal(val) ?? tuning.forceClickMarginLeft
+            case "right":   tuning.forceClickMarginRight   = floatVal(val) ?? tuning.forceClickMarginRight
+            case "top":     tuning.forceClickMarginTop     = floatVal(val) ?? tuning.forceClickMarginTop
+            case "bottom":  tuning.forceClickMarginBottom  = floatVal(val) ?? tuning.forceClickMarginBottom
             default: break
             }
             i += 1

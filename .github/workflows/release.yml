@@ -28,14 +28,43 @@ jobs:
           ./build.sh --dmg
           mv build/Glide.dmg "build/Glide-${GITHUB_REF_NAME}.dmg"
 
+      # Glide's in-app updater downloads this DMG and verifies it against the
+      # checksum below before it will replace the running app. Keep the file
+      # name ending in `.sha256` — that's how the app finds it.
+      - name: Publish Checksum
+        working-directory: build
+        run: |
+          shasum -a 256 "Glide-${GITHUB_REF_NAME}.dmg" > "Glide-${GITHUB_REF_NAME}.dmg.sha256"
+          cat "Glide-${GITHUB_REF_NAME}.dmg.sha256"
+
+      - name: Verify Release Artifacts
+        working-directory: build
+        run: |
+          test -f "Glide-${GITHUB_REF_NAME}.dmg"
+          shasum -a 256 -c "Glide-${GITHUB_REF_NAME}.dmg.sha256"
+          # The updater refuses any image whose app fails signature
+          # verification, so catch that here rather than after publishing.
+          hdiutil attach "Glide-${GITHUB_REF_NAME}.dmg" -nobrowse -readonly -mountpoint /tmp/glide-verify
+          codesign --verify --deep --strict /tmp/glide-verify/Glide.app
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" /tmp/glide-verify/Glide.app/Contents/Info.plist
+          hdiutil detach /tmp/glide-verify
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/Glide-*.dmg
+          files: |
+            build/Glide-*.dmg
+            build/Glide-*.dmg.sha256
           name: Glide ${{ github.ref_name }}
           generate_release_notes: true
           body: |
-            ## Install
+            ## Already running Glide?
+
+            Open **Glide → Preferences → General** and click **Check for Updates**.
+            Glide downloads and installs this version itself, then relaunches —
+            no DMG dragging, and no Gatekeeper warning.
+
+            ## New install
 
             1. Download **Glide-${{ github.ref_name }}.dmg** below and open it.
             2. Drag **Glide** into the **Applications** folder.
@@ -46,3 +75,5 @@ jobs:
                ```
 
             4. Open Glide, then grant Accessibility access in **System Settings → Privacy & Security → Accessibility**.
+
+            `Glide-${{ github.ref_name }}.dmg.sha256` holds the checksum the in-app updater verifies against.
