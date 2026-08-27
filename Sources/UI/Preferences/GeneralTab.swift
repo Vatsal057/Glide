@@ -4,7 +4,7 @@ import ServiceManagement
 
 struct GeneralTab: View {
     @EnvironmentObject var store: PreferencesStore
-    @StateObject private var updater = UpdateChecker()
+    @ObservedObject private var updater = UpdateChecker.shared
 
     var body: some View {
         ScrollView {
@@ -50,7 +50,10 @@ struct GeneralTab: View {
             }
             .padding()
         }
-        .onAppear { store.reload() }
+        .onAppear {
+            store.reload()
+            updater.checkIfDue()
+        }
     }
 
     // MARK: - Accessibility Card
@@ -251,19 +254,61 @@ struct GeneralTab: View {
 
                 SquiggleDivider()
 
-                HStack(spacing: 10) {
-                    updateStatus
-                    Spacer()
-                    if case .available(_, let url) = updater.state {
-                        Button("Download") { NSWorkspace.shared.open(url) }
-                            .buttonStyle(.borderedProminent)
-                    } else {
-                        Button("Check for Updates") { updater.check() }
-                            .disabled(updater.state == .checking)
-                    }
-                }
+                updateRow
             }
             .padding(8)
+        }
+    }
+
+    // MARK: - Updates
+
+    private var updateRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                updateStatus
+                Spacer()
+                updateActions
+            }
+
+            if case .downloading(let fraction) = updater.state {
+                // Indeterminate when GitHub didn't send a content length.
+                if let fraction {
+                    ProgressView(value: fraction)
+                        .progressViewStyle(.linear)
+                } else {
+                    ProgressView()
+                        .progressViewStyle(.linear)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var updateActions: some View {
+        switch updater.state {
+        case .available(let update):
+            HStack(spacing: 8) {
+                Button("Release Notes") { NSWorkspace.shared.open(update.pageURL) }
+                Button(update.canSelfInstall ? "Download & Install" : "Download") {
+                    updater.downloadAndInstall(update)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+        case .installed:
+            Button("Relaunch Now") { updater.relaunch() }
+                .buttonStyle(.borderedProminent)
+
+        case .manualInstall(let dmg, _):
+            Button("Open Installer") { updater.revealDownload(dmg) }
+                .buttonStyle(.borderedProminent)
+
+        case .downloading, .installing:
+            EmptyView()
+
+        case .idle, .checking, .upToDate, .failed:
+            Button("Check for Updates") { updater.check() }
+                .disabled(updater.state.isBusy)
         }
     }
 
@@ -272,25 +317,58 @@ struct GeneralTab: View {
         switch updater.state {
         case .idle:
             EmptyView()
+
         case .checking:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text("Checking…").font(.callout).foregroundStyle(.secondary)
             }
+
         case .upToDate:
             Label("You're on the latest version", systemImage: "checkmark.circle.fill")
                 .font(.callout)
                 .foregroundStyle(.green)
-        case .available(let version, _):
-            Label("Update available — \(version)", systemImage: "arrow.down.circle.fill")
+
+        case .available(let update):
+            Label("Update available — \(update.tag)", systemImage: "arrow.down.circle.fill")
                 .font(.callout.weight(.medium))
                 .foregroundStyle(.blue)
                 .materialPill()
                 .shimmer()
-        case .failed:
-            Label("Couldn't check right now", systemImage: "exclamationmark.triangle")
+
+        case .downloading(let fraction):
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(fraction.map { "Downloading… \(Int($0 * 100))%" } ?? "Downloading…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+
+        case .installing:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Installing…").font(.callout).foregroundStyle(.secondary)
+            }
+
+        case .installed(let version):
+            Label("Updated to v\(version) — relaunch to finish", systemImage: "checkmark.circle.fill")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.green)
+
+        case .manualInstall(_, let reason):
+            Label(reason, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(.orange)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

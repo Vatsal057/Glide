@@ -25,14 +25,29 @@ enum PrefsTab: String, CaseIterable, Identifiable {
     }
 }
 
+/// Lets other parts of the app decide which tab the Preferences window opens on.
+///
+/// Held outside the view so callers can set it *before* the window exists —
+/// posting a notification at a window that hasn't been created yet would land
+/// on nothing.
+@MainActor
+final class PreferencesNavigator: ObservableObject {
+    static let shared = PreferencesNavigator()
+    private init() {}
+
+    @Published var tab: PrefsTab = .gestures
+}
+
 struct PreferencesWindow: View {
-    @State private var selectedTab: PrefsTab = .gestures
+    @ObservedObject private var navigator = PreferencesNavigator.shared
     @EnvironmentObject var preferencesStore: PreferencesStore
     @EnvironmentObject var engineBridge: EngineBridge
 
+    private var selectedTab: PrefsTab { navigator.tab }
+
     var body: some View {
         NavigationSplitView {
-            List(PrefsTab.allCases, selection: $selectedTab) { tab in
+            List(PrefsTab.allCases, selection: $navigator.tab) { tab in
                 Label(tab.rawValue, systemImage: tab.systemImage)
                     .tag(tab)
             }

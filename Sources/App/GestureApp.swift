@@ -11,6 +11,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Re-assert on launch — System Settings may have re-enabled native gestures.
         SystemGestureManager.reconcileIfAutoEnabled()
+
+        // One quiet check shortly after launch, so an available update shows up
+        // in the menu bar instead of waiting to be hunted for. Delayed to keep
+        // it off the critical path of getting gestures running.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            UpdateChecker.shared.checkIfDue()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
