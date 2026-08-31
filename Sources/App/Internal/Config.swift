@@ -1155,7 +1155,7 @@ final class GlideConfigStore {
             AppLogger.debug("[Config] Saved → \(url.lastPathComponent)")
             return true
         } catch {
-            print("[Config] Save failed: \(error.localizedDescription)")
+            AppLogger.debug("[Config] Save failed: \(error.localizedDescription)")
             return false
         }
     }
@@ -1170,7 +1170,7 @@ final class GlideConfigStore {
         }
         guard let raw = try? String(contentsOf: configURL, encoding: .utf8),
               let cfg = GlideConfigParser.parse(yaml: raw) else {
-            print("[Config] Failed to parse config")
+            AppLogger.debug("[Config] Failed to parse config")
             return false
         }
         Settings.shared.apply(cfg)
@@ -1190,17 +1190,83 @@ final class GlideConfigStore {
             try FileManager.default.copyItem(at: configURL, to: destination)
             return true
         } catch {
-            print("[Config] Export failed: \(error.localizedDescription)")
+            AppLogger.debug("[Config] Export failed: \(error.localizedDescription)")
             return false
         }
     }
 
+    /// A gesture in an incoming config that would run code, not just drive the UI.
+    struct ExecutableAction {
+        /// How the gesture is described to the user, e.g. "3-finger swipe up".
+        let gesture: String
+        /// "Shell Command", "AppleScript", "Shortcut".
+        let kind: String
+        /// The command, script, or shortcut name that would run.
+        let payload: String
+    }
+
+    /// Parses `source` without applying it, so a caller can show what it does
+    /// before committing.
+    func inspect(_ source: URL) -> GlideConfig? {
+        guard let raw = try? String(contentsOf: source, encoding: .utf8) else { return nil }
+        return GlideConfigParser.parse(yaml: raw)
+    }
+
+    /// Every gesture in `config` bound to an action that executes code.
+    ///
+    /// Configs are meant to be shared, and three of the available actions run
+    /// arbitrary code the moment the gesture is performed — a shell command, an
+    /// AppleScript, or a named Shortcut. Importing one is therefore equivalent
+    /// to running a script, and the user deserves to be told which.
+    static func executableActions(in config: GlideConfig) -> [ExecutableAction] {
+        let scripted: Set<String> = [
+            GestureAction.runShellCommand.rawValue,
+            GestureAction.runAppleScript.rawValue,
+            GestureAction.runShortcut.rawValue,
+        ]
+
+        return config.gestures.compactMap { gesture -> ExecutableAction? in
+            // Continuous sub-actions can't be scripted, so only the primary
+            // action and the reciprocal override need checking.
+            let actions = [gesture.action, gesture.reciprocalAction].compactMap { $0 }
+            guard let action = actions.first(where: { scripted.contains($0) }) else { return nil }
+
+            let kind: String
+            let payload: String
+            switch action {
+            case GestureAction.runShellCommand.rawValue:
+                kind = "Shell command"
+                payload = gesture.script ?? "(empty)"
+            case GestureAction.runAppleScript.rawValue:
+                kind = "AppleScript"
+                payload = gesture.script ?? "(empty)"
+            default:
+                kind = "Shortcut"
+                payload = gesture.shortcutName ?? "(unnamed)"
+            }
+
+            let fingers = "\(gesture.fingers)-finger"
+            let motion = gesture.direction.map { "\(gesture.type) \($0)" } ?? gesture.type
+            return ExecutableAction(
+                gesture: gesture.name ?? "\(fingers) \(motion)",
+                kind: kind,
+                payload: payload
+            )
+        }
+    }
+
+    /// Applies an already-parsed config. Used by the import flow so the file is
+    /// only read and parsed once, with the confirmation step in between.
     @discardableResult
-    func importFrom(_ source: URL) -> Bool {
-        guard let raw = try? String(contentsOf: source, encoding: .utf8),
-              let cfg = GlideConfigParser.parse(yaml: raw) else { return false }
-        Settings.shared.apply(cfg)
+    func apply(_ config: GlideConfig) -> Bool {
+        Settings.shared.apply(config)
         save()
         return true
+    }
+
+    @discardableResult
+    func importFrom(_ source: URL) -> Bool {
+        guard let cfg = inspect(source) else { return false }
+        return apply(cfg)
     }
 }

@@ -293,7 +293,19 @@ bool GLDTStart(GLDTFrameCallback callback, void *context) {
     }
     pthread_mutex_unlock(&state_lock);
 
-    void *handle = dlopen(framework_path, RTLD_LAZY | RTLD_LOCAL);
+    // GLDTStop keeps the handle open on purpose (see the note there), so reuse
+    // it rather than stacking a dlopen refcount on every sleep/wake cycle.
+    pthread_mutex_lock(&state_lock);
+    void *handle = framework_handle;
+    pthread_mutex_unlock(&state_lock);
+
+    // Only a handle opened by *this* call may be closed on the failure paths
+    // below; a reused one is still referenced by framework_handle.
+    bool opened_here = false;
+    if (handle == NULL) {
+        handle = dlopen(framework_path, RTLD_LAZY | RTLD_LOCAL);
+        opened_here = handle != NULL;
+    }
     if (handle == NULL) {
         pthread_mutex_lock(&state_lock);
         last_start_status = GLDTStatusFrameworkUnavailable;
@@ -317,7 +329,7 @@ bool GLDTStart(GLDTFrameCallback callback, void *context) {
     resolve_symbol(handle, "MTDeviceRelease", (void **)&resolved_release);
 
     if (!resolved) {
-        dlclose(handle);
+        if (opened_here) dlclose(handle);
         pthread_mutex_lock(&state_lock);
         last_start_status = GLDTStatusRequiredSymbolsUnavailable;
         pthread_mutex_unlock(&state_lock);
@@ -326,7 +338,7 @@ bool GLDTStart(GLDTFrameCallback callback, void *context) {
 
     MTDeviceRef created_device = create_device();
     if (created_device == NULL) {
-        dlclose(handle);
+        if (opened_here) dlclose(handle);
         pthread_mutex_lock(&state_lock);
         last_start_status = GLDTStatusDefaultDeviceUnavailable;
         pthread_mutex_unlock(&state_lock);
@@ -355,7 +367,6 @@ bool GLDTStart(GLDTFrameCallback callback, void *context) {
 void GLDTStop(void) {
     pthread_mutex_lock(&state_lock);
     MTDeviceRef current_device = device;
-    void *current_handle = framework_handle;
     MTUnregisterContactFrameCallbackFunction current_unregister = unregister_callback;
     MTDeviceStopFunction current_stop = stop_device;
     MTDeviceReleaseFunction current_release = release_device;
@@ -366,7 +377,6 @@ void GLDTStop(void) {
     last_forwarded_timestamp = 0;
     last_forwarded_active_count = 0;
     device = NULL;
-    framework_handle = NULL;
     unregister_callback = NULL;
     stop_device = NULL;
     release_device = NULL;
@@ -383,7 +393,12 @@ void GLDTStop(void) {
             current_release(current_device);
         }
     }
-    if (current_handle != NULL) {
-        dlclose(current_handle);
-    }
+
+    // `framework_handle` is deliberately kept, and dlclose is deliberately not
+    // called. MTUnregisterContactFrameCallback gives no guarantee that an
+    // in-flight contact_frame_callback on the multitouch thread has returned, so
+    // unmapping the framework here could pull the code out from under a running
+    // callback. Glide starts and stops the bridge on every sleep/wake cycle, so
+    // that window is hit routinely. A retained handle costs one mapping for the
+    // life of the process; GLDTStart reuses it on the next start.
 }

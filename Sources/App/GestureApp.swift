@@ -169,14 +169,37 @@ final class EngineBridge: ObservableObject {
             }
         }
 
-        accessibilityPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        // Poll briskly while the user is plausibly in System Settings granting
+        // access, then back off. Without this the timer kept firing twice a
+        // second for the entire life of the process on any Mac where
+        // Accessibility is never granted — the `didBecomeActive` observer above
+        // already catches the common "grant it, then come back" path.
+        accessibilityPollStart = Date()
+        scheduleAccessibilityPoll(interval: 0.5)
+    }
+
+    private var accessibilityPollStart: Date?
+    /// How long to poll at the fast interval before easing off.
+    private static let accessibilityFastPollWindow: TimeInterval = 60
+
+    private func scheduleAccessibilityPoll(interval: TimeInterval) {
+        accessibilityPollTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.resumeEngineIfAccessibilityGranted()
+                guard let self else { return }
+                self.resumeEngineIfAccessibilityGranted()
+                // Still not trusted and past the fast window — slow down.
+                if interval < 5,
+                   let start = self.accessibilityPollStart,
+                   Date().timeIntervalSince(start) > Self.accessibilityFastPollWindow,
+                   self.accessibilityPollTimer != nil {
+                    self.scheduleAccessibilityPoll(interval: 5)
+                }
             }
         }
-        if let timer = accessibilityPollTimer {
-            RunLoop.main.add(timer, forMode: .common)
-        }
+        timer.tolerance = interval / 2
+        accessibilityPollTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     private func stopAccessibilityMonitoring() {

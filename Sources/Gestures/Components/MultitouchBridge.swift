@@ -19,7 +19,7 @@ final class MultitouchBridge {
             isRunning = true
             AppLogger.debug("[MT] Started C-Bridge")
         } else {
-            print("[MT] Failed to start C-Bridge. Status: \(GLDTGetLastStartStatus())")
+            AppLogger.debug("[MT] Failed to start C-Bridge. Status: \(GLDTGetLastStartStatus())")
         }
     }
 

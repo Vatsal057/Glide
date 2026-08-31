@@ -1,6 +1,9 @@
 import SwiftUI
 import Cocoa
 import ApplicationServices
+// Timer.publish returns a Combine type used in a stored property below; without
+// this import the compiler warns that the type isn't visible in this file.
+import Combine
 
 // ─────────────────────────────────────────────
 // MARK: - OnboardingController

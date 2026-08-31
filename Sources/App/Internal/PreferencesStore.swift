@@ -252,12 +252,59 @@ final class PreferencesStore: ObservableObject {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories    = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        if GlideConfigStore.shared.importFrom(url) {
+
+        guard let config = GlideConfigStore.shared.inspect(url) else {
+            configAlert = .error("File is not a valid Glide config.")
+            return
+        }
+
+        // Shell/AppleScript/Shortcut actions run arbitrary code as soon as the
+        // gesture is performed. Configs are explicitly meant to be passed
+        // around, so importing one has to be a deliberate choice, not a
+        // side effect of clicking Open.
+        let executable = GlideConfigStore.executableActions(in: config)
+        if !executable.isEmpty, !confirmExecutableActions(executable) { return }
+
+        if GlideConfigStore.shared.apply(config) {
             reload()
             configAlert = .importSuccess
         } else {
             configAlert = .error("File is not a valid Glide config.")
         }
+    }
+
+    /// Lists the code-running gestures in an incoming config and asks whether to
+    /// proceed. Returns true when the user accepts.
+    private func confirmExecutableActions(
+        _ actions: [GlideConfigStore.ExecutableAction]
+    ) -> Bool {
+        let shown = actions.prefix(8)
+        var detail = shown.map { action in
+            let payload = action.payload.replacingOccurrences(of: "\n", with: " ")
+            let clipped = payload.count > 120 ? String(payload.prefix(120)) + "…" : payload
+            return "• \(action.gesture) — \(action.kind): \(clipped)"
+        }.joined(separator: "\n")
+
+        if actions.count > shown.count {
+            detail += "\n• …and \(actions.count - shown.count) more."
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = actions.count == 1
+            ? "This config runs 1 command"
+            : "This config runs \(actions.count) commands"
+        alert.informativeText = """
+        Importing it will let the following run on your Mac whenever the matching gesture is performed. Only continue if you trust where this file came from.
+
+        \(detail)
+        """
+        alert.addButton(withTitle: "Import Anyway")
+        alert.addButton(withTitle: "Cancel")
+        // Cancel is the safe default, so make Escape and Return both land there.
+        alert.buttons.last?.keyEquivalent = "\r"
+        alert.buttons.first?.keyEquivalent = ""
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func chooseApp(for ruleID: UUID) {
