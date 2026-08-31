@@ -236,8 +236,13 @@ final class GestureInputManager {
 
         // Resolve a deferred click on release: if no deep press arrived before the
         // fingers lifted, it was a normal click. Dispatched async so it always runs
-        // after the mouse-down's processClick has registered the pending click.
+        // after the mouse-down's processClick has registered the pending click — the
+        // flush itself stays inside the async for that ordering, since the pending
+        // click can still be in flight at the instant the mouse-up fires. Skipping the
+        // dispatch while the engine is stopped keeps every system-wide click from
+        // scheduling a main-queue block that could have nothing to do.
         if let up = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp], handler: { [weak self] _ in
+            guard self?.engine?.isRunning == true else { return }
             DispatchQueue.main.async { self?.engine?.flushPendingClick() }
         }) { interactionMonitors.append(up) }
 

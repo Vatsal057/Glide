@@ -19,6 +19,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             try? await Task.sleep(nanoseconds: 15_000_000_000)
             UpdateChecker.shared.checkIfDue()
         }
+
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -85,6 +86,7 @@ final class EngineBridge: ObservableObject {
             } else {
                 GestureEngine.shared.stop()
             }
+            syncTapHealthTimer()
         }
     }
 
@@ -106,6 +108,7 @@ final class EngineBridge: ObservableObject {
         if isEnabled {
             engine.start()
         }
+        syncTapHealthTimer()
 
         startAccessibilityMonitoring()
 
@@ -138,19 +141,36 @@ final class EngineBridge: ObservableObject {
             }
         }
 
-        // Event taps get silently disabled by macOS (timeouts, permission churn).
-        // Periodically verify and revive them while gestures are enabled.
-        tapHealthTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
-            Task { @MainActor in
-                let engine = GestureEngine.shared
-                guard engine.isRunning else { return }
-                engine.inputManager.checkHealth()
+    }
+
+    /// Event taps get silently disabled by macOS (timeouts, permission churn). The
+    /// tap callbacks re-enable themselves on a plain disable, so this periodic check
+    /// is only a backstop for the rarer case where the Mach port goes invalid and the
+    /// tap has to be torn down and rebuilt.
+    ///
+    /// It only has anything to check while the engine is actually running its taps,
+    /// so it lives and dies with the engine: no wake-ups while gestures are toggled
+    /// off or while the machine sleeps. Previously this was a 5s repeating timer
+    /// created once and never invalidated — it fired ~17k times a day for the life of
+    /// the process even with gestures disabled. Now it is engine-scoped, at 30s with
+    /// generous slack so macOS can fold each check into a wake it was already making.
+    private func syncTapHealthTimer() {
+        if GestureEngine.shared.isRunning {
+            guard tapHealthTimer == nil else { return }
+            let timer = Timer(timeInterval: 30.0, repeats: true) { _ in
+                Task { @MainActor in
+                    let engine = GestureEngine.shared
+                    guard engine.isRunning else { return }
+                    engine.inputManager.checkHealth()
+                }
             }
+            timer.tolerance = 10.0
+            RunLoop.main.add(timer, forMode: .common)
+            tapHealthTimer = timer
+        } else {
+            tapHealthTimer?.invalidate()
+            tapHealthTimer = nil
         }
-        // A repeating timer with no slack forces its own wake-up every five
-        // seconds forever; slack lets macOS fold it into a wake it was making
-        // anyway, which is most of the idle battery cost of a check this cheap.
-        tapHealthTimer?.tolerance = 2.0
     }
 
     private func startAccessibilityMonitoring() {
@@ -188,12 +208,16 @@ final class EngineBridge: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.resumeEngineIfAccessibilityGranted()
-                // Still not trusted and past the fast window — slow down.
-                if interval < 5,
-                   let start = self.accessibilityPollStart,
-                   Date().timeIntervalSince(start) > Self.accessibilityFastPollWindow,
-                   self.accessibilityPollTimer != nil {
-                    self.scheduleAccessibilityPoll(interval: 5)
+                // Still not trusted and past the fast window — stop polling entirely.
+                // A user grants Accessibility right after the launch prompt, which the
+                // fast poll catches; a later grant is caught by the didBecomeActive
+                // observer above when they next interact with Glide. Re-arming a 5s
+                // timer here meant a Mac that never grants access woke the CPU every
+                // five seconds for the entire life of the process.
+                if let start = self.accessibilityPollStart,
+                   Date().timeIntervalSince(start) > Self.accessibilityFastPollWindow {
+                    self.accessibilityPollTimer?.invalidate()
+                    self.accessibilityPollTimer = nil
                 }
             }
         }
@@ -219,10 +243,12 @@ final class EngineBridge: ObservableObject {
 
         guard isEnabled else { return }
         GestureEngine.shared.start()
+        syncTapHealthTimer()
     }
 
     deinit {
         accessibilityPollTimer?.invalidate()
+        tapHealthTimer?.invalidate()
         if let observer = accessibilityActiveObserver {
             NotificationCenter.default.removeObserver(observer)
         }

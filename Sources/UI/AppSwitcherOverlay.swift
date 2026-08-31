@@ -7,6 +7,8 @@ private enum GlideSwitcherPalette {
     static let motionViolet = Color(red: 148 / 255, green: 129 / 255, blue: 201 / 255)
 }
 
+
+
 /// Curvature and rim values, following the two rules macOS applies to Liquid Glass
 /// surfaces (AltTab's App Icons style follows the same ones):
 ///
@@ -123,6 +125,31 @@ private struct AppSwitcherItem: Identifiable {
 private enum SwitcherRailIcon {
     static let padding: CGFloat = 16
     static let canvasSide = GlideSwitcherMetrics.railIconSize + padding * 2
+
+    /// One rasterized icon per process, per backing scale.
+    ///
+    /// `render` allocates and draws a 320x320 bitmap. `configure` calls it for
+    /// *every* running app on *every* open, synchronously on the main thread, so a
+    /// user with fifteen apps paid fifteen of those before the panel could appear —
+    /// and paid them again on the next swipe. An app's icon and pid are fixed for
+    /// the session, so the answer never changes.
+    private struct CacheKey: Hashable {
+        let pid: pid_t
+        let scale: CGFloat
+    }
+    private static var cache: [CacheKey: Image] = [:]
+
+    static func cached(for pid: pid_t, icon: NSImage, scale: CGFloat) -> Image? {
+        let key = CacheKey(pid: pid, scale: scale)
+        if let hit = cache[key] { return hit }
+        guard let rendered = render(icon, scale: scale) else { return nil }
+        // A switcher session sees a bounded set of apps, but a long-lived process
+        // sees apps come and go. Evicting wholesale on an implausible count keeps
+        // this from being a slow leak without needing per-entry bookkeeping.
+        if cache.count > 128 { cache.removeAll(keepingCapacity: true) }
+        cache[key] = rendered
+        return rendered
+    }
 
     static func render(_ icon: NSImage, scale: CGFloat) -> Image? {
         let pixels = Int((canvasSide * scale).rounded())
@@ -242,7 +269,11 @@ private final class AppSwitcherOverlayModel: ObservableObject {
                 id: app.processIdentifier,
                 name: app.localizedName ?? app.bundleIdentifier ?? "Application",
                 icon: icon,
-                railIcon: SwitcherRailIcon.render(icon, scale: iconScale),
+                railIcon: SwitcherRailIcon.cached(
+                    for: app.processIdentifier,
+                    icon: icon,
+                    scale: iconScale
+                ),
                 windows: windows.map { window in
                     AppSwitcherWindowItem(
                         id: window.id,
@@ -595,6 +626,13 @@ private struct AppSwitcherOverlayView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
+    /// Whether selection changes should spring. Opt-in (off by default) because the
+    /// springs re-render the whole panel every frame they run and overlap across
+    /// steps — see `AppSwitcherSettings.animationsEnabled`. Accessibility's Reduce
+    /// Motion always wins. Read per body pass; the panel is only built while a
+    /// gesture is active, and the setting can't change mid-gesture.
+    private var animate: Bool { Settings.shared.appSwitcher.animationsEnabled && !reduceMotion }
+
     /// macOS 26 and later draw the switcher's surface with real Liquid Glass, placed
     /// behind this view by `backdrop`. Older systems keep the SwiftUI material and its
     /// metaball mask, so nothing about them changes.
@@ -635,7 +673,17 @@ private struct AppSwitcherOverlayView: View {
                         backdrop.apply(glassSlabsInAppKitCoordinates(slabs, panelHeight: geo.size.height))
                     }
                 }
-                .animation(reduceMotion ? nil : .interactiveSpring(response: 0.4, dampingFraction: 0.7), value: model.selectedApp?.windows.count)
+                // Off by default. This `.animation` applies to the whole panel, so
+                // every step that changes the selected app's window count animates the
+                // entire hierarchy's *layout* — rail, shelf, every card, and the glass
+                // slab measurement — for the life of the curve. Steps arrive every
+                // 0.10s (`appSwitcherDebounce`) and a spring settles in ~0.5s, so the
+                // curves overlap and the panel re-lays-out at display rate for the
+                // whole swipe — measured at roughly 6x the CPU per step versus off.
+                // Gated on the user's opt-in; when off the shelf simply appears and
+                // disappears in one pass, like the system switcher and AltTab.
+                .animation(animate ? .interactiveSpring(response: 0.4, dampingFraction: 0.7) : nil,
+                           value: model.selectedApp?.windows.count)
             }
         }
     }
@@ -738,7 +786,7 @@ private struct AppSwitcherOverlayView: View {
                 AppRailCard(
                     item: model.items[index],
                     isSelected: index == model.selectedAppIndex,
-                    reduceMotion: reduceMotion
+                    animate: animate
                 )
                 .equatable()
             }
@@ -776,7 +824,7 @@ private struct AppSwitcherOverlayView: View {
                     visibleIndices: model.visibleWindowIndices,
                     appIcon: app.icon,
                     selectedIndex: model.selectedWindowIndex,
-                    reduceMotion: reduceMotion,
+                    animate: animate,
                     thumbnails: thumbnails
                 )
             }
@@ -830,7 +878,8 @@ private struct AppSwitcherOverlayView: View {
 private struct AppRailCard: View, Equatable {
     let item: AppSwitcherItem
     let isSelected: Bool
-    let reduceMotion: Bool
+    /// Whether selection changes spring. See `AppSwitcherOverlayView.animate`.
+    let animate: Bool
 
     /// Stepping the selection changes exactly two cards: the one losing it and the
     /// one gaining it. Without a way to prove that, SwiftUI has to re-evaluate
@@ -842,7 +891,7 @@ private struct AppRailCard: View, Equatable {
     /// matching artwork.
     static func == (lhs: AppRailCard, rhs: AppRailCard) -> Bool {
         lhs.isSelected == rhs.isSelected
-            && lhs.reduceMotion == rhs.reduceMotion
+            && lhs.animate == rhs.animate
             && lhs.item.id == rhs.item.id
             && lhs.item.name == rhs.item.name
             && lhs.item.windows.count == rhs.item.windows.count
@@ -895,7 +944,12 @@ private struct AppRailCard: View, Equatable {
             }
         }
         .scaleEffect(isSelected ? 1.05 : 1)
-        .animation(reduceMotion ? nil : .interactiveSpring(response: 0.25, dampingFraction: 0.7), value: isSelected)
+        // Sprung only when the user opts into animations. Otherwise the scale snaps:
+        // a SwiftUI `.animation` re-renders the panel's display list every frame for
+        // the life of the curve, and because steps arrive every 0.10s the curves
+        // overlap and never stop, roughly doubling per-step CPU. ⌘-Tab and AltTab
+        // snap for the same reason.
+        .animation(animate ? .interactiveSpring(response: 0.25, dampingFraction: 0.7) : nil, value: isSelected)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(item.name), \(item.windows.count) windows")
         .accessibilityValue(isSelected ? "Selected application" : "")
@@ -906,7 +960,7 @@ private struct TeardropWindowGrid: View {
     let visibleIndices: [Int]
     let appIcon: NSImage
     let selectedIndex: Int
-    let reduceMotion: Bool
+    let animate: Bool
     /// The one place in the panel that reacts to an arriving preview.
     @ObservedObject var thumbnails: SwitcherThumbnailStore
 
@@ -919,7 +973,7 @@ private struct TeardropWindowGrid: View {
                 thumbnail: windows[index].windowID.flatMap { thumbnails.images[$0] },
                 appIcon: appIcon,
                 isSelected: index == selectedIndex,
-                reduceMotion: reduceMotion
+                animate: animate
             )
             .equatable()
             .scaleEffect(x: 1.0 - CGFloat(offsetIndex) * 0.08, y: 1.0 - CGFloat(offsetIndex) * 0.04)
@@ -939,8 +993,11 @@ private struct TeardropWindowGrid: View {
             }
         }
         .padding(.bottom, CGFloat(max(0, visibleIndices.count - 1) * 50))
-        .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.6), value: visibleIndices)
-        .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.6), value: selectedIndex)
+        // Opt-in only — see the note on AppRailCard. Animating the shelf springs a
+        // full-panel relayout+render every frame of a continuous swipe; when off the
+        // cards restack instantly as the selection moves.
+        .animation(animate ? .spring(response: 0.4, dampingFraction: 0.6) : nil, value: visibleIndices)
+        .animation(animate ? .spring(response: 0.4, dampingFraction: 0.6) : nil, value: selectedIndex)
     }
 }
 
@@ -949,14 +1006,14 @@ private struct WindowSelectionCard: View, Equatable {
     let thumbnail: NSImage?
     let appIcon: NSImage
     let isSelected: Bool
-    let reduceMotion: Bool
+    let animate: Bool
 
     /// Same reasoning as `AppRailCard`: an arriving preview must not re-render the
     /// two cards it does not belong to. Images compare by identity — they are
     /// cached objects, never rebuilt in place.
     static func == (lhs: WindowSelectionCard, rhs: WindowSelectionCard) -> Bool {
         lhs.isSelected == rhs.isSelected
-            && lhs.reduceMotion == rhs.reduceMotion
+            && lhs.animate == rhs.animate
             && lhs.item == rhs.item
             && lhs.thumbnail === rhs.thumbnail
             && lhs.appIcon === rhs.appIcon
@@ -1050,7 +1107,8 @@ private struct WindowSelectionCard: View, Equatable {
             )
         }
         .scaleEffect(isSelected ? 1.03 : 1)
-        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: isSelected)
+        // Sprung only on opt-in — see the note on AppRailCard.
+        .animation(animate ? .spring(response: 0.3, dampingFraction: 0.72) : nil, value: isSelected)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.title)
         .accessibilityValue(isSelected ? "Selected window" : (item.status?.label ?? "Current Space"))

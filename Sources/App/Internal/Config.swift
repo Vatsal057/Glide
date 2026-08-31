@@ -37,6 +37,7 @@ struct GlideConfig {
         var fingers: Int = 3
         var skipWindowlessFinder: Bool = true
         var restoreMinimizedOnCommit: Bool = true
+        var animationsEnabled: Bool = false
     }
 
     struct TrackPoint {
@@ -162,6 +163,7 @@ extension GlideConfig {
         cfg.appSwitcher.fingers = s.appSwitcher.fingers
         cfg.appSwitcher.skipWindowlessFinder = s.appSwitcher.skipWindowlessFinder
         cfg.appSwitcher.restoreMinimizedOnCommit = s.appSwitcher.restoreMinimizedOnCommit
+        cfg.appSwitcher.animationsEnabled = s.appSwitcher.animationsEnabled
 
         cfg.trackPoint.enabled            = s.trackPoint.enabled
         cfg.trackPoint.zone               = s.trackPoint.zone.yamlValue ?? "bottom_right"
@@ -263,6 +265,7 @@ extension GlideConfig {
         s.fingers = appSwitcher.fingers
         s.skipWindowlessFinder = appSwitcher.skipWindowlessFinder
         s.restoreMinimizedOnCommit = appSwitcher.restoreMinimizedOnCommit
+        s.animationsEnabled = appSwitcher.animationsEnabled
         return AppSwitcherSettings.normalized(s)
     }
 
@@ -450,6 +453,7 @@ enum GlideConfigSerializer {
             "    fingers: \(config.appSwitcher.fingers)",
             "    skip_windowless_finder: \(config.appSwitcher.skipWindowlessFinder ? "true" : "false")",
             "    restore_minimized_on_commit: \(config.appSwitcher.restoreMinimizedOnCommit ? "true" : "false")",
+            "    animations_enabled: \(config.appSwitcher.animationsEnabled ? "true" : "false")",
             "",
             "  # ── TrackPoint (corner of the pad as a pointing stick) ──",
             "  trackpoint:",
@@ -732,6 +736,7 @@ enum GlideConfigParser {
             case "fingers": switcher.fingers = intVal(val) ?? switcher.fingers
             case "skip_windowless_finder": switcher.skipWindowlessFinder = boolVal(val) ?? switcher.skipWindowlessFinder
             case "restore_minimized_on_commit": switcher.restoreMinimizedOnCommit = boolVal(val) ?? switcher.restoreMinimizedOnCommit
+            case "animations_enabled": switcher.animationsEnabled = boolVal(val) ?? switcher.animationsEnabled
             default: break
             }
             i += 1

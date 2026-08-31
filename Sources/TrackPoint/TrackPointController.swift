@@ -317,6 +317,16 @@ final class TrackPointController {
                              mode: mode)
         }
         offset = push
+
+        // Frames only arrive while the finger moves, but the cursor has to start
+        // gliding the instant the push crosses out of the dead zone — so re-arm the
+        // drive timer here if `tick()` parked it. `startDriveTimer` resets the
+        // integration clock, so the first step after a pause can't discharge a stale
+        // interval into one cursor jump.
+        if driveTimer == nil,
+           magnitude > CGFloat(Settings.shared.trackPoint.deadZone) {
+            startDriveTimer()
+        }
     }
 
     /// Push magnitude with the trackpad's aspect ratio taken out, so a given
@@ -367,7 +377,16 @@ final class TrackPointController {
         let magnitude = Double(Self.correctedMagnitude(offset))
 
         let deadZone = Double(settings.deadZone)
-        guard magnitude > deadZone else { return }
+        guard magnitude > deadZone else {
+            // Resting inside the dead zone: the cursor must not move, so the 120 Hz
+            // timer has nothing left to do. Stop it and let `updateOffset` restart it
+            // the moment the finger pushes back out. A *steady* push outside the dead
+            // zone never trips this guard, so holding a deflection keeps the cursor
+            // gliding without depending on new frames — only a finger settled on the
+            // anchor stops the wake-ups, which is exactly when they were pure waste.
+            stopDriveTimer()
+            return
+        }
 
         // Normalize the push to 0…1 of its useful range, then curve it. The
         // exponent is what makes a stick usable: near the anchor it crawls for

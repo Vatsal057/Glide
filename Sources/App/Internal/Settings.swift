@@ -585,19 +585,27 @@ struct AppSwitcherSettings: Codable, Equatable {
     var skipWindowlessFinder: Bool = true
     /// Unminimize windows of the selected app when you release the gesture.
     var restoreMinimizedOnCommit: Bool = true
+    /// Animate the custom overlay's selection changes. Off by default: a SwiftUI
+    /// spring re-renders the whole panel every display frame it runs, and because
+    /// selection steps arrive faster than a spring settles they overlap into a
+    /// continuous re-render for the length of a swipe — roughly doubling the CPU
+    /// the switcher costs. Only the newer overlay style animates; legacy is native.
+    var animationsEnabled: Bool = false
 
     init(
         enabled: Bool = true,
         style: AppSwitcherStyle = .newer,
         fingers: Int = 3,
         skipWindowlessFinder: Bool = true,
-        restoreMinimizedOnCommit: Bool = true
+        restoreMinimizedOnCommit: Bool = true,
+        animationsEnabled: Bool = false
     ) {
         self.enabled = enabled
         self.style = style
         self.fingers = fingers
         self.skipWindowlessFinder = skipWindowlessFinder
         self.restoreMinimizedOnCommit = restoreMinimizedOnCommit
+        self.animationsEnabled = animationsEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -607,6 +615,7 @@ struct AppSwitcherSettings: Codable, Equatable {
         fingers = try c.decodeIfPresent(Int.self, forKey: .fingers) ?? 3
         skipWindowlessFinder = try c.decodeIfPresent(Bool.self, forKey: .skipWindowlessFinder) ?? true
         restoreMinimizedOnCommit = try c.decodeIfPresent(Bool.self, forKey: .restoreMinimizedOnCommit) ?? true
+        animationsEnabled = try c.decodeIfPresent(Bool.self, forKey: .animationsEnabled) ?? false
     }
 
     static func normalized(_ s: AppSwitcherSettings) -> AppSwitcherSettings {
