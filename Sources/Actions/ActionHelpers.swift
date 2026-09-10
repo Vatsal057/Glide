@@ -129,6 +129,8 @@ enum SystemActions {
         case play           = 16  // NX_KEYTYPE_PLAY
         case next           = 17  // NX_KEYTYPE_NEXT — skip to next track
         case previous       = 18  // NX_KEYTYPE_PREVIOUS — skip to previous track
+        case illuminationUp = 21  // NX_KEYTYPE_ILLUMINATION_UP
+        case illuminationDown = 22 // NX_KEYTYPE_ILLUMINATION_DOWN
     }
 
     static func sendMediaKey(_ key: MediaKey) {

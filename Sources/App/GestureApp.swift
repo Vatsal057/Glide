@@ -11,6 +11,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             runGestureVerification(forceFailure: true)
             exit(0)
         }
+        if CommandLine.arguments.contains("--test-edge-controls") {
+            runEdgeControlsVerification(forceFailure: false)
+            exit(0)
+        }
+        if CommandLine.arguments.contains("--test-edge-controls-fail") {
+            runEdgeControlsVerification(forceFailure: true)
+            exit(0)
+        }
 
         EngineBridge.shared.startEngine()
         if OnboardingController.shouldShow {
@@ -108,6 +116,89 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         print("[TEST] ✅ GestureAnimationView verification PASSED.")
+    }
+
+    @MainActor
+    private func runEdgeControlsVerification(forceFailure: Bool) {
+        print("[TEST-EDGE] Running Trackpad Edge Controls verification suite...")
+
+        if forceFailure {
+            print("[TEST-EDGE] Forced failure requested -> exiting with code 1")
+            exit(1)
+        }
+
+        // 1. Verify TickAccumulator quantization & rate limiting
+        let accumulator = TickAccumulator(configuration: TickConfiguration(stepSize: 5.0, maximumTickRate: 24.0))
+        let now = ProcessInfo.processInfo.systemUptime
+        let firstOutcome = accumulator.consume(delta: 2.0, timestamp: now, phase: .active)
+        assert(firstOutcome.count == 0, "Sub-step delta should not produce a tick")
+        let secondOutcome = accumulator.consume(delta: 4.0, timestamp: now + 0.01, phase: .active) // total 6mm >= 5mm step
+        assert(secondOutcome.count == 1, "Cumulative delta exceeding stepSize must produce exactly 1 tick")
+        print("[TEST-EDGE] TickAccumulator step quantization passed.")
+
+        // 2. Verify Edge detection geometry
+        let engine = EdgeGestureEngine(config: EdgeGestureEngine.Configuration(
+            isEnabled: true,
+            topAction: .appSwitcher,
+            bottomAction: .keyboardBacklight,
+            leftAction: .brightness,
+            rightAction: .volume,
+            marginMm: 10.0
+        ))
+
+        // Center touch (x: 0.5, y: 0.5) must NOT start edge gesture
+        let centerPoint = GLDTouchPoint(identifier: 1, state: 3, x: 0.5, y: 0.5, vx: 0, vy: 0, size: 1)
+        engine.consume(touch: centerPoint, contacts: 1, timestamp: now)
+        assert(engine.activeEdge == nil, "Center touch must not start edge gesture")
+        print("[TEST-EDGE] Center touch rejection passed.")
+
+        // Right edge touch (x: 0.98, y: 0.5) must start .right (volume)
+        let rightEdgePoint = GLDTouchPoint(identifier: 2, state: 3, x: 0.98, y: 0.5, vx: 0, vy: 0, size: 1)
+        engine.consume(touch: rightEdgePoint, contacts: 1, timestamp: now + 0.05)
+        assert(engine.activeEdge == .right, "Right edge touch must start right edge gesture")
+        print("[TEST-EDGE] Right edge detection passed.")
+
+        // Slide along right edge (y: 0.5 -> y: 0.8)
+        let rightSlidePoint = GLDTouchPoint(identifier: 2, state: 4, x: 0.97, y: 0.8, vx: 0, vy: 50, size: 1)
+        engine.consume(touch: rightSlidePoint, contacts: 1, timestamp: now + 0.10)
+        assert(engine.activeEdge == .right, "Gesture remains active during slide within margin")
+        print("[TEST-EDGE] Edge slide continuation passed.")
+
+        // Multitouch rejection (contacts == 2) must cancel edge gesture
+        let twoFingerPoint = GLDTouchPoint(identifier: 2, state: 4, x: 0.97, y: 0.8, vx: 0, vy: 0, size: 1)
+        engine.consume(touch: twoFingerPoint, contacts: 2, timestamp: now + 0.15)
+        assert(engine.activeEdge == nil, "Two-finger touch must immediately drop edge gesture for scrolling")
+        print("[TEST-EDGE] Multitouch isolation (2+ contacts dropped) passed.")
+
+        // 3. Verify App Switcher customization on different edges
+        engine.config.topAction = .appSwitcher
+        let topEdgePoint = GLDTouchPoint(identifier: 3, state: 3, x: 0.5, y: 0.98, vx: 0, vy: 0, size: 1)
+        engine.consume(touch: topEdgePoint, contacts: 1, timestamp: now + 0.20)
+        assert(engine.activeEdge == .top, "Top edge touch must start top edge gesture (App Switcher)")
+        print("[TEST-EDGE] Customizable App Switcher scrub on Top edge passed.")
+
+        // 4. Verify YAML Serialization round-trip
+        var testConfig = GlideConfig()
+        testConfig.edgeControls.enabled = true
+        testConfig.edgeControls.topEdge = "app_switcher"
+        testConfig.edgeControls.bottomEdge = "keyboard_backlight"
+        testConfig.edgeControls.leftEdge = "brightness"
+        testConfig.edgeControls.rightEdge = "volume"
+        testConfig.edgeControls.marginMm = 12.5
+
+        let yaml = GlideConfigSerializer.serialize(testConfig)
+        guard let parsed = GlideConfigParser.parse(yaml: yaml) else {
+            fatalError("Failed to parse emitted YAML with edge_controls")
+        }
+        assert(parsed.edgeControls.enabled == true)
+        assert(parsed.edgeControls.topEdge == "app_switcher")
+        assert(parsed.edgeControls.bottomEdge == "keyboard_backlight")
+        assert(parsed.edgeControls.leftEdge == "brightness")
+        assert(parsed.edgeControls.rightEdge == "volume")
+        assert(abs(parsed.edgeControls.marginMm - 12.5) < 0.01)
+        print("[TEST-EDGE] YAML config serialization roundtrip passed.")
+
+        print("[TEST-EDGE] ✅ Trackpad Edge Controls verification PASSED.")
     }
 }
 

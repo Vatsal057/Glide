@@ -58,6 +58,15 @@ struct GlideConfig {
         var invertScroll: Bool = false
     }
 
+    struct EdgeControls {
+        var enabled: Bool = true
+        var topEdge: String = "none"
+        var bottomEdge: String = "none"
+        var leftEdge: String = "brightness"
+        var rightEdge: String = "volume"
+        var marginMm: Double = 10.0
+    }
+
     struct Tuning {
         var appSwitcherStepThreshold: Float = 0.002
         var appSwitcherDebounce: Double = 0.05
@@ -129,6 +138,7 @@ struct GlideConfig {
     var preferences: Preferences = Preferences()
     var appSwitcher: AppSwitcher = AppSwitcher()
     var trackPoint: TrackPoint = TrackPoint()
+    var edgeControls: EdgeControls = EdgeControls()
     var tuning: Tuning = Tuning()
     /// haptic event rawValue → pattern rawValue (see HapticEvent / HapticPattern)
     var haptics: [String: String] = [:]
@@ -182,6 +192,13 @@ extension GlideConfig {
         cfg.trackPoint.scrollEnabled      = s.trackPoint.scrollEnabled
         cfg.trackPoint.scrollSpeed        = s.trackPoint.scrollSpeed
         cfg.trackPoint.invertScroll       = s.trackPoint.invertScroll
+
+        cfg.edgeControls.enabled    = s.edgeControls.enabled
+        cfg.edgeControls.topEdge    = s.edgeControls.topEdge.rawValue
+        cfg.edgeControls.bottomEdge = s.edgeControls.bottomEdge.rawValue
+        cfg.edgeControls.leftEdge   = s.edgeControls.leftEdge.rawValue
+        cfg.edgeControls.rightEdge  = s.edgeControls.rightEdge.rawValue
+        cfg.edgeControls.marginMm   = s.edgeControls.marginMm
 
         cfg.tuning.appSwitcherStepThreshold  = t.appSwitcherStepThreshold
         cfg.tuning.appSwitcherDebounce       = t.appSwitcherDebounce
@@ -291,6 +308,17 @@ extension GlideConfig {
         p.scrollSpeed        = trackPoint.scrollSpeed
         p.invertScroll       = trackPoint.invertScroll
         return TrackPointSettings.normalized(p)
+    }
+
+    func toEdgeControls() -> EdgeControlsSettings {
+        var e = EdgeControlsSettings()
+        e.enabled    = edgeControls.enabled
+        e.topEdge    = EdgeAction(rawValue: edgeControls.topEdge) ?? .none
+        e.bottomEdge = EdgeAction(rawValue: edgeControls.bottomEdge) ?? .none
+        e.leftEdge   = EdgeAction(rawValue: edgeControls.leftEdge) ?? .brightness
+        e.rightEdge  = EdgeAction(rawValue: edgeControls.rightEdge) ?? .volume
+        e.marginMm   = edgeControls.marginMm
+        return EdgeControlsSettings.normalized(e)
     }
 
     func toTuning() -> GestureTuning {
@@ -480,6 +508,15 @@ enum GlideConfigSerializer {
             "    scroll_enabled: \(config.trackPoint.scrollEnabled ? "true" : "false")",
             "    scroll_speed: \(String(format: "%.0f", config.trackPoint.scrollSpeed))",
             "    invert_scroll: \(config.trackPoint.invertScroll ? "true" : "false")",
+            "",
+            "  # ── Edge Controls ──────────────────────────────────",
+            "  edge_controls:",
+            "    enabled: \(config.edgeControls.enabled ? "true" : "false")",
+            "    top_edge: \(config.edgeControls.topEdge)",
+            "    bottom_edge: \(config.edgeControls.bottomEdge)",
+            "    left_edge: \(config.edgeControls.leftEdge)",
+            "    right_edge: \(config.edgeControls.rightEdge)",
+            "    margin_mm: \(String(format: "%.1f", config.edgeControls.marginMm))",
             "",
             "  # ── Tuning ─────────────────────────────────────────",
             "  tuning:",
@@ -675,6 +712,7 @@ enum GlideConfigParser {
             case "haptics":     i += 1; parseHaptics(lines, from: &i, parentIndent: indent, into: &cfg.haptics)
             case "app_switcher": i += 1; parseAppSwitcher(lines, from: &i, parentIndent: indent, into: &cfg.appSwitcher)
             case "trackpoint":   i += 1; parseTrackPoint(lines, from: &i, parentIndent: indent, into: &cfg.trackPoint)
+            case "edge_controls", "edgecontrols": i += 1; parseEdgeControls(lines, from: &i, parentIndent: indent, into: &cfg.edgeControls)
             case "tuning":       i += 1; parseTuning(lines, from: &i, parentIndent: indent, into: &cfg.tuning)
             case "gestures":    i += 1; parseGestures(lines, from: &i, parentIndent: indent, into: &cfg.gestures)
             default:            i += 1
@@ -775,6 +813,26 @@ enum GlideConfigParser {
             case "scroll_enabled":      point.scrollEnabled      = boolVal(val)   ?? point.scrollEnabled
             case "scroll_speed":        point.scrollSpeed        = floatVal(val)  ?? point.scrollSpeed
             case "invert_scroll":       point.invertScroll       = boolVal(val)   ?? point.invertScroll
+            default: break
+            }
+            i += 1
+        }
+    }
+
+    private static func parseEdgeControls(_ lines: [String], from i: inout Int, parentIndent: Int, into edge: inout GlideConfig.EdgeControls) {
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
+            switch key {
+            case "enabled":     edge.enabled    = boolVal(val)   ?? edge.enabled
+            case "top_edge":    edge.topEdge    = stringVal(val) ?? edge.topEdge
+            case "bottom_edge": edge.bottomEdge = stringVal(val) ?? edge.bottomEdge
+            case "left_edge":   edge.leftEdge   = stringVal(val) ?? edge.leftEdge
+            case "right_edge":  edge.rightEdge  = stringVal(val) ?? edge.rightEdge
+            case "margin_mm":   edge.marginMm   = doubleVal(val) ?? edge.marginMm
             default: break
             }
             i += 1

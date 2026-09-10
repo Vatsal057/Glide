@@ -114,6 +114,18 @@ enum TouchTracker {
         set { stateLock.lock(); defer { stateLock.unlock() }; _trackPointAnchoredID = newValue }
     }
 
+    fileprivate static var _edgeControlsEnabled: Bool = false
+    fileprivate static var _edgeControlsStreaming: Bool = false
+
+    static func updateEdgeControlsCache(enabled: Bool) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        _edgeControlsEnabled = enabled
+        if !enabled {
+            _edgeControlsStreaming = false
+        }
+    }
+
     static func updateDeviceFingerCount(device: UnsafeMutableRawPointer, count: Int) {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -194,6 +206,7 @@ enum TouchTracker {
         _lastFingerLiftTime = 0
         _trackPointAnchoredID = -1
         _trackPointStreaming = false
+        _edgeControlsStreaming = false
         stateLock.unlock()
 
         frameDispatchLock.lock()
@@ -204,6 +217,7 @@ enum TouchTracker {
 }
 let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
     feedTrackPoint(points, count)
+    feedEdgeControls(points, count, timestamp)
 
     var activeTouches: [GLDTouchPoint] = []
     if let points = points, count > 0 {
@@ -409,6 +423,43 @@ private func feedTrackPoint(_ points: UnsafePointer<GLDTouchPoint>?, _ count: In
             sample1: s1,
             sample2: s2,
             contacts: contacts
+        )
+    }
+}
+
+/// Feeds Edge Controls from raw single-finger contact frames, ahead of
+/// the gesture engine. Costs nothing when Edge Controls is off.
+private func feedEdgeControls(_ points: UnsafePointer<GLDTouchPoint>?, _ count: Int32, _ timestamp: Double) {
+    TouchTracker.stateLock.lock()
+    let enabled = TouchTracker._edgeControlsEnabled
+    let wasStreaming = TouchTracker._edgeControlsStreaming
+    TouchTracker.stateLock.unlock()
+
+    guard enabled else { return }
+
+    var contacts = 0
+    var loneTouch: GLDTouchPoint?
+    if let points, count > 0 {
+        for index in 0..<Int(count) {
+            let touch = points[index]
+            guard touch.state >= 3 && touch.state <= 4 else { continue }
+            contacts += 1
+            if contacts == 1 { loneTouch = touch }
+        }
+    }
+
+    let streaming = contacts == 1
+    guard streaming || wasStreaming else { return }
+
+    TouchTracker.stateLock.lock()
+    TouchTracker._edgeControlsStreaming = streaming
+    TouchTracker.stateLock.unlock()
+
+    DispatchQueue.main.async {
+        EdgeControlsController.shared.ingest(
+            touch: loneTouch,
+            contacts: contacts,
+            timestamp: timestamp
         )
     }
 }

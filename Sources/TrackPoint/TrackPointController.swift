@@ -157,9 +157,9 @@ final class TrackPointController {
                                            mode: settings.activationMode,
                                            zone: settings.zone,
                                            reach: settings.zoneSize)
-        // Gesture rules all need three fingers; the stick needs one or two. Only widen
-        // the bridge's forwarding window while the feature is actually on.
-        MultitouchBridge.shared.setMinimumContactCount(settings.enabled ? 1 : 3)
+        // Gesture rules all need three fingers; stick and edge controls need one or two.
+        // Coordinate forwarding window so neither feature overrides the other.
+        MultitouchBridge.shared.updateMinimumContactCount()
         if !settings.enabled { reset() }
     }
 

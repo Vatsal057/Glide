@@ -757,6 +757,23 @@ struct TrackPointSettings: Codable, Equatable {
     }
 }
 
+struct EdgeControlsSettings: Codable, Equatable {
+    var enabled: Bool = true
+    var topEdge: EdgeAction = .none
+    var bottomEdge: EdgeAction = .none
+    var leftEdge: EdgeAction = .brightness
+    var rightEdge: EdgeAction = .volume
+    var marginMm: Double = 10.0
+
+    static let marginMmRange: ClosedRange<Double> = 3.0...30.0
+
+    static func normalized(_ s: EdgeControlsSettings) -> EdgeControlsSettings {
+        var n = s
+        n.marginMm = n.marginMm.clamped(to: marginMmRange)
+        return n
+    }
+}
+
 extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
         min(max(self, range.lowerBound), range.upperBound)
@@ -859,6 +876,7 @@ final class Settings {
     private var _rules:           [GestureRule]
     private var _appSwitcher:     AppSwitcherSettings = AppSwitcherSettings()
     private var _trackPoint:      TrackPointSettings  = TrackPointSettings()
+    private var _edgeControls:    EdgeControlsSettings = EdgeControlsSettings()
     /// Guards `_tuning` — the only setting read off the main thread (the MT
     /// callback reads edge margins every frame).
     private let tuningLock = NSLock()
@@ -885,6 +903,11 @@ final class Settings {
     var trackPoint: TrackPointSettings {
         get { _trackPoint }
         set { _trackPoint = TrackPointSettings.normalized(newValue); GlideConfigStore.shared.scheduleSave() }
+    }
+
+    var edgeControls: EdgeControlsSettings {
+        get { _edgeControls }
+        set { _edgeControls = EdgeControlsSettings.normalized(newValue); GlideConfigStore.shared.scheduleSave() }
     }
 
     var tuning: GestureTuning {
@@ -939,6 +962,12 @@ final class Settings {
         trackPoint = fresh
     }
 
+    func resetEdgeControls() {
+        var fresh = EdgeControlsSettings()
+        fresh.enabled = _edgeControls.enabled
+        edgeControls = fresh
+    }
+
     // MARK: Batch load — bypasses per-field saves (called by GlideConfigStore.load)
 
     func apply(_ config: GlideConfig) {
@@ -947,6 +976,7 @@ final class Settings {
         Self.migrateLegacyAppSwitcherRules(into: &switcher, rules: &loadedRules)
         _appSwitcher     = AppSwitcherSettings.normalized(switcher)
         _trackPoint      = TrackPointSettings.normalized(config.toTrackPoint())
+        _edgeControls    = EdgeControlsSettings.normalized(config.toEdgeControls())
         _rules           = Self.normalizeRules(loadedRules, appSwitcher: _appSwitcher)
         let normalizedTuning = Self.normalizedTuning(config.toTuning())
         tuningLock.lock(); _tuning = normalizedTuning; tuningLock.unlock()
