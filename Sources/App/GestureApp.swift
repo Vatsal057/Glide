@@ -152,21 +152,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         assert(engine.activeEdge == nil, "Center touch must not start edge gesture")
         print("[TEST-EDGE] Center touch rejection passed.")
 
+        // Moving center touch into the edge (x: 0.5 -> x: 0.98) must NOT trigger edge controls (disqualified origin)
+        let draggedToEdgePoint = GLDTouchPoint(identifier: 1, state: 3, x: 0.98, y: 0.5, vx: 100, vy: 0, size: 1)
+        engine.consume(touch: draggedToEdgePoint, contacts: 1, timestamp: now + 0.02)
+        assert(engine.activeEdge == nil, "Touch originating away from edge must not activate edge controls when moving into edge")
+        print("[TEST-EDGE] Non-edge origin disqualification passed.")
+
         // Right edge touch (x: 0.98, y: 0.5) must start .right (volume)
         let rightEdgePoint = GLDTouchPoint(identifier: 2, state: 3, x: 0.98, y: 0.5, vx: 0, vy: 0, size: 1)
         engine.consume(touch: rightEdgePoint, contacts: 1, timestamp: now + 0.05)
         assert(engine.activeEdge == .right, "Right edge touch must start right edge gesture")
         print("[TEST-EDGE] Right edge detection passed.")
 
-        // Slide along right edge (y: 0.5 -> y: 0.8)
+        // Slide along right edge (y: 0.5 -> y: 0.8, x remains at 0.97 near edge)
         let rightSlidePoint = GLDTouchPoint(identifier: 2, state: 4, x: 0.97, y: 0.8, vx: 0, vy: 50, size: 1)
         engine.consume(touch: rightSlidePoint, contacts: 1, timestamp: now + 0.10)
         assert(engine.activeEdge == .right, "Gesture remains active during slide within margin")
         print("[TEST-EDGE] Edge slide continuation passed.")
 
+        // Drifting inward away from edge (x: 0.80 is ~31mm from right edge, > 10mm margin) must cancel
+        let inwardDriftPoint = GLDTouchPoint(identifier: 2, state: 4, x: 0.80, y: 0.8, vx: -50, vy: 0, size: 1)
+        engine.consume(touch: inwardDriftPoint, contacts: 1, timestamp: now + 0.12)
+        assert(engine.activeEdge == nil, "Drifting inward away from edge must cancel edge gesture")
+        print("[TEST-EDGE] Inward drift cancellation passed.")
+
+        // Perpendicular inward movement from edge on fresh touch must be rejected
+        let edgeFreshPoint = GLDTouchPoint(identifier: 4, state: 3, x: 0.98, y: 0.5, vx: 0, vy: 0, size: 1)
+        engine.consume(touch: edgeFreshPoint, contacts: 1, timestamp: now + 0.13)
+        assert(engine.activeEdge == .right)
+        let perpInwardPoint = GLDTouchPoint(identifier: 4, state: 3, x: 0.95, y: 0.501, vx: -50, vy: 0, size: 1) // ~4.7mm inward, 0.1mm vertical
+        engine.consume(touch: perpInwardPoint, contacts: 1, timestamp: now + 0.14)
+        assert(engine.activeEdge == nil, "Inward movement into trackpad must not trigger along-edge swipe")
+        print("[TEST-EDGE] Perpendicular inward motion rejection passed.")
+
         // Multitouch rejection (contacts == 2) must cancel edge gesture
-        let twoFingerPoint = GLDTouchPoint(identifier: 2, state: 4, x: 0.97, y: 0.8, vx: 0, vy: 0, size: 1)
-        engine.consume(touch: twoFingerPoint, contacts: 2, timestamp: now + 0.15)
+        let rightEdgeStartPoint = GLDTouchPoint(identifier: 5, state: 3, x: 0.98, y: 0.5, vx: 0, vy: 0, size: 1)
+        engine.consume(touch: rightEdgeStartPoint, contacts: 1, timestamp: now + 0.15)
+        assert(engine.activeEdge == .right)
+        let twoFingerPoint = GLDTouchPoint(identifier: 5, state: 4, x: 0.97, y: 0.8, vx: 0, vy: 0, size: 1)
+        engine.consume(touch: twoFingerPoint, contacts: 2, timestamp: now + 0.16)
         assert(engine.activeEdge == nil, "Two-finger touch must immediately drop edge gesture for scrolling")
         print("[TEST-EDGE] Multitouch isolation (2+ contacts dropped) passed.")
 

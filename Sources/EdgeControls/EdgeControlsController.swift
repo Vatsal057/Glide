@@ -17,7 +17,7 @@ final class EdgeControlsController: ObservableObject {
     @Published var bottomEdge: EdgeAction = .none
     @Published var leftEdge: EdgeAction = .brightness
     @Published var rightEdge: EdgeAction = .volume
-    @Published var marginMm: Double = 10.0
+    @Published var marginMm: Double = 8.0
     @Published var activeEdge: TrackpadPhysicalEdge?
 
     private let engine = EdgeGestureEngine()

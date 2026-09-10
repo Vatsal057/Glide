@@ -29,14 +29,16 @@ final class EdgeGestureEngine {
         var bottomAction: EdgeAction = .none
         var leftAction: EdgeAction = .brightness
         var rightAction: EdgeAction = .volume
-        var marginMm: Double = 10.0
+        var marginMm: Double = 8.0
     }
 
     private struct ActiveGesture {
         let touchId: Int32
         let edge: TrackpadPhysicalEdge
         let action: EdgeAction
+        let startPosition: CGPoint
         var lastPosition: CGPoint
+        var isSwiping: Bool
         let accumulator: TickAccumulator
         var switcherSession: EdgeAppSwitcherSession?
     }
@@ -44,9 +46,9 @@ final class EdgeGestureEngine {
     var config: Configuration
     var surfaceSize: TrackpadSurfaceSize = .default
 
-    /// Hold slack (in mm) allowing finger to drift slightly inward while scrubbing
-    /// without dropping the active gesture.
-    private static let holdSlack: Double = 6.0
+    /// Tracks touch identifiers that did not originate at an edge,
+    /// preventing normal cursor movements from turning into edge controls.
+    private var disqualifiedTouchIds: Set<Int32> = []
 
     private var activeGesture: ActiveGesture?
 
@@ -58,7 +60,7 @@ final class EdgeGestureEngine {
     }
 
     func reset() {
-        if let current = activeGesture, current.action == .appSwitcher {
+        if let current = activeGesture, current.isSwiping, current.action == .appSwitcher {
             current.switcherSession?.cancel()
         }
         activeGesture = nil
@@ -70,6 +72,7 @@ final class EdgeGestureEngine {
     func consume(touch: GLDTouchPoint?, contacts: Int, timestamp: TimeInterval) {
         guard config.isEnabled else {
             if activeGesture != nil { reset() }
+            disqualifiedTouchIds.removeAll(keepingCapacity: true)
             return
         }
 
@@ -77,12 +80,16 @@ final class EdgeGestureEngine {
         // 2 contacts is scroll/pinch, 3+ contacts is Glide gesture.
         guard contacts == 1, let touch else {
             if let current = activeGesture {
-                if current.action == .appSwitcher {
+                if current.isSwiping && current.action == .appSwitcher {
                     current.switcherSession?.commit()
                 }
-                activeGesture = nil
-                activeEdge = nil
+                reset()
             }
+            disqualifiedTouchIds.removeAll(keepingCapacity: true)
+            return
+        }
+
+        if disqualifiedTouchIds.contains(touch.identifier) {
             return
         }
 
@@ -91,7 +98,7 @@ final class EdgeGestureEngine {
         if let current = activeGesture, current.touchId == touch.identifier {
             advance(current: current, touch: touch, currentPos: currentPos, timestamp: timestamp)
         } else {
-            // No active gesture matching this touch; check if it starts in an edge margin
+            // Touch must originate at the edge to be considered.
             if activeGesture != nil { reset() }
             beginIfNeeded(touch: touch, currentPos: currentPos, timestamp: timestamp)
         }
@@ -100,55 +107,86 @@ final class EdgeGestureEngine {
     // MARK: - Gesture Lifecycle
 
     private func beginIfNeeded(touch: GLDTouchPoint, currentPos: CGPoint, timestamp: TimeInterval) {
+        // Touch must land within the edge margin (touching the edge)
         guard let (edge, action) = detectEdge(for: currentPos, depth: config.marginMm),
               action != .none else {
+            // Touch landed away from the edge; disqualify for its entire lifetime
+            disqualifiedTouchIds.insert(touch.identifier)
             return
         }
 
         let tickConfig = makeTickConfiguration(for: action)
         let accumulator = TickAccumulator(configuration: tickConfig)
 
-        var session: EdgeAppSwitcherSession?
-        if action == .appSwitcher {
-            let switcher = EdgeAppSwitcherSession()
-            if switcher.begin(movingForward: true) {
-                session = switcher
-            } else {
-                return
-            }
-        }
-
         activeGesture = ActiveGesture(
             touchId: touch.identifier,
             edge: edge,
             action: action,
+            startPosition: currentPos,
             lastPosition: currentPos,
+            isSwiping: false,
             accumulator: accumulator,
-            switcherSession: session
+            switcherSession: nil
         )
         activeEdge = edge
     }
 
     private func advance(current: ActiveGesture, touch: GLDTouchPoint, currentPos: CGPoint, timestamp: TimeInterval) {
-        let maxDepth = config.marginMm + Self.holdSlack
-        guard isWithinEdge(currentPos, edge: current.edge, depth: maxDepth) else {
-            if current.action == .appSwitcher {
+        // 1. Strict edge proximity: must remain near the edge ("touching it").
+        // Moving further inward than marginMm immediately terminates the gesture.
+        guard isWithinEdge(currentPos, edge: current.edge, depth: config.marginMm) else {
+            if current.isSwiping && current.action == .appSwitcher {
                 current.switcherSession?.commit()
             }
-            activeGesture = nil
-            activeEdge = nil
+            disqualifiedTouchIds.insert(touch.identifier)
+            reset()
             return
         }
 
+        // 2. Measure movement along the edge and perpendicular to the edge
+        let alongAxisMm: Double
+        let perpAxisMm: Double
         let travelMm: Double
+
         if current.edge.isHorizontal {
+            alongAxisMm = Double(currentPos.x - current.startPosition.x) * surfaceSize.width
+            perpAxisMm = Double(currentPos.y - current.startPosition.y) * surfaceSize.height
             travelMm = Double(currentPos.x - current.lastPosition.x) * surfaceSize.width
         } else {
+            alongAxisMm = Double(currentPos.y - current.startPosition.y) * surfaceSize.height
+            perpAxisMm = Double(currentPos.x - current.startPosition.x) * surfaceSize.width
             travelMm = Double(currentPos.y - current.lastPosition.y) * surfaceSize.height
+        }
+
+        // If the finger moves inward toward trackpad center rather than along the edge,
+        // it is a cursor drag or inward motion, not an edge swipe.
+        if abs(perpAxisMm) > abs(alongAxisMm) + 1.5 {
+            disqualifiedTouchIds.insert(touch.identifier)
+            reset()
+            return
         }
 
         var updated = current
         updated.lastPosition = currentPos
+
+        // 3. Swipe threshold: require intentional motion along the edge (>= 2.0 mm)
+        // before firing any ticks or opening App Switcher.
+        if !updated.isSwiping {
+            let swipeThresholdMm = 2.0
+            if abs(alongAxisMm) >= swipeThresholdMm {
+                updated.isSwiping = true
+                if updated.action == .appSwitcher && updated.switcherSession == nil {
+                    let switcher = EdgeAppSwitcherSession()
+                    let movingForward = alongAxisMm > 0
+                    if switcher.begin(movingForward: movingForward) {
+                        updated.switcherSession = switcher
+                    }
+                }
+            } else {
+                activeGesture = updated
+                return
+            }
+        }
 
         guard abs(travelMm) > 0.0001 else {
             activeGesture = updated

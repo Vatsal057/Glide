@@ -763,7 +763,7 @@ struct EdgeControlsSettings: Codable, Equatable {
     var bottomEdge: EdgeAction = .none
     var leftEdge: EdgeAction = .brightness
     var rightEdge: EdgeAction = .volume
-    var marginMm: Double = 10.0
+    var marginMm: Double = 8.0
 
     static let marginMmRange: ClosedRange<Double> = 3.0...30.0
 
