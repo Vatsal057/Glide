@@ -377,7 +377,7 @@ private func feedTrackPoint(_ points: UnsafePointer<GLDTouchPoint>?, _ count: In
         switch mode {
         case .cornerZone:
             if zone.contains(x: s1.x, y: s1.y, reach: reach) { candidate = s1 }
-        case .anywhere:
+        case .anywhere, .doubleTapHold:
             candidate = s1
         case .twoFingerHold:
             candidate = nil
@@ -389,7 +389,7 @@ private func feedTrackPoint(_ points: UnsafePointer<GLDTouchPoint>?, _ count: In
         streaming = true
     } else {
         switch mode {
-        case .cornerZone, .anywhere:
+        case .cornerZone, .anywhere, .doubleTapHold:
             streaming = candidate != nil
         case .twoFingerHold:
             streaming = contacts == 2 || (wasStreaming && contacts == 1)

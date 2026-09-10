@@ -76,6 +76,8 @@ struct TrackPointTab: View {
                     explainer("Rest one finger in the designated corner, hold for a moment, then push.")
                 case .anywhere:
                     explainer("Rest one finger still anywhere on the trackpad, hold for a moment, then push.")
+                case .doubleTapHold:
+                    explainer("Tap once with one finger, then tap again and keep it down. Hold still for a moment and that finger becomes the pointing stick — then push.\n\nIf you have tap-to-click switched on in System Settings, the two taps still register as a double-click.")
                 }
             }
         }
@@ -183,6 +185,8 @@ struct TrackPointTab: View {
                 explainer("Hold two fingers motionless until armed. Moving earlier leaves the touch to macOS as an ordinary two-finger scroll.")
             case .cornerZone, .anywhere:
                 explainer("A short hold is what separates the stick from an ordinary drag. Move before the hold is up and Glide steps aside, letting macOS handle the touch normally.")
+            case .doubleTapHold:
+                explainer("The double tap is the deliberate part, so the hold that follows can be short. Move before the hold is up and Glide steps aside, letting macOS handle the touch normally.")
             }
 
             SliderRow(
@@ -194,6 +198,18 @@ struct TrackPointTab: View {
                     ? "Time both fingers must rest still before lifting one to engage."
                     : "Zero engages instantly; longer leaves normal drags or swipes alone."
             )
+
+            if settings.activationMode == .doubleTapHold {
+                Divider().padding(.horizontal, 12)
+
+                SliderRow(
+                    label: "Double-tap window",
+                    value: binding(\.doubleTapWindow),
+                    range: TrackPointSettings.doubleTapWindowRange,
+                    format: "%.2f s",
+                    hint: "Longest pause between the two taps. Shorter is harder to trigger by accident."
+                )
+            }
 
             Divider().padding(.horizontal, 12)
 

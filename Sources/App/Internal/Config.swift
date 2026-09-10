@@ -41,16 +41,17 @@ struct GlideConfig {
     }
 
     struct TrackPoint {
-        var enabled: Bool = false
-        var activationMode: String = "two_finger_hold"
+        var enabled: Bool = true
+        var activationMode: String = "double_tap_hold"
         var zone: String = "bottom_right"
-        var zoneSize: Float = 0.16
-        var activationDelay: Double = 0.35
+        var zoneSize: Float = 0.198
+        var activationDelay: Double = 0.59
         var activationMovement: Float = 0.012
-        var deadZone: Float = 0.005
-        var pushRange: Float = 0.055
-        var maxSpeed: Float = 1500
-        var acceleration: Float = 2.2
+        var doubleTapWindow: Double = 0.35
+        var deadZone: Float = 0.006
+        var pushRange: Float = 0.042
+        var maxSpeed: Float = 3350
+        var acceleration: Float = 1.39
         var hapticFeedback: Bool = true
         var scrollEnabled: Bool = true
         var scrollSpeed: Float = 1200
@@ -58,8 +59,8 @@ struct GlideConfig {
     }
 
     struct Tuning {
-        var appSwitcherStepThreshold: Float = 0.003
-        var appSwitcherDebounce: Double = 0.10
+        var appSwitcherStepThreshold: Float = 0.002
+        var appSwitcherDebounce: Double = 0.05
         var continuousStepThreshold: Float = 0.025
         var continuousDebounce: Double = 0.08
         var candidateFrames: Int = 3
@@ -74,10 +75,10 @@ struct GlideConfig {
         var forceClickMarginTop: Float = 0.35
         var forceClickMarginBottom: Float = 0.35
         var edgeMarginEnabled: Bool = true
-        var edgeMarginLeft: Float = 0.05
-        var edgeMarginRight: Float = 0.05
-        var edgeMarginTop: Float = 0.05
-        var edgeMarginBottom: Float = 0.05
+        var edgeMarginLeft: Float = 0.0
+        var edgeMarginRight: Float = 0.0
+        var edgeMarginTop: Float = 0.0
+        var edgeMarginBottom: Float = 0.19
     }
 
     struct Gesture {
@@ -172,6 +173,7 @@ extension GlideConfig {
         cfg.trackPoint.zoneSize           = s.trackPoint.zoneSize
         cfg.trackPoint.activationDelay    = s.trackPoint.activationDelay
         cfg.trackPoint.activationMovement = s.trackPoint.activationMovement
+        cfg.trackPoint.doubleTapWindow    = s.trackPoint.doubleTapWindow
         cfg.trackPoint.deadZone           = s.trackPoint.deadZone
         cfg.trackPoint.pushRange          = s.trackPoint.pushRange
         cfg.trackPoint.maxSpeed           = s.trackPoint.maxSpeed
@@ -279,6 +281,7 @@ extension GlideConfig {
         p.zoneSize           = trackPoint.zoneSize
         p.activationDelay    = trackPoint.activationDelay
         p.activationMovement = trackPoint.activationMovement
+        p.doubleTapWindow    = trackPoint.doubleTapWindow
         p.deadZone           = trackPoint.deadZone
         p.pushRange          = trackPoint.pushRange
         p.maxSpeed           = trackPoint.maxSpeed
@@ -466,6 +469,8 @@ enum GlideConfigSerializer {
             "    zone_size: \(fmt(config.trackPoint.zoneSize))",
             "    activation_delay: \(String(format: "%.2f", config.trackPoint.activationDelay))",
             "    activation_movement: \(fmt(config.trackPoint.activationMovement))",
+            "    # Gap allowed between the two taps of double_tap_hold.",
+            "    double_tap_window: \(String(format: "%.2f", config.trackPoint.doubleTapWindow))",
             "    dead_zone: \(fmt(config.trackPoint.deadZone))",
             "    push_range: \(fmt(config.trackPoint.pushRange))",
             "    max_speed: \(String(format: "%.0f", config.trackPoint.maxSpeed))",
@@ -761,6 +766,7 @@ enum GlideConfigParser {
             case "zone_size":           point.zoneSize           = floatVal(val)  ?? point.zoneSize
             case "activation_delay":    point.activationDelay    = doubleVal(val) ?? point.activationDelay
             case "activation_movement": point.activationMovement = floatVal(val)  ?? point.activationMovement
+            case "double_tap_window":   point.doubleTapWindow    = doubleVal(val) ?? point.doubleTapWindow
             case "dead_zone":           point.deadZone           = floatVal(val)  ?? point.deadZone
             case "push_range":          point.pushRange          = floatVal(val)  ?? point.pushRange
             case "max_speed":           point.maxSpeed           = floatVal(val)  ?? point.maxSpeed

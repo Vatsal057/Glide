@@ -640,20 +640,31 @@ enum TrackPointActivationMode: String, Codable, CaseIterable {
     case twoFingerHold = "two_finger_hold"
     case cornerZone    = "corner"
     case anywhere      = "anywhere"
+    case doubleTapHold = "double_tap_hold"
 
     var displayName: String {
         switch self {
         case .twoFingerHold: return "Two-Finger Hold"
         case .cornerZone:    return "Corner Hold"
         case .anywhere:      return "One-Finger Hold"
+        case .doubleTapHold: return "Double-Tap & Hold"
         }
     }
 }
 
 struct TrackPointSettings: Codable, Equatable {
-    var enabled: Bool = false
-    /// How TrackPoint is initiated: 2-finger hold anywhere, 1-finger corner hold, or 1-finger anywhere.
-    var activationMode: TrackPointActivationMode = .twoFingerHold
+    /// On by default. It is the one thing here a trackpad cannot already do, so
+    /// leaving it switched off means most people never find out it exists —
+    /// and `doubleTapHold` is deliberate enough that nobody triggers it by
+    /// accident while they are still unaware of it.
+    var enabled: Bool = true
+    /// How TrackPoint is initiated: 2-finger hold anywhere, 1-finger corner hold,
+    /// 1-finger hold anywhere, or 1-finger double-tap-then-hold anywhere.
+    ///
+    /// Double-tap-and-hold is the default because it is the only mode that can't
+    /// be entered by resting a finger on the pad: every hold-only mode has to
+    /// choose between engaging too eagerly and feeling sluggish.
+    var activationMode: TrackPointActivationMode = .doubleTapHold
     /// Which corner anchors the pointer stick (when activationMode is .cornerZone).
     var zone: TrackpadZone = .bottomRight
     /// Resting a second finger anywhere on the pad turns the engaged stick into a
@@ -666,23 +677,30 @@ struct TrackPointSettings: Codable, Equatable {
     /// Reverses both scroll axes, matching what the system's natural-scrolling
     /// switch does.
     var invertScroll: Bool = false
-    /// Zone depth along each axis (normalized). 0.16 → outer 16% of both axes.
-    var zoneSize: Float = 0.16
+    /// Zone depth along each axis (normalized). 0.20 → outer 20% of both axes.
+    var zoneSize: Float = 0.198
     /// Motionless time before the stick engages or arms. Keeps normal cursor
     /// drags or scrolls from being hijacked.
-    var activationDelay: TimeInterval = 0.35
+    var activationDelay: TimeInterval = 0.59
     /// Push distance the finger travels before it must have committed — exceed
     /// it during `activationDelay` and the touch is left to macOS.
     var activationMovement: Float = 0.012
+    /// Longest gap between the first tap lifting and the second tap landing for
+    /// the pair to count as a double tap (`.doubleTapHold` only).
+    var doubleTapWindow: TimeInterval = 0.35
     /// Push distance ignored around the anchor, so a resting finger doesn't drift.
-    var deadZone: Float = 0.005
+    var deadZone: Float = 0.006
     /// Push distance that reaches `maxSpeed`. Smaller feels twitchier.
-    var pushRange: Float = 0.055
+    var pushRange: Float = 0.042
     /// Cursor speed in points/second at full push.
-    var maxSpeed: Float = 1500
+    var maxSpeed: Float = 3350
     /// Response curve exponent. 1 is linear; higher trades top-end reach for
     /// fine control near the anchor, which is what a pointing stick wants.
-    var acceleration: Float = 2.2
+    ///
+    /// Paired with a short `pushRange` and a high `maxSpeed`: a small push stays
+    /// slow enough to land on a pixel, and the whole screen is still one lean
+    /// away. A gentler curve at this top speed overshoots everything.
+    var acceleration: Float = 1.39
     /// Tap the Taptic Engine when the stick engages and releases.
     var hapticFeedback: Bool = true
 
@@ -690,17 +708,18 @@ struct TrackPointSettings: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        enabled            = try c.decodeIfPresent(Bool.self,         forKey: .enabled)            ?? false
+        enabled            = try c.decodeIfPresent(Bool.self,         forKey: .enabled)            ?? true
         activationMode     = (try? c.decodeIfPresent(TrackPointActivationMode.self, forKey: .activationMode))
-                             .flatMap { $0 }                                                       ?? .cornerZone
+                             .flatMap { $0 }                                                       ?? .doubleTapHold
         zone               = (try? c.decodeIfPresent(TrackpadZone.self, forKey: .zone))
                              .flatMap { $0 }                                                       ?? .bottomRight
         scrollEnabled      = try c.decodeIfPresent(Bool.self,         forKey: .scrollEnabled)      ?? true
         scrollSpeed        = try c.decodeIfPresent(Float.self,        forKey: .scrollSpeed)        ?? 1200
         invertScroll       = try c.decodeIfPresent(Bool.self,         forKey: .invertScroll)       ?? false
-        zoneSize           = try c.decodeIfPresent(Float.self,        forKey: .zoneSize)           ?? 0.16
-        activationDelay    = try c.decodeIfPresent(TimeInterval.self, forKey: .activationDelay)    ?? 0.35
+        zoneSize           = try c.decodeIfPresent(Float.self,        forKey: .zoneSize)           ?? 0.198
+        activationDelay    = try c.decodeIfPresent(TimeInterval.self, forKey: .activationDelay)    ?? 0.59
         activationMovement = try c.decodeIfPresent(Float.self,        forKey: .activationMovement) ?? 0.012
+        doubleTapWindow    = try c.decodeIfPresent(TimeInterval.self, forKey: .doubleTapWindow)    ?? 0.35
         deadZone           = try c.decodeIfPresent(Float.self,        forKey: .deadZone)           ?? 0.005
         pushRange          = try c.decodeIfPresent(Float.self,        forKey: .pushRange)          ?? 0.055
         maxSpeed           = try c.decodeIfPresent(Float.self,        forKey: .maxSpeed)           ?? 1500
@@ -710,6 +729,7 @@ struct TrackPointSettings: Codable, Equatable {
 
     static let zoneSizeRange:        ClosedRange<Float>        = 0.08...0.35
     static let activationDelayRange: ClosedRange<TimeInterval> = 0.0...1.0
+    static let doubleTapWindowRange: ClosedRange<TimeInterval> = 0.15...0.80
     static let deadZoneRange:        ClosedRange<Float>        = 0.0...0.02
     static let pushRangeRange:       ClosedRange<Float>        = 0.02...0.15
     static let maxSpeedRange:        ClosedRange<Float>        = 200...4000
@@ -725,6 +745,7 @@ struct TrackPointSettings: Codable, Equatable {
         n.zoneSize           = n.zoneSize.clamped(to: zoneSizeRange)
         n.activationDelay    = n.activationDelay.clamped(to: activationDelayRange)
         n.activationMovement = n.activationMovement.clamped(to: 0.004...0.05)
+        n.doubleTapWindow    = n.doubleTapWindow.clamped(to: doubleTapWindowRange)
         n.deadZone           = n.deadZone.clamped(to: deadZoneRange)
         n.pushRange          = n.pushRange.clamped(to: pushRangeRange)
         n.maxSpeed           = n.maxSpeed.clamped(to: maxSpeedRange)
@@ -752,8 +773,10 @@ enum SpeedLogic: String, Codable, CaseIterable {
 
 struct GestureTuning: Codable, Equatable {
     var initialThreshold:           Float        = 0.014
-    var appSwitcherStepThreshold:   Float        = 0.003
-    var appSwitcherDebounce:        TimeInterval = 0.10
+    /// Small and short on purpose: the switcher is *browsed*, and a step that
+    /// lags behind the finger makes a three-app hop feel like guesswork.
+    var appSwitcherStepThreshold:   Float        = 0.002
+    var appSwitcherDebounce:        TimeInterval = 0.05
     var continuousStepThreshold:    Float        = 0.025
     var continuousDebounce:         TimeInterval = 0.08
     var fastVelocityThreshold:      Float        = 0.009
@@ -770,15 +793,20 @@ struct GestureTuning: Codable, Equatable {
     /// on each axis counts as that corner; the middle stays position-blind.
     var forceClickMargin:           EdgeMargin   = EdgeMargin(left: 0.35, right: 0.35, top: 0.35, bottom: 0.35)
     var edgeMarginEnabled:          Bool         = true
-    var edgeMargin:                 EdgeMargin   = EdgeMargin()
+    /// Palm rejection shaped like a laptop rather than like a square. On a
+    /// MacBook the only contact that isn't a finger is the base of the thumb
+    /// resting along the near edge, so the budget goes almost entirely to the
+    /// bottom; trimming the other three edges just shrinks the usable pad and
+    /// makes swipes that start near the rim die for no reason.
+    var edgeMargin:                 EdgeMargin   = EdgeMargin(left: 0, right: 0, top: 0, bottom: 0.19)
 
     init() {}
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         initialThreshold          = try c.decodeIfPresent(Float.self,        forKey: .initialThreshold)          ?? 0.014
-        appSwitcherStepThreshold  = try c.decodeIfPresent(Float.self,        forKey: .appSwitcherStepThreshold)  ?? 0.003
-        appSwitcherDebounce       = try c.decodeIfPresent(TimeInterval.self, forKey: .appSwitcherDebounce)       ?? 0.10
+        appSwitcherStepThreshold  = try c.decodeIfPresent(Float.self,        forKey: .appSwitcherStepThreshold)  ?? 0.002
+        appSwitcherDebounce       = try c.decodeIfPresent(TimeInterval.self, forKey: .appSwitcherDebounce)       ?? 0.05
         continuousStepThreshold   = try c.decodeIfPresent(Float.self,        forKey: .continuousStepThreshold)   ?? 0.025
         continuousDebounce        = try c.decodeIfPresent(TimeInterval.self, forKey: .continuousDebounce)        ?? 0.08
         fastVelocityThreshold     = try c.decodeIfPresent(Float.self,        forKey: .fastVelocityThreshold)     ?? 0.009
@@ -806,7 +834,8 @@ struct GestureTuning: Codable, Equatable {
             forceClickMargin = EdgeMargin(left: 0.35, right: 0.35, top: 0.35, bottom: 0.35)
         }
         edgeMarginEnabled         = try c.decodeIfPresent(Bool.self,         forKey: .edgeMarginEnabled)         ?? true
-        edgeMargin                = try c.decodeIfPresent(EdgeMargin.self,   forKey: .edgeMargin)                ?? EdgeMargin()
+        edgeMargin                = try c.decodeIfPresent(EdgeMargin.self,   forKey: .edgeMargin)
+                                    ?? EdgeMargin(left: 0, right: 0, top: 0, bottom: 0.19)
     }
 }
 
@@ -1047,18 +1076,87 @@ final class Settings {
 
     static let defaultAppSwitcher = AppSwitcherSettings(enabled: true, fingers: 3)
 
-    static let defaultRules: [GestureRule] = [
-        GestureRule(fingers: 3, direction: .click,      action: .quitApp),
-        GestureRule(fingers: 3, direction: .swipeUp,    action: .missionControl),
-        GestureRule(fingers: 3, direction: .swipeDown,  action: .minimizeAllApps),
-        GestureRule(fingers: 4, direction: .swipeUp,    action: .maximizeWindow),
-        GestureRule(fingers: 4, direction: .swipeDown,  action: .restoreWindow),
-        GestureRule(fingers: 4, direction: .swipeLeft,  action: .snapLeft),
-        GestureRule(fingers: 4, direction: .swipeRight, action: .snapRight),
-        GestureRule(fingers: 5, direction: .swipeUp,    action: .enterFullscreen),
-        GestureRule(fingers: 5, direction: .swipeDown,  action: .exitFullscreen),
-        GestureRule(fingers: 5, direction: .click,      action: .lockScreen),
-    ]
+    /// The gesture set a new install starts with, and what "Reset to Defaults"
+    /// restores.
+    ///
+    /// Organised by finger count rather than by action, because that is how a
+    /// hand learns it: three fingers act on the *system*, four on the *window*,
+    /// five jump straight to fullscreen. Nothing here needs a speed tier, an app
+    /// to be installed, or a script to run — the set has to work on a machine
+    /// it has never seen.
+    ///
+    /// **Ordering is load-bearing.** When two rules match the same gesture the
+    /// later one wins, so a broad rule is listed first and its window-state
+    /// override follows.
+    static let defaultRules: [GestureRule] = {
+        /// `zone` and `hapticPattern` aren't initializer parameters, so the
+        /// helpers set them afterwards.
+        func swipe(_ fingers: Int,
+                   _ direction: GestureDirection,
+                   _ action: GestureAction,
+                   state: WindowStateFilter = .any,
+                   reciprocal: Bool = true,
+                   haptic: HapticPattern? = nil) -> GestureRule {
+            var rule = GestureRule(fingers: fingers,
+                                   direction: direction,
+                                   action: action,
+                                   windowStateFilter: state,
+                                   reciprocalEnabled: reciprocal)
+            rule.hapticPattern = haptic
+            return rule
+        }
+
+        func forceClick(_ fingers: Int,
+                        _ zone: TrackpadZone,
+                        _ action: GestureAction,
+                        haptic: HapticPattern? = nil) -> GestureRule {
+            var rule = GestureRule(fingers: fingers, direction: .forceClick, action: action)
+            rule.zone = zone
+            rule.hapticPattern = haptic
+            return rule
+        }
+
+        return [
+            // ── 3 fingers — the system layer ──
+            // Horizontal is absent on purpose: three-finger left/right is the
+            // App Switcher's reserved slot and is stripped from any rule list.
+            swipe(3, .swipeUp,   .missionControl,  haptic: .doubleTap),
+            swipe(3, .swipeDown, .minimizeAllApps, haptic: .falling),
+
+            GestureRule(fingers: 3, direction: .click, action: .quitFrontmost),
+            // Quitting Finder, or Glide itself while its window is open, is never
+            // what the gesture meant. Listed after the broad rule so they win.
+            GestureRule(fingers: 3, direction: .click, action: .closeWindow,
+                        appFilter: "com.apple.finder"),
+            GestureRule(fingers: 3, direction: .click, action: .closeWindow,
+                        appFilter: "com.glide.app"),
+
+            // Screenshots are silent: the shutter is the feedback, and a haptic
+            // on top of it reads as a second, phantom capture.
+            forceClick(3, .topLeft,  .screenshotFullClipboard, haptic: .none),
+            forceClick(3, .topRight, .screenshotAreaClipboard, haptic: .none),
+
+            // ── 4 fingers — the window layer ──
+            // A ladder, one rung per swipe: up grows the window (normal →
+            // maximized → fullscreen), down walks the same steps back and then
+            // minimizes. The window's current state picks the rung, so the same
+            // gesture keeps doing "more" or "less" without anything to remember.
+            swipe(4, .swipeUp,   .maximizeWindow,  reciprocal: false),
+            swipe(4, .swipeUp,   .enterFullscreen, state: .maximized),
+            swipe(4, .swipeDown, .minimizeWindow,  state: .notMaximized, reciprocal: false),
+            swipe(4, .swipeDown, .restoreWindow,   state: .maximized),
+            swipe(4, .swipeDown, .exitFullscreen,  state: .fullscreen),
+
+            swipe(4, .swipeLeft,  .snapLeft),
+            swipe(4, .swipeRight, .snapRight),
+
+            forceClick(4, .any, .hideApp),
+
+            // ── 5 fingers — straight to fullscreen ──
+            swipe(5, .swipeUp,   .enterFullscreen, state: .notFullscreen),
+            swipe(5, .swipeDown, .exitFullscreen,  state: .fullscreen),
+        ]
+    }()
 }
 
 

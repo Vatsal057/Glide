@@ -42,6 +42,17 @@ struct TrackPointSample {
 /// of it and macOS keeps the touch. Native cursor tracking is only suppressed
 /// once engaged, so a rejected touch never loses any movement.
 ///
+/// `.doubleTapHold` puts two extra states in front of the same `arming` step, so
+/// a lone finger merely resting on the pad never activates anything:
+///
+///   idle ──lone contact──▶ firstTapDown ──lifted quickly──▶ awaitingSecondTap
+///                               │                                   │
+///                     held long / moved / joined                    │
+///                               ▼                        contact lands in time
+///                        rejected or idle                           │
+///                                                                   ▼
+///                                                     arming ──▶ engaged
+///
 /// All methods run on the main thread.
 final class TrackPointController {
 
@@ -56,6 +67,13 @@ final class TrackPointController {
         case twoFingerArming(id1: Int32, id2: Int32, anchor1: CGPoint, anchor2: CGPoint)
         /// Two-finger hold: delay expired, fingers held still! Ready for one finger to lift to engage.
         case twoFingerArmed(id1: Int32, id2: Int32, anchor1: CGPoint, anchor2: CGPoint)
+        /// Double-tap & hold: a lone contact is down and may turn out to be the
+        /// first of the two taps. `landed` is when it arrived, so its duration can
+        /// be measured on lift.
+        case firstTapDown(id: Int32, anchor: CGPoint, landed: TimeInterval)
+        /// Double-tap & hold: the first tap has lifted cleanly. A second contact
+        /// landing inside `doubleTapWindow` starts the hold.
+        case awaitingSecondTap(liftedAt: TimeInterval)
         /// This contact moved too far to be a stick; ignore it until it lifts.
         case rejected(id: Int32)
         case engaged(id: Int32, anchor: CGPoint, mode: TrackPointMode)
@@ -65,12 +83,16 @@ final class TrackPointController {
         /// state machine would stop hearing about the finger it is waiting on.
         var trackedID: Int32 {
             switch self {
-            case .idle:                  return -1
-            case .arming(let id, _):     return id
-            case .twoFingerArming:       return -1
-            case .twoFingerArmed:        return -1
-            case .rejected(let id):      return id
-            case .engaged(let id, _, _): return id
+            case .idle:                        return -1
+            case .arming(let id, _):           return id
+            case .twoFingerArming:             return -1
+            case .twoFingerArmed:              return -1
+            case .firstTapDown(let id, _, _):  return id
+            // Nothing is on the pad between the taps; the next contact will be a
+            // fresh identifier, so there is nothing to follow.
+            case .awaitingSecondTap:           return -1
+            case .rejected(let id):            return id
+            case .engaged(let id, _, _):       return id
             }
         }
     }
@@ -83,6 +105,15 @@ final class TrackPointController {
     /// Ceiling on a single integration step, so a stalled main thread can't
     /// discharge its whole backlog into one cursor jump.
     private static let maxStep = 0.05
+
+    /// Longest a contact may stay down and still read as the first *tap* of a
+    /// double tap. Anything longer is someone resting or dragging, and is left to
+    /// macOS rather than becoming the opening half of an activation.
+    private static let tapMaxDuration: TimeInterval = 0.30
+    /// Travel allowed during that first tap. Looser than `activationMovement`,
+    /// which governs a deliberate motionless hold — a quick tap rolls the
+    /// fingertip a little and shouldn't be punished for it.
+    private static let tapMaxMovement: CGFloat = 0.03
 
     /// Kept in lockstep with the multitouch thread's view of what to follow, so
     /// the two can't drift apart on any path out of a session.
@@ -97,6 +128,9 @@ final class TrackPointController {
     private var lastSample: TrackPointSample?
     private var offset: CGPoint = .zero
     private var armTimer: DispatchWorkItem?
+    /// Expires `awaitingSecondTap`. With nothing on the pad no frames arrive, so
+    /// the way back to idle has to be driven by the clock.
+    private var tapGapTimer: DispatchWorkItem?
     private var driveTimer: DispatchSourceTimer?
     private var lastTick: TimeInterval = 0
 
@@ -132,6 +166,7 @@ final class TrackPointController {
     /// Drops any session and returns the cursor to macOS.
     func reset() {
         cancelArmTimer()
+        cancelTapGapTimer()
         if isEngaged { releaseControl(playHaptic: false) }
         state = .idle
         lastSample = nil
@@ -262,11 +297,58 @@ final class TrackPointController {
                 state = .rejected(id: id)
             }
 
+        case .firstTapDown(let id, let anchor, let landed):
+            if contacts == 0 {
+                // The tap is over. Only a brief, near-motionless contact counts as
+                // the opening half; a long press or a drag is someone using the
+                // trackpad normally, and gets no window.
+                let held = ProcessInfo.processInfo.systemUptime - landed
+                if held <= Self.tapMaxDuration {
+                    awaitSecondTap()
+                } else {
+                    state = .idle
+                }
+                return
+            }
+            guard contacts == 1, let candidate else {
+                // A second finger joined, so this is a scroll or a gesture.
+                state = .rejected(id: id)
+                return
+            }
+            guard candidate.id == id else {
+                // Identifier churn on a barely-moving contact. Same tap, new name:
+                // adopt it without restarting the clock.
+                state = .firstTapDown(id: candidate.id, anchor: anchor, landed: landed)
+                return
+            }
+            let dx = CGFloat(candidate.x) - anchor.x
+            let dy = CGFloat(candidate.y) - anchor.y
+            if (dx * dx + dy * dy).squareRoot() > Self.tapMaxMovement {
+                state = .rejected(id: id)
+            }
+
+        case .awaitingSecondTap(let liftedAt):
+            guard contacts > 0 else { return }
+            guard contacts == 1, let candidate else {
+                cancelTapGapTimer()
+                state = .rejected(id: -1)
+                return
+            }
+            if ProcessInfo.processInfo.systemUptime - liftedAt <= Settings.shared.trackPoint.doubleTapWindow {
+                // Second tap landed in time. Holding it still now engages, and
+                // pushing off early hands the touch back to macOS — the same
+                // contract every other hold mode honours.
+                arm(candidate)
+            } else {
+                // The timer that would have expired this hasn't run yet.
+                beginFirstTap(candidate)
+            }
+
         case .rejected(let id):
             if contacts == 0 {
                 state = .idle
             } else if let candidate, candidate.id != id {
-                arm(candidate)
+                beginSingleFingerSession(candidate)
             }
 
         case .idle:
@@ -277,9 +359,9 @@ final class TrackPointController {
                 if contacts == 2, let s1 = sample1, let s2 = sample2 {
                     armTwoFinger(s1, s2)
                 }
-            case .cornerZone, .anywhere:
+            case .cornerZone, .anywhere, .doubleTapHold:
                 if let candidate {
-                    arm(candidate)
+                    beginSingleFingerSession(candidate)
                 }
             }
         }
@@ -318,6 +400,7 @@ final class TrackPointController {
 
     private func arm(_ sample: TrackPointSample) {
         cancelArmTimer()
+        cancelTapGapTimer()
         let anchor = CGPoint(x: CGFloat(sample.x), y: CGFloat(sample.y))
         state = .arming(id: sample.id, anchor: anchor)
         offset = .zero
@@ -342,6 +425,7 @@ final class TrackPointController {
 
     private func engage(with sample: TrackPointSample) {
         cancelArmTimer()
+        cancelTapGapTimer()
         let startMode = mode(forContacts: 1)
         let anchor = CGPoint(x: CGFloat(sample.x), y: CGFloat(sample.y))
         lastSample = sample
@@ -393,6 +477,50 @@ final class TrackPointController {
     private func cancelArmTimer() {
         armTimer?.cancel()
         armTimer = nil
+    }
+
+    private func cancelTapGapTimer() {
+        tapGapTimer?.cancel()
+        tapGapTimer = nil
+    }
+
+    /// A lone eligible contact has appeared with no session in progress. In
+    /// `.doubleTapHold` that contact is only ever the *first* half of the
+    /// activation; every other single-finger mode arms the hold straight away.
+    private func beginSingleFingerSession(_ sample: TrackPointSample) {
+        if Settings.shared.trackPoint.activationMode == .doubleTapHold {
+            beginFirstTap(sample)
+        } else {
+            arm(sample)
+        }
+    }
+
+    private func beginFirstTap(_ sample: TrackPointSample) {
+        cancelArmTimer()
+        cancelTapGapTimer()
+        state = .firstTapDown(id: sample.id,
+                              anchor: CGPoint(x: CGFloat(sample.x), y: CGFloat(sample.y)),
+                              landed: ProcessInfo.processInfo.systemUptime)
+        offset = .zero
+    }
+
+    /// The first tap lifted cleanly. Open the window for its partner.
+    private func awaitSecondTap() {
+        cancelArmTimer()
+        cancelTapGapTimer()
+        let now = ProcessInfo.processInfo.systemUptime
+        state = .awaitingSecondTap(liftedAt: now)
+        offset = .zero
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard case .awaitingSecondTap(let liftedAt) = self.state, liftedAt == now else { return }
+            self.tapGapTimer = nil
+            self.state = .idle
+        }
+        tapGapTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Settings.shared.trackPoint.doubleTapWindow,
+                                     execute: work)
     }
 
     /// Measures the push, and lets the anchor trail a finger that has pushed past
