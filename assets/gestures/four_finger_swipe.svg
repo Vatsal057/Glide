@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 380" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b2e" />
+      <stop offset="100%" stop-color="#110e1b" />
+    </linearGradient>
+
+    <linearGradient id="trackpadGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2d283e" />
+      <stop offset="100%" stop-color="#231f32" />
+    </linearGradient>
+
+    <linearGradient id="fingerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d8d0f2" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#a092c8" stop-opacity="0.20" />
+    </linearGradient>
+
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="600" height="380" rx="16" fill="url(#bgGrad)" />
+
+  <!-- Title & Subtitle -->
+  <text x="300" y="38" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">4-Finger Swipe Up</text>
+  <text x="300" y="58" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" fill="#a099bc" text-anchor="middle">Window Management Gesture with 4-Finger Silhouettes</text>
+
+  <!-- Trackpad Surface -->
+  <rect x="100" y="75" width="400" height="250" rx="14" fill="url(#trackpadGrad)" stroke="#453e59" stroke-width="2" filter="url(#shadow)" />
+
+  <!-- Upward Swipe Arrows -->
+  <g stroke="#c7bde7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.9">
+    <path d="M 300 150 L 300 110" />
+    <path d="M 288 122 L 300 110 L 312 122" />
+  </g>
+
+  <!-- Index Finger (cx=225, cy=185) -->
+  <g class="finger">
+    <path d="M 214 197 C 214 185, 236 185, 236 197 L 239 262 L 211 262 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 218.4 201 C 218.4 193, 231.6 193, 231.6 201 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+    <circle cx="225" cy="185" r="11" fill="#c7bde7" opacity="0.9" />
+    <circle cx="225" cy="185" r="18" fill="none" stroke="#c7bde7" stroke-width="1.5" opacity="0.4" />
+  </g>
+  <text x="225" y="278" font-family="-apple-system, sans-serif" font-size="9.5" fill="#a099bc" text-anchor="middle">Index</text>
+
+  <!-- Middle Finger (cx=275, cy=175) -->
+  <g class="finger">
+    <path d="M 264 187 C 264 175, 286 175, 286 187 L 289 252 L 261 252 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 268.4 191 C 268.4 183, 281.6 183, 281.6 191 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+    <circle cx="275" cy="175" r="11" fill="#c7bde7" opacity="0.9" />
+    <circle cx="275" cy="175" r="18" fill="none" stroke="#c7bde7" stroke-width="1.5" opacity="0.4" />
+  </g>
+  <text x="275" y="268" font-family="-apple-system, sans-serif" font-size="9.5" fill="#a099bc" text-anchor="middle">Middle</text>
+
+  <!-- Ring Finger (cx=325, cy=185) -->
+  <g class="finger">
+    <path d="M 314 197 C 314 185, 336 185, 336 197 L 339 262 L 311 262 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 318.4 201 C 318.4 193, 331.6 193, 331.6 201 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+    <circle cx="325" cy="185" r="11" fill="#c7bde7" opacity="0.9" />
+    <circle cx="325" cy="185" r="18" fill="none" stroke="#c7bde7" stroke-width="1.5" opacity="0.4" />
+  </g>
+  <text x="325" y="278" font-family="-apple-system, sans-serif" font-size="9.5" fill="#a099bc" text-anchor="middle">Ring</text>
+
+  <!-- Pinky Finger (cx=375, cy=198) -->
+  <g class="finger">
+    <path d="M 365 208 C 365 198, 385 198, 385 208 L 387 270 L 363 270 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 368.5 212 C 368.5 205, 381.5 205, 381.5 212 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+    <circle cx="375" cy="198" r="10" fill="#c7bde7" opacity="0.9" />
+    <circle cx="375" cy="198" r="16" fill="none" stroke="#c7bde7" stroke-width="1.5" opacity="0.4" />
+  </g>
+  <text x="375" y="286" font-family="-apple-system, sans-serif" font-size="9.5" fill="#a099bc" text-anchor="middle">Pinky</text>
+
+  <!-- Bottom Caption -->
+  <text x="300" y="306" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" font-weight="600" fill="#c7bde7" text-anchor="middle">4-Finger Swipe: Maximize or fullscreen active window</text>
+
+</svg>

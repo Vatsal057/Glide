@@ -5,6 +5,7 @@
 Instead of memorizing keyboard shortcuts, Glide lets you use trackpad movements. Open **Preferences → Gestures** to see and edit them. Every gesture is built from a few simple elements:
 
 - **Finger count.** Gestures use **3**, **4**, or **5** fingers.
+  <br><img src="../assets/gestures/four_finger_swipe.svg" width="220">
 - **Gesture type:**
   - **Swipe** — sliding your fingers in a direction (**Up**, **Down**, **Left**, or **Right**).
     <br><img src="../assets/gestures/swipe_up.svg" width="220"> <img src="../assets/gestures/swipe_down.svg" width="220">

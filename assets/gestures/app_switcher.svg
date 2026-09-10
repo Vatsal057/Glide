@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 380" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b2e" />
+      <stop offset="100%" stop-color="#110e1b" />
+    </linearGradient>
+
+    <linearGradient id="trackpadGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2d283e" />
+      <stop offset="100%" stop-color="#231f32" />
+    </linearGradient>
+
+    <linearGradient id="fingerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d8d0f2" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#a092c8" stop-opacity="0.20" />
+    </linearGradient>
+
+    <linearGradient id="app1Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+
+    <linearGradient id="app2Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+
+    <linearGradient id="app3Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#6d28d9" />
+    </linearGradient>
+
+    <linearGradient id="app4Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+
+    <linearGradient id="app5Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#64748b" />
+      <stop offset="100%" stop-color="#475569" />
+    </linearGradient>
+
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="600" height="380" rx="16" fill="url(#bgGrad)" />
+
+  <!-- Title & Subtitle -->
+  <text x="300" y="38" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">App Switcher: 3-Finger Hold &amp; Swipe</text>
+  <text x="300" y="58" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" fill="#a099bc" text-anchor="middle">2D Spatial Navigation: Horizontal for Apps, Vertical for Windows</text>
+
+  <!-- Trackpad Surface -->
+  <rect x="100" y="75" width="400" height="250" rx="14" fill="url(#trackpadGrad)" stroke="#453e59" stroke-width="2" filter="url(#shadow)" />
+
+  <!-- App Switcher Mini Rail Overlay -->
+  <g transform="translate(300, 104)">
+    <!-- Rail Glass Slab -->
+    <rect x="-115" y="-22" width="230" height="44" rx="12" fill="#1e1b2e" stroke="#453e59" stroke-width="1.5" opacity="0.95" />
+
+    <!-- App 1 (Finder) -->
+    <rect x="-98" y="-13" width="26" height="26" rx="6" fill="url(#app1Grad)" />
+    <circle cx="-85" cy="0" r="4" fill="#ffffff" opacity="0.8" />
+
+    <!-- App 2 (Safari) -->
+    <rect x="-62" y="-13" width="26" height="26" rx="6" fill="url(#app2Grad)" />
+    <circle cx="-49" cy="0" r="5" fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0.8" />
+
+    <!-- App 3 [Active Selection - Terminal] -->
+    <rect x="-21" y="-18" width="36" height="36" rx="9" fill="#2d283e" stroke="#c7bde7" stroke-width="2" />
+    <rect x="-17" y="-14" width="28" height="28" rx="7" fill="url(#app3Grad)" />
+    <text x="-3" y="4" font-family="'SF Mono', Menlo, monospace" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">&gt;_</text>
+
+    <!-- Vertical Window Shelf Cue (Under Selected App) -->
+    <g stroke="#c7bde7" stroke-width="1.2" opacity="0.8">
+      <line x1="-12" y1="21" x2="6" y2="21" />
+      <polyline points="-5,23 -3,25 -1,23" fill="none" stroke-width="1" />
+    </g>
+
+    <!-- App 4 (Notes) -->
+    <rect x="25" y="-13" width="26" height="26" rx="6" fill="url(#app4Grad)" />
+    <line x1="31" y1="-5" x2="45" y2="-5" stroke="#ffffff" stroke-width="1.5" opacity="0.8" stroke-linecap="round" />
+    <line x1="31" y1="1" x2="41" y2="1" stroke="#ffffff" stroke-width="1.5" opacity="0.8" stroke-linecap="round" />
+
+    <!-- App 5 (Settings) -->
+    <rect x="61" y="-13" width="26" height="26" rx="6" fill="url(#app5Grad)" />
+    <circle cx="74" cy="0" r="4" fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0.8" />
+  </g>
+
+  <!-- 2D Directional Navigation Arrows -->
+  <!-- Horizontal App Navigation (Left / Right) -->
+  <g stroke="#c7bde7" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.9">
+    <!-- Left Arrow (Previous App) -->
+    <path d="M 225 178 L 165 178" />
+    <path d="M 178 168 L 165 178 L 178 188" />
+    <!-- Right Arrow (Next App) -->
+    <path d="M 375 178 L 435 178" />
+    <path d="M 422 168 L 435 178 L 422 188" />
+  </g>
+
+  <!-- Vertical Window Navigation (Up / Down) -->
+  <g stroke="#a092c8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.85">
+    <!-- Up Arrow (Previous Window) -->
+    <path d="M 300 146 L 300 134" />
+    <path d="M 295 140 L 300 134 L 305 140" />
+    <!-- Down Arrow (Next Window) -->
+    <path d="M 300 205 L 300 220" />
+    <path d="M 295 214 L 300 220 L 305 214" />
+  </g>
+
+  <!-- 3-Finger Contact Points & Silhouettes -->
+  <!-- Index Finger (cx=250, cy=180) -->
+  <g class="finger">
+    <path d="M 239 192 C 239 180, 261 180, 261 192 L 264 256 L 236 256 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 243.4 196 C 243.4 188, 256.6 188, 256.6 196 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+    <circle cx="250" cy="180" r="12" fill="#c7bde7" opacity="0.9" />
+    <circle cx="250" cy="180" r="20" fill="none" stroke="#c7bde7" stroke-width="1.5" opacity="0.4" />
+  </g>
+  <text x="250" y="272" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Index</text>
+
+  <!-- Middle Finger (cx=300, cy=170) -->
+  <g class="finger">
+    <path d="M 289 182 C 289 170, 311 170, 311 182 L 314 246 L 286 246 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 293.4 186 C 293.4 178, 306.6 178, 306.6 186 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+    <circle cx="300" cy="170" r="12" fill="#c7bde7" opacity="0.9" />
+    <circle cx="300" cy="170" r="20" fill="none" stroke="#c7bde7" stroke-width="1.5" opacity="0.4" />
+  </g>
+  <text x="300" y="262" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Middle</text>
+
+  <!-- Ring Finger (cx=350, cy=180) -->
+  <g class="finger">
+    <path d="M 339 192 C 339 180, 361 180, 361 192 L 364 256 L 336 256 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 343.4 196 C 343.4 188, 356.6 188, 356.6 196 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+    <circle cx="350" cy="180" r="12" fill="#c7bde7" opacity="0.9" />
+    <circle cx="350" cy="180" r="20" fill="none" stroke="#c7bde7" stroke-width="1.5" opacity="0.4" />
+  </g>
+  <text x="350" y="272" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Ring</text>
+
+  <!-- Bottom Caption -->
+  <text x="300" y="306" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" font-weight="600" fill="#c7bde7" text-anchor="middle">App Switcher: Swipe left/right for apps, up/down for windows</text>
+
+</svg>

@@ -14,6 +14,7 @@ You don't have to use the same gesture for everything everywhere. Every gesture'
 
   This is how the built-in gestures build a "ladder": swipe up once to maximize, swipe up again (now that the window is maximized) to go fullscreen. Same gesture, two window states, two outcomes.
 - **Reciprocal (reverse) gestures.** For swipes, this lets the opposite direction undo the action — swipe up to maximize, swipe down right after to restore. Enabled by default for most actions that have a natural opposite (maximize ↔ restore, volume up ↔ down, next track ↔ previous). Turn it off, or pick a custom reverse action, in Conditions.
+- **Corner zones (Force Click).** Restrict a Force Click to fire only when pressed inside a specific corner of the trackpad — **Top-Left**, **Top-Right**, **Bottom-Left**, or **Bottom-Right** — or allow it **Anywhere**. For example, the defaults map a top-left force click to full screenshot and top-right to area screenshot.<br><img src="../assets/gestures/force_click_corner.svg" width="280">
 - **Continuous gestures.** Left/right and up/down swipes can be set to *continuous*: instead of firing once, they run a begin → repeat → end sequence for as long as you keep your fingers down and moving. Good for scrub-style controls like volume or brightness, where you want the action to keep stepping while you swipe rather than firing once per gesture.
 
 ---

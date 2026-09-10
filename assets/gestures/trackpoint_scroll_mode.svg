@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 380" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b2e" />
+      <stop offset="100%" stop-color="#110e1b" />
+    </linearGradient>
+
+    <linearGradient id="trackpadGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2d283e" />
+      <stop offset="100%" stop-color="#231f32" />
+    </linearGradient>
+
+    <linearGradient id="fingerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d8d0f2" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#a092c8" stop-opacity="0.20" />
+    </linearGradient>
+
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="600" height="380" rx="16" fill="url(#bgGrad)" />
+
+  <!-- Title & Subtitle -->
+  <text x="300" y="38" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">TrackPoint: Scroll Mode</text>
+  <text x="300" y="58" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" fill="#a099bc" text-anchor="middle">Rest a Second Finger to Turn Pointing Stick into Scroll Wheel</text>
+
+  <!-- Trackpad Surface -->
+  <rect x="100" y="75" width="400" height="250" rx="14" fill="url(#trackpadGrad)" stroke="#453e59" stroke-width="2" filter="url(#shadow)" />
+
+  <!-- Scroll Wheel Active Waves (Surrounding Primary Finger) -->
+  <g stroke="#c7bde7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9">
+    <!-- Scroll Up Arrow -->
+    <path d="M 270 135 L 270 115" />
+    <path d="M 264 122 L 270 115 L 276 122" />
+    <!-- Scroll Down Arrow -->
+    <path d="M 270 205 L 270 225" />
+    <path d="M 264 218 L 270 225 L 276 218" />
+    <!-- Horizontal Scroll Indicators -->
+    <path d="M 235 170 L 220 170" stroke-dasharray="2 2" />
+    <path d="M 305 170 L 320 170" stroke-dasharray="2 2" />
+  </g>
+
+  <!-- Primary Steering Finger (Left: cx=270) -->
+  <g class="finger-primary">
+    <path d="M 259 182 C 259 170, 281 170, 281 182 L 284 250 L 256 250 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 263.4 186 C 263.4 178, 276.6 178, 276.6 186 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+
+    <circle cx="270" cy="170" r="13" fill="#c7bde7" opacity="0.95" />
+    <circle cx="270" cy="170" r="22" fill="none" stroke="#c7bde7" stroke-width="2" opacity="0.75" />
+
+    <!-- Badge -->
+    <rect x="220" y="258" width="100" height="22" rx="11" fill="#2d283e" stroke="#c7bde7" stroke-width="1.2" opacity="0.9" />
+    <text x="270" y="273" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="10" font-weight="600" fill="#c7bde7" text-anchor="middle">Steer Stick</text>
+  </g>
+
+  <!-- Secondary Resting Finger (Right: cx=370) -->
+  <g class="finger-secondary">
+    <path d="M 359 182 C 359 170, 381 170, 381 182 L 384 250 L 356 250 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 363.4 186 C 363.4 178, 376.6 178, 376.6 186 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+
+    <circle cx="370" cy="170" r="11" fill="#c7bde7" opacity="0.7" />
+    <circle cx="370" cy="170" r="18" fill="none" stroke="#c7bde7" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.5" />
+
+    <!-- Badge -->
+    <rect x="316" y="258" width="108" height="22" rx="11" fill="#2d283e" stroke="#c7bde7" stroke-width="1.2" opacity="0.9" />
+    <text x="370" y="273" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="10" font-weight="600" fill="#c7bde7" text-anchor="middle">+ Rest 2nd Finger</text>
+  </g>
+
+  <!-- Mode Switch Header Pill -->
+  <g transform="translate(300, 110)">
+    <rect x="-65" y="-12" width="130" height="22" rx="11" fill="#2d283e" stroke="#c7bde7" stroke-width="1.2" opacity="0.9" />
+    <text x="0" y="3" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="10" font-weight="600" fill="#c7bde7" text-anchor="middle">Scroll Mode Active</text>
+  </g>
+
+  <!-- Bottom Caption -->
+  <text x="300" y="306" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" font-weight="600" fill="#c7bde7" text-anchor="middle">Scroll Mode: Rest 2nd finger while steering to scroll</text>
+
+</svg>

@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 380" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b2e" />
+      <stop offset="100%" stop-color="#110e1b" />
+    </linearGradient>
+
+    <linearGradient id="trackpadGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2d283e" />
+      <stop offset="100%" stop-color="#231f32" />
+    </linearGradient>
+
+    <linearGradient id="fingerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d8d0f2" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#a092c8" stop-opacity="0.20" />
+    </linearGradient>
+
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="600" height="380" rx="16" fill="url(#bgGrad)" />
+
+  <!-- Title & Subtitle -->
+  <text x="300" y="38" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">TrackPoint: Corner Hold</text>
+  <text x="300" y="58" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" fill="#a099bc" text-anchor="middle">Corner-Isolated Pointing Stick with Free Pad Area</text>
+
+  <!-- Trackpad Surface -->
+  <rect x="100" y="75" width="400" height="250" rx="14" fill="url(#trackpadGrad)" stroke="#453e59" stroke-width="2" filter="url(#shadow)" />
+
+  <!-- Normal Trackpad Surface Label (Center-Left) -->
+  <g opacity="0.6">
+    <rect x="130" y="155" width="180" height="40" rx="8" fill="#1e1b2e" fill-opacity="0.5" stroke="#453e59" stroke-width="1" />
+    <text x="220" y="174" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="11" font-weight="600" fill="#a099bc" text-anchor="middle">Normal Trackpad Area</text>
+    <text x="220" y="188" font-family="-apple-system, sans-serif" font-size="9" fill="#a099bc" opacity="0.8" text-anchor="middle">Free for standard gestures</text>
+  </g>
+
+  <!-- Top-Right Active Corner Zone -->
+  <rect x="350" y="75" width="150" height="150" rx="14" fill="#c7bde7" fill-opacity="0.08" stroke="#c7bde7" stroke-width="1.8" stroke-dasharray="5 4" opacity="0.7" />
+  
+  <!-- Zone Header Pill -->
+  <rect x="365" y="87" width="120" height="20" rx="10" fill="#2d283e" stroke="#c7bde7" stroke-width="1" opacity="0.9" />
+  <text x="425" y="101" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="10" font-weight="600" fill="#c7bde7" text-anchor="middle">Active Corner Zone</text>
+
+  <!-- Omnidirectional Velocity Arrows (Inside Corner Zone) -->
+  <g stroke="#c7bde7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.85">
+    <!-- Up Arrow -->
+    <path d="M 425 124 L 425 109" />
+    <path d="M 421 114 L 425 109 L 429 114" />
+    <!-- Down Arrow -->
+    <path d="M 425 174 L 425 189" />
+    <path d="M 421 184 L 425 189 L 429 184" />
+    <!-- Left Arrow -->
+    <path d="M 397 149 L 382 149" />
+    <path d="M 387 145 L 382 149 L 387 153" />
+    <!-- Right Arrow -->
+    <path d="M 453 149 L 468 149" />
+    <path d="M 463 145 L 468 149 L 463 153" />
+  </g>
+
+  <!-- Finger Body Silhouette -->
+  <g class="finger">
+    <path d="M 414 161
+             C 414 149, 436 149, 436 161
+             L 439 220
+             L 411 220 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 418.4 165 C 418.4 157, 431.6 157, 431.6 165 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+
+    <!-- Anchor Point, Ripple & Hold Timer Arc -->
+    <circle cx="425" cy="149" r="12" fill="#c7bde7" opacity="0.95" />
+    <circle cx="425" cy="149" r="20" fill="none" stroke="#c7bde7" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="95 30" opacity="0.8" />
+  </g>
+  <text x="425" y="235" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Index</text>
+
+  <!-- Bottom Caption -->
+  <text x="300" y="306" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" font-weight="600" fill="#c7bde7" text-anchor="middle">Corner Hold: Rest finger in corner zone to steer cursor</text>
+
+</svg>

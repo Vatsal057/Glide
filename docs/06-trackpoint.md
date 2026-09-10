@@ -11,15 +11,15 @@ TrackPoint turns a patch of your trackpad into a pointing stick, like the red nu
 | Mode | How you engage it |
 |---|---|
 | Double-Tap & Hold *(default)* | Tap once with one finger, tap again, and hold. The double tap is deliberate enough that you can't trigger it by accident just resting a finger on the pad.<br><img src="../assets/gestures/trackpoint_double_tap.svg" width="280"> |
-| One-Finger Hold | Rest one finger anywhere on the pad and hold still for a moment. |
-| Corner Hold | Rest one finger in a corner you pick, and hold still for a moment. Keeps the rest of the trackpad free for normal use. |
-| Two-Finger Hold | Rest two fingers anywhere and hold still; lift one and the remaining finger becomes the stick. |
+| One-Finger Hold | Rest one finger anywhere on the pad and hold still for a moment.<br><img src="../assets/gestures/trackpoint_one_finger_hold.svg" width="280"> |
+| Corner Hold | Rest one finger in a corner you pick, and hold still for a moment. Keeps the rest of the trackpad free for normal use.<br><img src="../assets/gestures/trackpoint_corner_hold.svg" width="280"> |
+| Two-Finger Hold | Rest two fingers anywhere and hold still; lift one and the remaining finger becomes the stick.<br><img src="../assets/gestures/trackpoint_two_finger_hold.svg" width="280"> |
 
 Whichever mode you use, a short hold ("hold to engage") is what tells Glide you're committing to the stick rather than starting an ordinary drag or swipe — move too far before the hold completes and Glide steps aside, leaving the touch to macOS untouched.
 
 **Once engaged:**
 - Push your finger in a direction; the cursor accelerates that way. Ease off toward the anchor point and it decelerates. This continues as long as the finger stays down.
-- Rest a **second finger** anywhere on the pad (if scrolling is enabled) to turn the stick into a scroll wheel instead of a cursor — the same role the middle button plays on a real TrackPoint.
+- Rest a **second finger** anywhere on the pad (if scrolling is enabled) to turn the stick into a scroll wheel instead of a cursor — the same role the middle button plays on a real TrackPoint.<br><img src="../assets/gestures/trackpoint_scroll_mode.svg" width="280">
 - Lift the finger to disengage and hand control back to macOS.
 - A soft haptic tick confirms engagement and release, if haptics are enabled.
 

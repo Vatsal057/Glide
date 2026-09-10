@@ -25,68 +25,80 @@
 
   <!-- Title & Subtitle -->
   <text x="300" y="38" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">Force Click Gesture</text>
-  <text x="300" y="58" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" fill="#a099bc" text-anchor="middle">Zoned Force Touch Press with Finger Silhouettes</text>
+  <text x="300" y="58" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" fill="#a099bc" text-anchor="middle">Deep Force Touch Press Past Standard Click</text>
 
   <!-- Trackpad Surface -->
   <rect x="100" y="75" width="400" height="250" rx="14" fill="url(#trackpadGrad)" stroke="#453e59" stroke-width="2" filter="url(#shadow)" />
 
+  <!-- Downward Pressure Vectors -->
+  <g stroke="#c7bde7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.85">
+    <!-- Index downward arrow -->
+    <path d="M 250 132 L 250 152" />
+    <path d="M 245 146 L 250 152 L 255 146" />
+    <!-- Middle downward arrow -->
+    <path d="M 300 122 L 300 142" />
+    <path d="M 295 136 L 300 142 L 305 136" />
+    <!-- Ring downward arrow -->
+    <path d="M 350 132 L 350 152" />
+    <path d="M 345 146 L 350 152 L 355 146" />
+  </g>
 
-    <!-- Top-Left Zone -->
-    <rect x="100" y="75" width="140" height="90" rx="14" fill="#9887c9" opacity="0.15" stroke="#9887c9" stroke-dasharray="3 3" />
-    <text x="170" y="160" font-family="-apple-system, sans-serif" font-size="11" fill="#9887c9" text-anchor="middle">Top-Left Zone</text>
-    <g class="finger">
-      <!-- Finger Body Silhouette -->
-      <path d="M 129 127
-               C 129 115, 151 115, 151 127
-               L 154 205
-               L 126 205 Z"
-            fill="url(#fingerGrad)" stroke="#9887c9" stroke-width="1.5" stroke-opacity="0.6" />
+  <!-- Multi-Stage Deep Pressure Rings & Haptic Bursts -->
+  <!-- Outer Shockwave connecting all fingers -->
+  <ellipse cx="300" cy="175" rx="80" ry="46" fill="none" stroke="#c7bde7" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.45" />
 
-      <!-- Fingernail Detail -->
-      <path d="M 133.4 131 C 133.4 123, 146.6 123, 146.6 131 Z"
-            fill="none" stroke="#9887c9" stroke-width="1" opacity="0.5" />
+  <!-- Index Finger -->
+  <g class="finger">
+    <path d="M 239 192
+             C 239 180, 261 180, 261 192
+             L 264 260
+             L 236 260 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 243.4 196 C 243.4 188, 256.6 188, 256.6 196 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
 
-      <!-- Touch Point Touch Circle & Ripple -->
-      <circle cx="140" cy="115" r="12" fill="#9887c9" opacity="0.9" />
-      <circle cx="140" cy="115" r="20" fill="none" stroke="#9887c9" stroke-width="1.5" opacity="0.4" />
-    </g>
-<text x="140" y="220" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Index</text>
-<g class="finger">
-      <!-- Finger Body Silhouette -->
-      <path d="M 159 117
-               C 159 105, 181 105, 181 117
-               L 184 195
-               L 156 195 Z"
-            fill="url(#fingerGrad)" stroke="#9887c9" stroke-width="1.5" stroke-opacity="0.6" />
+    <!-- Deep Pressure Rings -->
+    <circle cx="250" cy="180" r="13" fill="#c7bde7" opacity="0.95" />
+    <circle cx="250" cy="180" r="21" fill="none" stroke="#c7bde7" stroke-width="2" opacity="0.75" />
+    <circle cx="250" cy="180" r="28" fill="none" stroke="#c7bde7" stroke-width="2.5" opacity="0.4" />
+  </g>
+  <text x="250" y="276" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Index</text>
 
-      <!-- Fingernail Detail -->
-      <path d="M 163.4 121 C 163.4 113, 176.6 113, 176.6 121 Z"
-            fill="none" stroke="#9887c9" stroke-width="1" opacity="0.5" />
+  <!-- Middle Finger -->
+  <g class="finger">
+    <path d="M 289 182
+             C 289 170, 311 170, 311 182
+             L 314 250
+             L 286 250 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 293.4 186 C 293.4 178, 306.6 178, 306.6 186 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
 
-      <!-- Touch Point Touch Circle & Ripple -->
-      <circle cx="170" cy="105" r="12" fill="#9887c9" opacity="0.9" />
-      <circle cx="170" cy="105" r="20" fill="none" stroke="#9887c9" stroke-width="1.5" opacity="0.4" />
-    </g>
-<text x="170" y="210" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Middle</text>
-<g class="finger">
-      <!-- Finger Body Silhouette -->
-      <path d="M 189 127
-               C 189 115, 211 115, 211 127
-               L 214 205
-               L 186 205 Z"
-            fill="url(#fingerGrad)" stroke="#9887c9" stroke-width="1.5" stroke-opacity="0.6" />
+    <!-- Deep Pressure Rings -->
+    <circle cx="300" cy="170" r="13" fill="#c7bde7" opacity="0.95" />
+    <circle cx="300" cy="170" r="21" fill="none" stroke="#c7bde7" stroke-width="2" opacity="0.75" />
+    <circle cx="300" cy="170" r="28" fill="none" stroke="#c7bde7" stroke-width="2.5" opacity="0.4" />
+  </g>
+  <text x="300" y="266" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Middle</text>
 
-      <!-- Fingernail Detail -->
-      <path d="M 193.4 131 C 193.4 123, 206.6 123, 206.6 131 Z"
-            fill="none" stroke="#9887c9" stroke-width="1" opacity="0.5" />
+  <!-- Ring Finger -->
+  <g class="finger">
+    <path d="M 339 192
+             C 339 180, 361 180, 361 192
+             L 364 260
+             L 336 260 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 343.4 196 C 343.4 188, 356.6 188, 356.6 196 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
 
-      <!-- Touch Point Touch Circle & Ripple -->
-      <circle cx="200" cy="115" r="12" fill="#9887c9" opacity="0.9" />
-      <circle cx="200" cy="115" r="20" fill="none" stroke="#9887c9" stroke-width="1.5" opacity="0.4" />
-    </g>
-<text x="200" y="220" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Ring</text>
+    <!-- Deep Pressure Rings -->
+    <circle cx="350" cy="180" r="13" fill="#c7bde7" opacity="0.95" />
+    <circle cx="350" cy="180" r="21" fill="none" stroke="#c7bde7" stroke-width="2" opacity="0.75" />
+    <circle cx="350" cy="180" r="28" fill="none" stroke="#c7bde7" stroke-width="2.5" opacity="0.4" />
+  </g>
+  <text x="350" y="276" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Ring</text>
 
-    <circle cx="170" cy="115" r="32" fill="none" stroke="#9887c9" stroke-width="3" />
-    <text x="300" y="305" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="13" font-weight="600" fill="#9887c9" text-anchor="middle">Force Click: Deep press in designated corner zone</text>
+  <!-- Bottom Caption -->
+  <text x="300" y="306" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="13" font-weight="600" fill="#c7bde7" text-anchor="middle">Force Click: Deep press past standard click threshold</text>
 
 </svg>

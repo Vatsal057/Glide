@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 380" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b2e" />
+      <stop offset="100%" stop-color="#110e1b" />
+    </linearGradient>
+
+    <linearGradient id="trackpadGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2d283e" />
+      <stop offset="100%" stop-color="#231f32" />
+    </linearGradient>
+
+    <linearGradient id="fingerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d8d0f2" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#a092c8" stop-opacity="0.20" />
+    </linearGradient>
+
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="600" height="380" rx="16" fill="url(#bgGrad)" />
+
+  <!-- Title & Subtitle -->
+  <text x="300" y="38" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">TrackPoint: Two-Finger Hold</text>
+  <text x="300" y="58" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" fill="#a099bc" text-anchor="middle">Hold Two Fingers, Lift One to Drive Pointing Stick</text>
+
+  <!-- Trackpad Surface -->
+  <rect x="100" y="75" width="400" height="250" rx="14" fill="url(#trackpadGrad)" stroke="#453e59" stroke-width="2" filter="url(#shadow)" />
+
+  <!-- Step 1: Rest 2 Fingers (Left side: center x=215) -->
+  <g class="step1">
+    <!-- Finger 1 (Index) -->
+    <path d="M 189 182 C 189 170, 211 170, 211 182 L 214 248 L 186 248 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 193.4 186 C 193.4 178, 206.6 178, 206.6 186 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+    <circle cx="200" cy="170" r="11" fill="#c7bde7" opacity="0.9" />
+    <circle cx="200" cy="170" r="18" fill="none" stroke="#c7bde7" stroke-width="2" stroke-linecap="round" stroke-dasharray="85 30" opacity="0.8" />
+
+    <!-- Finger 2 (Middle) -->
+    <path d="M 224 182 C 224 170, 246 170, 246 182 L 249 248 L 221 248 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 228.4 186 C 228.4 178, 241.6 178, 241.6 186 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+    <circle cx="235" cy="170" r="11" fill="#c7bde7" opacity="0.9" />
+    <circle cx="235" cy="170" r="18" fill="none" stroke="#c7bde7" stroke-width="2" stroke-linecap="round" stroke-dasharray="85 30" opacity="0.8" />
+
+    <!-- Step 1 Badge -->
+    <rect x="168" y="256" width="100" height="22" rx="11" fill="#2d283e" stroke="#c7bde7" stroke-width="1.2" opacity="0.9" />
+    <text x="218" y="271" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="10" font-weight="600" fill="#c7bde7" text-anchor="middle">1. Rest 2 Fingers</text>
+  </g>
+
+  <!-- Step Flow Connector -->
+  <g class="connector">
+    <path d="M 268 152 Q 300 118 334 148" fill="none" stroke="#a099bc" stroke-width="1.8" stroke-dasharray="4 3" opacity="0.85" />
+    <polygon points="336,150 326,145 330,154" fill="#a099bc" opacity="0.85" />
+    <text x="300" y="118" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="10" font-weight="600" fill="#a099bc" text-anchor="middle">Lift One</text>
+  </g>
+
+  <!-- Step 2: Lift 1, Steer with Other (Right side: center x=385) -->
+  <g class="step2">
+    <!-- Lifted Finger (Middle: ghosted/dashed lifting up) -->
+    <g opacity="0.4" stroke-dasharray="4 3">
+      <path d="M 404 172 C 404 160, 426 160, 426 172 L 429 238 L 401 238 Z"
+            fill="none" stroke="#a099bc" stroke-width="1.5" />
+      <!-- Upward lift arrow -->
+      <path d="M 415 152 L 415 132" stroke="#c7bde7" stroke-width="2" stroke-linecap="round" stroke-dasharray="none" />
+      <path d="M 410 138 L 415 132 L 420 138" fill="none" stroke="#c7bde7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="none" />
+    </g>
+
+    <!-- Active Pointing Stick Finger (Index) -->
+    <path d="M 354 182 C 354 170, 376 170, 376 182 L 379 248 L 351 248 Z"
+          fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+    <path d="M 358.4 186 C 358.4 178, 371.6 178, 371.6 186 Z"
+          fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+
+    <!-- Omnidirectional Velocity Arrows -->
+    <g stroke="#c7bde7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.85">
+      <path d="M 365 140 L 365 120" />
+      <path d="M 360 126 L 365 120 L 370 126" />
+      <path d="M 365 200 L 365 220" />
+      <path d="M 360 214 L 365 220 L 370 214" />
+      <path d="M 335 170 L 315 170" />
+      <path d="M 321 165 L 315 170 L 321 175" />
+      <path d="M 395 170 L 415 170" />
+      <path d="M 409 165 L 415 170 L 409 175" />
+    </g>
+
+    <!-- TrackPoint Active Hub -->
+    <circle cx="365" cy="170" r="13" fill="#c7bde7" opacity="0.95" />
+    <circle cx="365" cy="170" r="22" fill="none" stroke="#c7bde7" stroke-width="2" opacity="0.75" />
+
+    <!-- Step 2 Badge -->
+    <rect x="330" y="256" width="102" height="22" rx="11" fill="#2d283e" stroke="#c7bde7" stroke-width="1.2" opacity="0.9" />
+    <text x="381" y="271" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="10" font-weight="600" fill="#c7bde7" text-anchor="middle">2. Steer with Stick</text>
+  </g>
+
+  <!-- Bottom Caption -->
+  <text x="300" y="306" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="11.5" font-weight="600" fill="#c7bde7" text-anchor="middle">Two-Finger Hold: Rest 2 fingers, lift one, and steer with other</text>
+
+</svg>

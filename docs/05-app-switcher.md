@@ -26,6 +26,7 @@ This means you can target and switch directly to *any open window on your Mac* i
 2. **Initiate the switcher:** Swipe left or right with 3 fingers and keep your fingers on the trackpad.
 3. **Select an app:** Swipe left or right to highlight the app you want.
 4. **Select a window:** If that app has multiple open windows, swipe **up or down** with 3 fingers to cycle through its window deck. Live window previews are shown if Screen Recording permission is granted (or window icons if not).
+<br><img src="../assets/gestures/app_switcher.svg" width="320">
 5. **Commit:** Release all fingers to focus the selected window immediately.
 6. **Cancel:** Lift all fingers while outside or without selecting, or pause without committing.
 
