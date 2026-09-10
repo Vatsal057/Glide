@@ -141,8 +141,14 @@ final class UpdateChecker: ObservableObject {
             downloadedDMG = dmg
 
             // Integrity check against the checksum published beside the image.
-            // Absent on older releases, so a missing file isn't an error — a
-            // mismatching one very much is.
+            //
+            // Glide is ad-hoc signed, so `codesign --verify` only proves the
+            // bundle is internally consistent — it can't prove the bundle is
+            // *ours*. This digest is the only real authenticity control in the
+            // pipeline, so once a release publishes one, a failure to check it
+            // has to abort. Releases with no checksum asset at all still
+            // install (older versions shipped without one), but a checksum
+            // that exists and can't be fetched or doesn't match does not.
             if let checksumURL = update.checksumURL {
                 do {
                     let expected = try await fetchText(checksumURL)
@@ -155,7 +161,11 @@ final class UpdateChecker: ObservableObject {
                     }
                     AppLogger.debug("[update] checksum verified")
                 } catch {
-                    AppLogger.debug("[update] checksum unavailable: \(error.localizedDescription)")
+                    AppLogger.debug("[update] checksum fetch failed: \(error.localizedDescription)")
+                    try? FileManager.default.removeItem(at: dmg)
+                    downloadedDMG = nil
+                    state = .failed("Couldn't verify the download against its published checksum. Nothing was installed.")
+                    return
                 }
             }
 
@@ -198,9 +208,12 @@ final class UpdateChecker: ObservableObject {
         UpdateInstaller.relaunch(installedApp ?? Bundle.main.bundleURL)
     }
 
-    /// Opens the downloaded image in Finder for the manual-install fallback.
+    /// Reveals the downloaded image in Finder for the manual-install fallback.
+    ///
+    /// `NSWorkspace.open` would mount the image instead of showing it, which
+    /// isn't what the button says and leaves a volume attached.
     func revealDownload(_ dmg: URL) {
-        NSWorkspace.shared.open(dmg)
+        NSWorkspace.shared.activateFileViewerSelecting([dmg])
     }
 
     func openReleasesPage() {
@@ -259,11 +272,37 @@ final class UpdateChecker: ObservableObject {
             version: release.tagName.hasPrefix("v")
                 ? String(release.tagName.dropFirst())
                 : release.tagName,
-            pageURL: URL(string: release.htmlURL) ?? Self.releasesPage,
-            dmgURL: dmg.flatMap { URL(string: $0.browserDownloadURL) },
-            checksumURL: checksum.flatMap { URL(string: $0.browserDownloadURL) },
+            pageURL: Self.trustedURL(release.htmlURL) ?? Self.releasesPage,
+            dmgURL: dmg.flatMap { Self.trustedURL($0.browserDownloadURL) },
+            checksumURL: checksum.flatMap { Self.trustedURL($0.browserDownloadURL) },
             size: dmg?.size ?? 0
         )
+    }
+
+    /// Hosts an update artifact or release page is allowed to live on.
+    private static let allowedHosts: Set<String> = [
+        "github.com",
+        "api.github.com",
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+        "codeload.github.com",
+    ]
+
+    /// Accepts a URL from the release JSON only if it's HTTPS on a GitHub host.
+    ///
+    /// These strings arrive from a remote server and then get downloaded,
+    /// installed over the running app, or handed to `NSWorkspace.open`. Without
+    /// a check, a `file:` or `http:` URL — or a redirect to somewhere else
+    /// entirely — would be followed just as readily as a real release asset.
+    static func trustedURL(_ candidate: String) -> URL? {
+        guard let url = URL(string: candidate),
+              url.scheme?.lowercased() == "https",
+              let host = url.host?.lowercased() else { return nil }
+        guard allowedHosts.contains(host) || host.hasSuffix(".githubusercontent.com") else {
+            AppLogger.debug("[update] rejected non-GitHub URL host: \(host)")
+            return nil
+        }
+        return url
     }
 
     private func fetchText(_ url: URL) async throws -> String {

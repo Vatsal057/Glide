@@ -114,26 +114,39 @@ final class LiquidGlassBackdropView: NSView {
     /// a moving or resizing block reuses its glass view instead of tearing one
     /// down and building another.
     func apply(_ slabs: [GlassSlab]) {
-        guard slabs != appliedSlabs else { return }
+        // Frames arrive straight from a SwiftUI `GeometryReader` while a spring is
+        // running, so they carry values like 160.44298885476712 that change in the
+        // low bits on every layout pass. Glass is a backdrop: a sub-point shift in
+        // it is invisible, but each distinct frame is another WindowServer glass
+        // rebuild. Snapping to whole points turns that churn into no-ops and lets
+        // the guard below actually reject it. `integral` rounds outward, so the
+        // glass never ends up smaller than the content it sits behind.
+        let snapped = slabs.map { slab -> GlassSlab in
+            var snappedSlab = slab
+            snappedSlab.frame = slab.frame.integral
+            return snappedSlab
+        }
+        guard snapped != appliedSlabs else { return }
         SwitcherDiagnostics.bump(.slabApplies)
-        // Full precision on purpose: the guard above is exact float equality, so
-        // frames that only differ in the low bits read as "changed" forever. A
-        // report showing digits churning far to the right of the decimal point is
-        // that loop; one showing whole-point movement is a real animation.
         SwitcherDiagnostics.noteSlabs(
-            slabs.map { "#\($0.id) \($0.frame.origin.x),\($0.frame.origin.y) \($0.frame.width)x\($0.frame.height)" }
+            snapped.map { "#\($0.id) \($0.frame.origin.x),\($0.frame.origin.y) \($0.frame.width)x\($0.frame.height)" }
                 .joined(separator: " | ")
         )
-        appliedSlabs = slabs
+        appliedSlabs = snapped
 
         withoutImplicitAnimations {
-            let liveIDs = Set(slabs.map(\.id))
+            let liveIDs = Set(snapped.map(\.id))
             for (id, view) in slabViews where !liveIDs.contains(id) {
-                view.removeFromSuperview()
-                slabViews.removeValue(forKey: id)
+                // Hidden, not removed. The shelf's slab disappears and comes back
+                // whenever the selection crosses between a single-window app and a
+                // multi-window one — which is most steps — and building an
+                // `NSGlassEffectView` makes the WindowServer stand up a whole glass
+                // surface. Keeping the view and toggling visibility reuses it.
+                if !view.isHidden { view.isHidden = true }
             }
-            for slab in slabs {
+            for slab in snapped {
                 let view = slabViews[slab.id] ?? makeSlabView(id: slab.id)
+                if view.isHidden { view.isHidden = false }
                 if view.frame != slab.frame { view.frame = slab.frame }
                 if #available(macOS 26.0, *), let glass = view as? NSGlassEffectView {
                     // Assigning the radius makes the WindowServer rebuild the glass,
@@ -147,12 +160,14 @@ final class LiquidGlassBackdropView: NSView {
         }
     }
 
+    /// Called when the panel is dismissed. The slab views are kept — hidden — so the
+    /// next open reuses their glass surfaces instead of building new ones; the panel
+    /// is ordered out by then, so nothing hidden here is being rendered.
     func clear() {
-        guard !slabViews.isEmpty else { return }
+        guard !appliedSlabs.isEmpty || slabViews.values.contains(where: { !$0.isHidden }) else { return }
         appliedSlabs = []
         withoutImplicitAnimations {
-            slabViews.values.forEach { $0.removeFromSuperview() }
-            slabViews.removeAll()
+            for view in slabViews.values where !view.isHidden { view.isHidden = true }
         }
     }
 

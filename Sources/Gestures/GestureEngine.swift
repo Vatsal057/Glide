@@ -75,7 +75,7 @@ final class GestureEngine {
     // MARK: - Lifecycle
 
     func start() {
-        guard AXIsProcessTrusted() else { print("[Engine] Not trusted"); return }
+        guard AXIsProcessTrusted() else { AppLogger.debug("[Engine] Not trusted"); return }
         guard !isRunning else { return }
 
         TouchTracker.resetGlobalMTState()

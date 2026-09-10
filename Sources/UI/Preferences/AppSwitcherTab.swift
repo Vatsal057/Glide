@@ -309,6 +309,16 @@ struct AppSwitcherTab: View {
 
                 Divider()
 
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Animate selection", isOn: switcherBinding(\.animationsEnabled))
+                    Text("Springy transitions as you move between apps and windows. Off by default: because selection can step several times a second, the animation keeps the whole overlay redrawing and roughly doubles the CPU the switcher uses while you swipe. Leave it off for the lightest, most battery-friendly switcher.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Divider()
+
                 Label("If the custom panel cannot open, Glide falls back to the native macOS switcher.", systemImage: "checkmark.shield")
                     .font(.caption)
                     .foregroundStyle(.secondary)

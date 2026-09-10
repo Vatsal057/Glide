@@ -37,18 +37,21 @@ struct GlideConfig {
         var fingers: Int = 3
         var skipWindowlessFinder: Bool = true
         var restoreMinimizedOnCommit: Bool = true
+        var animationsEnabled: Bool = false
     }
 
     struct TrackPoint {
-        var enabled: Bool = false
+        var enabled: Bool = true
+        var activationMode: String = "double_tap_hold"
         var zone: String = "bottom_right"
-        var zoneSize: Float = 0.16
-        var activationDelay: Double = 0.15
+        var zoneSize: Float = 0.198
+        var activationDelay: Double = 0.59
         var activationMovement: Float = 0.012
-        var deadZone: Float = 0.005
-        var pushRange: Float = 0.055
-        var maxSpeed: Float = 1500
-        var acceleration: Float = 2.2
+        var doubleTapWindow: Double = 0.35
+        var deadZone: Float = 0.006
+        var pushRange: Float = 0.042
+        var maxSpeed: Float = 3350
+        var acceleration: Float = 1.39
         var hapticFeedback: Bool = true
         var scrollEnabled: Bool = true
         var scrollSpeed: Float = 1200
@@ -56,8 +59,8 @@ struct GlideConfig {
     }
 
     struct Tuning {
-        var appSwitcherStepThreshold: Float = 0.003
-        var appSwitcherDebounce: Double = 0.10
+        var appSwitcherStepThreshold: Float = 0.002
+        var appSwitcherDebounce: Double = 0.05
         var continuousStepThreshold: Float = 0.025
         var continuousDebounce: Double = 0.08
         var candidateFrames: Int = 3
@@ -72,10 +75,10 @@ struct GlideConfig {
         var forceClickMarginTop: Float = 0.35
         var forceClickMarginBottom: Float = 0.35
         var edgeMarginEnabled: Bool = true
-        var edgeMarginLeft: Float = 0.05
-        var edgeMarginRight: Float = 0.05
-        var edgeMarginTop: Float = 0.05
-        var edgeMarginBottom: Float = 0.05
+        var edgeMarginLeft: Float = 0.0
+        var edgeMarginRight: Float = 0.0
+        var edgeMarginTop: Float = 0.0
+        var edgeMarginBottom: Float = 0.19
     }
 
     struct Gesture {
@@ -162,12 +165,15 @@ extension GlideConfig {
         cfg.appSwitcher.fingers = s.appSwitcher.fingers
         cfg.appSwitcher.skipWindowlessFinder = s.appSwitcher.skipWindowlessFinder
         cfg.appSwitcher.restoreMinimizedOnCommit = s.appSwitcher.restoreMinimizedOnCommit
+        cfg.appSwitcher.animationsEnabled = s.appSwitcher.animationsEnabled
 
         cfg.trackPoint.enabled            = s.trackPoint.enabled
+        cfg.trackPoint.activationMode     = s.trackPoint.activationMode.rawValue
         cfg.trackPoint.zone               = s.trackPoint.zone.yamlValue ?? "bottom_right"
         cfg.trackPoint.zoneSize           = s.trackPoint.zoneSize
         cfg.trackPoint.activationDelay    = s.trackPoint.activationDelay
         cfg.trackPoint.activationMovement = s.trackPoint.activationMovement
+        cfg.trackPoint.doubleTapWindow    = s.trackPoint.doubleTapWindow
         cfg.trackPoint.deadZone           = s.trackPoint.deadZone
         cfg.trackPoint.pushRange          = s.trackPoint.pushRange
         cfg.trackPoint.maxSpeed           = s.trackPoint.maxSpeed
@@ -263,16 +269,19 @@ extension GlideConfig {
         s.fingers = appSwitcher.fingers
         s.skipWindowlessFinder = appSwitcher.skipWindowlessFinder
         s.restoreMinimizedOnCommit = appSwitcher.restoreMinimizedOnCommit
+        s.animationsEnabled = appSwitcher.animationsEnabled
         return AppSwitcherSettings.normalized(s)
     }
 
     func toTrackPoint() -> TrackPointSettings {
         var p = TrackPointSettings()
         p.enabled            = trackPoint.enabled
+        p.activationMode     = TrackPointActivationMode(rawValue: trackPoint.activationMode) ?? .twoFingerHold
         p.zone               = TrackpadZone(yamlValue: trackPoint.zone) ?? .bottomRight
         p.zoneSize           = trackPoint.zoneSize
         p.activationDelay    = trackPoint.activationDelay
         p.activationMovement = trackPoint.activationMovement
+        p.doubleTapWindow    = trackPoint.doubleTapWindow
         p.deadZone           = trackPoint.deadZone
         p.pushRange          = trackPoint.pushRange
         p.maxSpeed           = trackPoint.maxSpeed
@@ -450,14 +459,18 @@ enum GlideConfigSerializer {
             "    fingers: \(config.appSwitcher.fingers)",
             "    skip_windowless_finder: \(config.appSwitcher.skipWindowlessFinder ? "true" : "false")",
             "    restore_minimized_on_commit: \(config.appSwitcher.restoreMinimizedOnCommit ? "true" : "false")",
+            "    animations_enabled: \(config.appSwitcher.animationsEnabled ? "true" : "false")",
             "",
-            "  # ── TrackPoint (corner of the pad as a pointing stick) ──",
+            "  # ── TrackPoint (pointing stick on trackpad) ──",
             "  trackpoint:",
             "    enabled: \(config.trackPoint.enabled ? "true" : "false")",
+            "    activation_mode: \(config.trackPoint.activationMode)",
             "    zone: \(config.trackPoint.zone)",
             "    zone_size: \(fmt(config.trackPoint.zoneSize))",
             "    activation_delay: \(String(format: "%.2f", config.trackPoint.activationDelay))",
             "    activation_movement: \(fmt(config.trackPoint.activationMovement))",
+            "    # Gap allowed between the two taps of double_tap_hold.",
+            "    double_tap_window: \(String(format: "%.2f", config.trackPoint.doubleTapWindow))",
             "    dead_zone: \(fmt(config.trackPoint.deadZone))",
             "    push_range: \(fmt(config.trackPoint.pushRange))",
             "    max_speed: \(String(format: "%.0f", config.trackPoint.maxSpeed))",
@@ -732,6 +745,7 @@ enum GlideConfigParser {
             case "fingers": switcher.fingers = intVal(val) ?? switcher.fingers
             case "skip_windowless_finder": switcher.skipWindowlessFinder = boolVal(val) ?? switcher.skipWindowlessFinder
             case "restore_minimized_on_commit": switcher.restoreMinimizedOnCommit = boolVal(val) ?? switcher.restoreMinimizedOnCommit
+            case "animations_enabled": switcher.animationsEnabled = boolVal(val) ?? switcher.animationsEnabled
             default: break
             }
             i += 1
@@ -747,10 +761,12 @@ enum GlideConfigParser {
             if ind <= parentIndent { return }
             switch key {
             case "enabled":             point.enabled            = boolVal(val)   ?? point.enabled
+            case "activation_mode":     point.activationMode     = stringVal(val) ?? point.activationMode
             case "zone":                point.zone               = stringVal(val) ?? point.zone
             case "zone_size":           point.zoneSize           = floatVal(val)  ?? point.zoneSize
             case "activation_delay":    point.activationDelay    = doubleVal(val) ?? point.activationDelay
             case "activation_movement": point.activationMovement = floatVal(val)  ?? point.activationMovement
+            case "double_tap_window":   point.doubleTapWindow    = doubleVal(val) ?? point.doubleTapWindow
             case "dead_zone":           point.deadZone           = floatVal(val)  ?? point.deadZone
             case "push_range":          point.pushRange          = floatVal(val)  ?? point.pushRange
             case "max_speed":           point.maxSpeed           = floatVal(val)  ?? point.maxSpeed
@@ -1155,7 +1171,7 @@ final class GlideConfigStore {
             AppLogger.debug("[Config] Saved → \(url.lastPathComponent)")
             return true
         } catch {
-            print("[Config] Save failed: \(error.localizedDescription)")
+            AppLogger.debug("[Config] Save failed: \(error.localizedDescription)")
             return false
         }
     }
@@ -1170,7 +1186,7 @@ final class GlideConfigStore {
         }
         guard let raw = try? String(contentsOf: configURL, encoding: .utf8),
               let cfg = GlideConfigParser.parse(yaml: raw) else {
-            print("[Config] Failed to parse config")
+            AppLogger.debug("[Config] Failed to parse config")
             return false
         }
         Settings.shared.apply(cfg)
@@ -1190,17 +1206,83 @@ final class GlideConfigStore {
             try FileManager.default.copyItem(at: configURL, to: destination)
             return true
         } catch {
-            print("[Config] Export failed: \(error.localizedDescription)")
+            AppLogger.debug("[Config] Export failed: \(error.localizedDescription)")
             return false
         }
     }
 
+    /// A gesture in an incoming config that would run code, not just drive the UI.
+    struct ExecutableAction {
+        /// How the gesture is described to the user, e.g. "3-finger swipe up".
+        let gesture: String
+        /// "Shell Command", "AppleScript", "Shortcut".
+        let kind: String
+        /// The command, script, or shortcut name that would run.
+        let payload: String
+    }
+
+    /// Parses `source` without applying it, so a caller can show what it does
+    /// before committing.
+    func inspect(_ source: URL) -> GlideConfig? {
+        guard let raw = try? String(contentsOf: source, encoding: .utf8) else { return nil }
+        return GlideConfigParser.parse(yaml: raw)
+    }
+
+    /// Every gesture in `config` bound to an action that executes code.
+    ///
+    /// Configs are meant to be shared, and three of the available actions run
+    /// arbitrary code the moment the gesture is performed — a shell command, an
+    /// AppleScript, or a named Shortcut. Importing one is therefore equivalent
+    /// to running a script, and the user deserves to be told which.
+    static func executableActions(in config: GlideConfig) -> [ExecutableAction] {
+        let scripted: Set<String> = [
+            GestureAction.runShellCommand.rawValue,
+            GestureAction.runAppleScript.rawValue,
+            GestureAction.runShortcut.rawValue,
+        ]
+
+        return config.gestures.compactMap { gesture -> ExecutableAction? in
+            // Continuous sub-actions can't be scripted, so only the primary
+            // action and the reciprocal override need checking.
+            let actions = [gesture.action, gesture.reciprocalAction].compactMap { $0 }
+            guard let action = actions.first(where: { scripted.contains($0) }) else { return nil }
+
+            let kind: String
+            let payload: String
+            switch action {
+            case GestureAction.runShellCommand.rawValue:
+                kind = "Shell command"
+                payload = gesture.script ?? "(empty)"
+            case GestureAction.runAppleScript.rawValue:
+                kind = "AppleScript"
+                payload = gesture.script ?? "(empty)"
+            default:
+                kind = "Shortcut"
+                payload = gesture.shortcutName ?? "(unnamed)"
+            }
+
+            let fingers = "\(gesture.fingers)-finger"
+            let motion = gesture.direction.map { "\(gesture.type) \($0)" } ?? gesture.type
+            return ExecutableAction(
+                gesture: gesture.name ?? "\(fingers) \(motion)",
+                kind: kind,
+                payload: payload
+            )
+        }
+    }
+
+    /// Applies an already-parsed config. Used by the import flow so the file is
+    /// only read and parsed once, with the confirmation step in between.
     @discardableResult
-    func importFrom(_ source: URL) -> Bool {
-        guard let raw = try? String(contentsOf: source, encoding: .utf8),
-              let cfg = GlideConfigParser.parse(yaml: raw) else { return false }
-        Settings.shared.apply(cfg)
+    func apply(_ config: GlideConfig) -> Bool {
+        Settings.shared.apply(config)
         save()
         return true
+    }
+
+    @discardableResult
+    func importFrom(_ source: URL) -> Bool {
+        guard let cfg = inspect(source) else { return false }
+        return apply(cfg)
     }
 }
