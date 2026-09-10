@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 380" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b2e" />
+      <stop offset="100%" stop-color="#110e1b" />
+    </linearGradient>
+
+    <linearGradient id="trackpadGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2d283e" />
+      <stop offset="100%" stop-color="#231f32" />
+    </linearGradient>
+
+    <linearGradient id="fingerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d8d0f2" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#a092c8" stop-opacity="0.20" />
+    </linearGradient>
+
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="600" height="380" rx="16" fill="url(#bgGrad)" />
+
+  <!-- Title & Subtitle -->
+  <text x="300" y="38" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">Swipe Down</text>
+  <text x="300" y="58" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" fill="#a099bc" text-anchor="middle">Vertical Downward Gesture with Finger Silhouettes</text>
+
+  <!-- Trackpad Surface -->
+  <rect x="100" y="75" width="400" height="250" rx="14" fill="url(#trackpadGrad)" stroke="#453e59" stroke-width="2" filter="url(#shadow)" />
+
+  <g class="finger">
+      <!-- Finger Body Silhouette -->
+      <path d="M 239 142
+               C 239 130, 261 130, 261 142
+               L 264 220
+               L 236 220 Z"
+            fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+
+      <!-- Fingernail Detail -->
+      <path d="M 243.4 146 C 243.4 138, 256.6 138, 256.6 146 Z"
+            fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+
+      <!-- Touch Point Touch Circle & Ripple -->
+      <circle cx="250" cy="130" r="12" fill="#c7bde7" opacity="0.9" />
+      <circle cx="250" cy="130" r="20" fill="none" stroke="#c7bde7" stroke-width="1.5" opacity="0.4" />
+    </g>
+<text x="250" y="235" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Index</text>
+<g class="finger">
+      <!-- Finger Body Silhouette -->
+      <path d="M 289 132
+               C 289 120, 311 120, 311 132
+               L 314 210
+               L 286 210 Z"
+            fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+
+      <!-- Fingernail Detail -->
+      <path d="M 293.4 136 C 293.4 128, 306.6 128, 306.6 136 Z"
+            fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+
+      <!-- Touch Point Touch Circle & Ripple -->
+      <circle cx="300" cy="120" r="12" fill="#c7bde7" opacity="0.9" />
+      <circle cx="300" cy="120" r="20" fill="none" stroke="#c7bde7" stroke-width="1.5" opacity="0.4" />
+    </g>
+<text x="300" y="225" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Middle</text>
+<g class="finger">
+      <!-- Finger Body Silhouette -->
+      <path d="M 339 142
+               C 339 130, 361 130, 361 142
+               L 364 220
+               L 336 220 Z"
+            fill="url(#fingerGrad)" stroke="#c7bde7" stroke-width="1.5" stroke-opacity="0.6" />
+
+      <!-- Fingernail Detail -->
+      <path d="M 343.4 146 C 343.4 138, 356.6 138, 356.6 146 Z"
+            fill="none" stroke="#c7bde7" stroke-width="1" opacity="0.5" />
+
+      <!-- Touch Point Touch Circle & Ripple -->
+      <circle cx="350" cy="130" r="12" fill="#c7bde7" opacity="0.9" />
+      <circle cx="350" cy="130" r="20" fill="none" stroke="#c7bde7" stroke-width="1.5" opacity="0.4" />
+    </g>
+<text x="350" y="235" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Ring</text>
+
+    <g stroke="#c7bde7" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 300 145 L 300 220" />
+      <path d="M 285 205 L 300 220 L 315 205" />
+    </g>
+    <text x="300" y="305" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="13" font-weight="600" fill="#c7bde7" text-anchor="middle">Swipe Down: Smooth downward finger motion</text>
+
+</svg>

@@ -10,7 +10,7 @@ TrackPoint turns a patch of your trackpad into a pointing stick, like the red nu
 
 | Mode | How you engage it |
 |---|---|
-| Double-Tap & Hold *(default)* | Tap once with one finger, tap again, and hold. The double tap is deliberate enough that you can't trigger it by accident just resting a finger on the pad. |
+| Double-Tap & Hold *(default)* | Tap once with one finger, tap again, and hold. The double tap is deliberate enough that you can't trigger it by accident just resting a finger on the pad.<br><img src="../assets/gestures/trackpoint_double_tap.svg" width="280"> |
 | One-Finger Hold | Rest one finger anywhere on the pad and hold still for a moment. |
 | Corner Hold | Rest one finger in a corner you pick, and hold still for a moment. Keeps the rest of the trackpad free for normal use. |
 | Two-Finger Hold | Rest two fingers anywhere and hold still; lift one and the remaining finger becomes the stick. |

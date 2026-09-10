@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 380" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b2e" />
+      <stop offset="100%" stop-color="#110e1b" />
+    </linearGradient>
+
+    <linearGradient id="trackpadGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2d283e" />
+      <stop offset="100%" stop-color="#231f32" />
+    </linearGradient>
+
+    <linearGradient id="fingerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d8d0f2" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#a092c8" stop-opacity="0.20" />
+    </linearGradient>
+
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="600" height="380" rx="16" fill="url(#bgGrad)" />
+
+  <!-- Title & Subtitle -->
+  <text x="300" y="38" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">Force Click Gesture</text>
+  <text x="300" y="58" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12" fill="#a099bc" text-anchor="middle">Zoned Force Touch Press with Finger Silhouettes</text>
+
+  <!-- Trackpad Surface -->
+  <rect x="100" y="75" width="400" height="250" rx="14" fill="url(#trackpadGrad)" stroke="#453e59" stroke-width="2" filter="url(#shadow)" />
+
+
+    <!-- Top-Left Zone -->
+    <rect x="100" y="75" width="140" height="90" rx="14" fill="#9887c9" opacity="0.15" stroke="#9887c9" stroke-dasharray="3 3" />
+    <text x="170" y="160" font-family="-apple-system, sans-serif" font-size="11" fill="#9887c9" text-anchor="middle">Top-Left Zone</text>
+    <g class="finger">
+      <!-- Finger Body Silhouette -->
+      <path d="M 129 127
+               C 129 115, 151 115, 151 127
+               L 154 205
+               L 126 205 Z"
+            fill="url(#fingerGrad)" stroke="#9887c9" stroke-width="1.5" stroke-opacity="0.6" />
+
+      <!-- Fingernail Detail -->
+      <path d="M 133.4 131 C 133.4 123, 146.6 123, 146.6 131 Z"
+            fill="none" stroke="#9887c9" stroke-width="1" opacity="0.5" />
+
+      <!-- Touch Point Touch Circle & Ripple -->
+      <circle cx="140" cy="115" r="12" fill="#9887c9" opacity="0.9" />
+      <circle cx="140" cy="115" r="20" fill="none" stroke="#9887c9" stroke-width="1.5" opacity="0.4" />
+    </g>
+<text x="140" y="220" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Index</text>
+<g class="finger">
+      <!-- Finger Body Silhouette -->
+      <path d="M 159 117
+               C 159 105, 181 105, 181 117
+               L 184 195
+               L 156 195 Z"
+            fill="url(#fingerGrad)" stroke="#9887c9" stroke-width="1.5" stroke-opacity="0.6" />
+
+      <!-- Fingernail Detail -->
+      <path d="M 163.4 121 C 163.4 113, 176.6 113, 176.6 121 Z"
+            fill="none" stroke="#9887c9" stroke-width="1" opacity="0.5" />
+
+      <!-- Touch Point Touch Circle & Ripple -->
+      <circle cx="170" cy="105" r="12" fill="#9887c9" opacity="0.9" />
+      <circle cx="170" cy="105" r="20" fill="none" stroke="#9887c9" stroke-width="1.5" opacity="0.4" />
+    </g>
+<text x="170" y="210" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Middle</text>
+<g class="finger">
+      <!-- Finger Body Silhouette -->
+      <path d="M 189 127
+               C 189 115, 211 115, 211 127
+               L 214 205
+               L 186 205 Z"
+            fill="url(#fingerGrad)" stroke="#9887c9" stroke-width="1.5" stroke-opacity="0.6" />
+
+      <!-- Fingernail Detail -->
+      <path d="M 193.4 131 C 193.4 123, 206.6 123, 206.6 131 Z"
+            fill="none" stroke="#9887c9" stroke-width="1" opacity="0.5" />
+
+      <!-- Touch Point Touch Circle & Ripple -->
+      <circle cx="200" cy="115" r="12" fill="#9887c9" opacity="0.9" />
+      <circle cx="200" cy="115" r="20" fill="none" stroke="#9887c9" stroke-width="1.5" opacity="0.4" />
+    </g>
+<text x="200" y="220" font-family="-apple-system, sans-serif" font-size="10" fill="#a099bc" text-anchor="middle">Ring</text>
+
+    <circle cx="170" cy="115" r="32" fill="none" stroke="#9887c9" stroke-width="3" />
+    <text x="300" y="305" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="13" font-weight="600" fill="#9887c9" text-anchor="middle">Force Click: Deep press in designated corner zone</text>
+
+</svg>
