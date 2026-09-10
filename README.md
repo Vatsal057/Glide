@@ -4,7 +4,7 @@
 
 # Glide
 
-**Free, lightweight trackpad gestures, physical edge sliders, and global shortcuts for macOS.**
+**Free, lightweight trackpad gestures, physical edge sliders, TrackPoint mode, and global shortcuts for macOS.**
 
 [![Release](https://img.shields.io/github/v/release/Vatsal057/Glide?label=release)](https://github.com/Vatsal057/Glide/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -16,7 +16,7 @@
 
 ---
 
-Glide turns your Mac trackpad into a customizable control surface for window management, 2D app switching, system adjustments, and keyboard automation.
+Glide turns your Mac trackpad into a customizable control surface for window management, 2D app switching, physical edge sliders, and the first true TrackPoint pointing stick engine for macOS.
 
 Written in pure Swift using low-level `MultitouchSupport` and `WindowServer` APIs, Glide idles at 0.0% CPU, uses ~25 MB of RAM, and runs entirely event-driven with zero idle battery drain.
 
@@ -48,7 +48,7 @@ Everything is customizable. Press `⌘,` with the app focused or click the menu 
 
 macOS limits trackpad gestures to a few fixed actions. The traditional alternative, BetterTouchTool, has been a paid utility with unnecessary CPU drain and battery usage.
 
-Glide provides deep trackpad and desktop control: advanced touchpad gestures, edge sliders, feature rich app switching, Revolutionary Trackpoint for macos, and global macros in a lean, open-source utility that runs ideally at 0.0% CPU.
+Glide provides deep trackpad and desktop control: advanced touchpad gestures, edge sliders, feature-rich app switching, revolutionary TrackPoint for macOS, and global macros in a lean, open-source utility that runs ideally at 0.0% CPU.
 
 | Capability | Glide | BetterTouchTool | macOS Default |
 | :--- | :--- | :--- | :--- |
@@ -59,7 +59,7 @@ Glide provides deep trackpad and desktop control: advanced touchpad gestures, ed
 | **Window State Ladders** | **State-adaptive chaining (maximize → fullscreen)** | Manual multi-rule setup | None |
 | **Reverse Action Gestures** | **Automatic opposite-direction undo** | Manual inverse rule setup | None |
 | **2D Spatial App Switcher** | **Horizontal app flow + vertical window decks** | 1D switcher | ⌘Tab (apps only) |
-| **TrackPoint Velocity Mode** | **Trackpad pointer stick simulation + 2-finger scroll** | None | None |
+| **TrackPoint Mode** | **Exclusive to Glide on Mac: pointer stick + 2-finger scroll** | None | None |
 | **Global Shortcuts Engine** | **Hotkeys, menu items, key sequences, scripts** | Supported | Shortcuts app (limited) |
 | **Configuration UI** | **Native SwiftUI with live animated previews** | Dense multi-pane menus | System Settings |
 | **Telemetry & Privacy** | **100% offline, zero telemetry** | Proprietary closed-source | Apple diagnostics |
@@ -68,9 +68,9 @@ Glide provides deep trackpad and desktop control: advanced touchpad gestures, ed
 
 - **Multi-Finger Gestures:** 3, 4, and 5-finger swipes, clicks, force-clicks, and holds with configurable flick vs. glide speed classification.
 - **Physical Rim Sliders:** Slide along the trackpad's physical border to adjust volume, brightness, keyboard backlight, or scrub the App Switcher.
+- **TrackPoint (A First on macOS):** Brings ThinkPad-style pointing stick mechanics to the Mac trackpad. Rest or double-tap an anchor finger, then lean in any direction to steer the cursor with continuous, vector-based velocity across multi-monitor setups without lifting your hand. Place a second finger down for high-speed inertia scrolling.
 - **State-Aware Ladders & Reciprocals:** Swipes adapt to current window state (maximize → fullscreen), and opposite gestures reverse actions automatically.
 - **2D Spatial App Switcher:** Swipe horizontally across running applications and vertically through window decks with live thumbnails.
-- **TrackPoint Velocity Mode:** Anchor a finger on the pad to drive continuous cursor velocity across multiple monitors, with second-finger directional scrolling.
 - **Smart Conditions & Filters:** Restrict any gesture or shortcut by active application, modifier keys, or window state.
 - **Global Shortcuts & Automation:** Trigger window snaps, application menu items, keystroke sequences, AppleScripts, shell commands, or macOS Shortcuts.
 - **Tuning & Live Previews:** One-click presets (**Relaxed**, **Balanced**, **Precise**), customizable edge dead-zones, palm rejection, and real-time animated touch previews.
@@ -111,6 +111,21 @@ To create a release DMG:
 ### In-App Updates
 
 Glide includes built-in release checking. Open **Preferences → General** and click **Check for Updates**, or select **Check for Updates…** from the menu bar icon. Updates download, verify checksums, and relaunch automatically in place.
+
+## Why I Built This
+
+About five months ago, I got my first MacBook. The trackpad hardware was easily the best I had ever used, but macOS barely let me do anything with it. I couldn't snap windows, adjust volume with a swipe, or switch between open windows without memorizing shortcuts or lifting my hands from the pad. The traditional tool, BetterTouchTool, felt heavy—ongoing background CPU drain, battery hit, and a paid license for a kitchen-sink utility.
+
+So I opened an editor and started building Glide with the help of AI.
+
+Looking back through the commit history, what started as a simple weekend experiment turned into a five-month journey down the macOS low-level API rabbit hole:
+
+- **The Early Days:** It began with basic 3-finger swipes. Quickly, edge cases piled up—pinch-to-zoom conflicts, accidental Mission Control triggers, and dropped click events. To solve this properly, I had to drop standard AppKit event handling and build a C-based bridge into Apple's private `MultitouchSupport` framework with per-gesture event suppression.
+- **The App Switcher Obsession:** I wanted a visual 2D switcher where you swipe horizontally across apps and vertically through their window decks. Standard macOS Accessibility APIs were far too slow across multiple Spaces, causing noticeable lag. I spent weeks rewriting the engine to query window IDs directly from `WindowServer` (`GLDWCopyWindowIDsForProcess`) and remote AX tokens, tuning caching until window switching was instant.
+- **TrackPoint Mode (A First on macOS):** Standard trackpads force you to swipe, lift, and swipe again just to traverse high-resolution multi-monitor setups. Windows and Linux ThinkPad users have long relied on the red pointing stick for continuous cursor velocity without repositioning fingers, but macOS has never had anything like it. I brought velocity-driven vector physics to Apple's glass trackpad: anchor a finger, push outward from the origin to accelerate the cursor continuously in any direction, and drop a second finger to instantly transition into high-speed directional scrolling.
+- **Physical Rim Sliders:** I wanted to adjust volume and brightness without looking at the keyboard. The challenge was preventing accidental triggers during normal cursor navigation. The solution was strict touch-origin filtering: controls only engage if the contact begins directly on the outer 10mm hardware rim of the trackpad.
+
+Five months of daily dogfooding turned Glide into the tool I wanted on day one: deep trackpad control, pure Swift, zero telemetry, and an event-driven engine that idles at 0.0% CPU.
 
 ## Documentation
 
