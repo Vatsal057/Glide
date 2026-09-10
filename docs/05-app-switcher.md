@@ -6,6 +6,10 @@ The App Switcher is a hold-and-swipe way to browse and jump between running apps
 
 **How it works:** swipe left or right with 3 fingers to browse apps, and release to switch — or lift all fingers without committing to cancel. (When using the **Newer** presentation style, if an app has multiple open windows, you can also swipe up or down to pick a specific window.)
 
+<p align="center">
+  <img src="../assets/gesture_app_switcher.svg" alt="App Switcher 2D Spatial Navigation Gesture" width="680">
+</p>
+
 ### Why Vertical Swipes for Window Switching?
 
 Standard macOS app switching (like native `⌘Tab`) only switches at the application level. If you have multiple Chrome windows, several Terminal sessions, or multiple documents open in the same app, switching to a specific window normally requires additional shortcuts (like `⌘\``) or opening Mission Control.
