@@ -74,7 +74,7 @@ A few gestures come set up out of the box. Try them right away:
 | Swipe up with 4 fingers | Maximize the active window |
 | Swipe up again, on that same maximized window | Enter fullscreen |
 
-That last pair is one gesture doing two things depending on the window's current state — a pattern the [usage manual](USAGE.md#2-smart-filters--conditions) explains in full.
+That last pair is one gesture doing two things depending on the window's current state — a pattern the [usage manual](docs/02-filters-and-conditions.md) explains in full.
 
 Everything is editable. Click the hand icon in your menu bar and choose **Open Preferences…** (or press ⌘, once the app is focused), then go to the **Gestures** tab to change what any of them do, or add your own. The [usage manual](USAGE.md) covers every gesture type, action, filter, and setting in detail.
 
