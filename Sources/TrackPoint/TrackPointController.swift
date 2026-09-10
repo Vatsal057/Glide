@@ -52,6 +52,10 @@ final class TrackPointController {
         case idle
         /// Waiting out the activation delay. `anchor` is where the finger landed.
         case arming(id: Int32, anchor: CGPoint)
+        /// Two-finger hold: waiting out the activation delay while both fingers rest still.
+        case twoFingerArming(id1: Int32, id2: Int32, anchor1: CGPoint, anchor2: CGPoint)
+        /// Two-finger hold: delay expired, fingers held still! Ready for one finger to lift to engage.
+        case twoFingerArmed(id1: Int32, id2: Int32, anchor1: CGPoint, anchor2: CGPoint)
         /// This contact moved too far to be a stick; ignore it until it lifts.
         case rejected(id: Int32)
         case engaged(id: Int32, anchor: CGPoint, mode: TrackPointMode)
@@ -63,6 +67,8 @@ final class TrackPointController {
             switch self {
             case .idle:                  return -1
             case .arming(let id, _):     return id
+            case .twoFingerArming:       return -1
+            case .twoFingerArmed:        return -1
             case .rejected(let id):      return id
             case .engaged(let id, _, _): return id
             }
@@ -108,15 +114,16 @@ final class TrackPointController {
 
     // MARK: - Settings
 
-    /// Publishes the zone to the multitouch thread and opens or closes the
-    /// single-contact frame path in the C bridge. Call after any settings change
+    /// Publishes the zone and mode to the multitouch thread and opens or closes the
+    /// contact frame path in the C bridge. Call after any settings change
     /// and on engine start.
     func applySettings() {
         let settings = Settings.shared.trackPoint
         TouchTracker.updateTrackPointCache(enabled: settings.enabled,
+                                           mode: settings.activationMode,
                                            zone: settings.zone,
                                            reach: settings.zoneSize)
-        // Gesture rules all need three fingers; the stick needs one. Only widen
+        // Gesture rules all need three fingers; the stick needs one or two. Only widen
         // the bridge's forwarding window while the feature is actually on.
         MultitouchBridge.shared.setMinimumContactCount(settings.enabled ? 1 : 3)
         if !settings.enabled { reset() }
@@ -134,11 +141,16 @@ final class TrackPointController {
     // MARK: - Touch input
 
     /// - Parameters:
-    ///   - candidate: a lone contact inside the zone, the only thing that may
-    ///     start a session. Nil when there are other fingers down or none in the zone.
+    ///   - candidate: a lone contact eligible to start a single-finger session.
     ///   - tracked: the contact currently driving an engaged session, if still present.
+    ///   - sample1: first active contact sample, if any.
+    ///   - sample2: second active contact sample, if any.
     ///   - contacts: total active contacts this frame.
-    func ingest(candidate: TrackPointSample?, tracked: TrackPointSample?, contacts: Int) {
+    func ingest(candidate: TrackPointSample?,
+                tracked: TrackPointSample?,
+                sample1: TrackPointSample?,
+                sample2: TrackPointSample?,
+                contacts: Int) {
         guard Settings.shared.trackPoint.enabled else {
             reset()
             return
@@ -162,16 +174,73 @@ final class TrackPointController {
                 } else {
                     updateOffset(from: tracked, anchor: anchor, id: id, mode: activeMode)
                 }
+            } else if contacts == 2, let s1 = sample1, let s2 = sample2, (s1.id == id || s2.id == id) {
+                let matched = s1.id == id ? s1 : s2
+                let wanted = mode(forContacts: contacts)
+                if wanted != activeMode {
+                    switchMode(to: wanted, at: matched, id: id)
+                } else {
+                    updateOffset(from: matched, anchor: anchor, id: id, mode: activeMode)
+                }
             } else if let candidate {
                 // The driving contact dropped out of the multitouch state and
                 // came back under a fresh identifier (fingers that barely move
                 // do this). Re-anchor instead of letting a stale offset fling
                 // the cursor, and keep the session alive.
                 reanchor(to: candidate)
+            } else if contacts == 1, let s1 = sample1, Settings.shared.trackPoint.activationMode != .cornerZone {
+                // In anywhere modes, re-anchor to the lone contact if the identifier dropped
+                reanchor(to: s1)
             } else {
                 releaseControl(playHaptic: true)
                 state = .idle
                 offset = .zero
+            }
+
+        case .twoFingerArming(let id1, let id2, let a1, let a2):
+            guard contacts == 2, let s1 = sample1, let s2 = sample2 else {
+                cancelArmTimer()
+                state = contacts > 0 ? .rejected(id: -1) : .idle
+                return
+            }
+            let match1 = (s1.id == id1) ? s1 : ((s2.id == id1) ? s2 : nil)
+            let match2 = (s2.id == id2) ? s2 : ((s1.id == id2) ? s1 : nil)
+            guard let m1 = match1, let m2 = match2 else {
+                cancelArmTimer()
+                state = .rejected(id: -1)
+                return
+            }
+            let dx1 = CGFloat(m1.x) - a1.x
+            let dy1 = CGFloat(m1.y) - a1.y
+            let dist1 = (dx1 * dx1 + dy1 * dy1).squareRoot()
+            let dx2 = CGFloat(m2.x) - a2.x
+            let dy2 = CGFloat(m2.y) - a2.y
+            let dist2 = (dx2 * dx2 + dy2 * dy2).squareRoot()
+            let limit = CGFloat(Settings.shared.trackPoint.activationMovement)
+            if dist1 > limit || dist2 > limit {
+                // Moving before delay expired: normal 2-finger scroll/gesture. Reject.
+                cancelArmTimer()
+                state = .rejected(id: -1)
+            }
+
+        case .twoFingerArmed(_, _, let a1, let a2):
+            if contacts == 1, let remaining = sample1 {
+                // One finger lifted! Engage the remaining finger as the pointing stick!
+                engage(with: remaining)
+            } else if contacts == 0 {
+                state = .idle
+            } else if contacts == 2, let s1 = sample1, let s2 = sample2 {
+                // Still 2 fingers resting. If pushed beyond limit, user chose to scroll instead.
+                let dx1 = CGFloat(s1.x) - a1.x, dy1 = CGFloat(s1.y) - a1.y
+                let dist1 = (dx1 * dx1 + dy1 * dy1).squareRoot()
+                let dx2 = CGFloat(s2.x) - a2.x, dy2 = CGFloat(s2.y) - a2.y
+                let dist2 = (dx2 * dx2 + dy2 * dy2).squareRoot()
+                let limit = CGFloat(Settings.shared.trackPoint.activationMovement * 2.0)
+                if dist1 > limit || dist2 > limit {
+                    state = .rejected(id: -1)
+                }
+            } else if contacts >= 3 {
+                state = .rejected(id: -1)
             }
 
         case .arming(let id, let anchor):
@@ -194,11 +263,25 @@ final class TrackPointController {
             }
 
         case .rejected(let id):
-            if let candidate, candidate.id != id { arm(candidate) }
-            else if contacts == 0 { state = .idle }
+            if contacts == 0 {
+                state = .idle
+            } else if let candidate, candidate.id != id {
+                arm(candidate)
+            }
 
         case .idle:
-            if let candidate { arm(candidate) }
+            guard contacts > 0 else { return }
+            let mode = Settings.shared.trackPoint.activationMode
+            switch mode {
+            case .twoFingerHold:
+                if contacts == 2, let s1 = sample1, let s2 = sample2 {
+                    armTwoFinger(s1, s2)
+                }
+            case .cornerZone, .anywhere:
+                if let candidate {
+                    arm(candidate)
+                }
+            }
         }
     }
 
@@ -206,6 +289,32 @@ final class TrackPointController {
     func engineWillStop() { reset() }
 
     // MARK: - State transitions
+
+    private func armTwoFinger(_ s1: TrackPointSample, _ s2: TrackPointSample) {
+        cancelArmTimer()
+        let a1 = CGPoint(x: CGFloat(s1.x), y: CGFloat(s1.y))
+        let a2 = CGPoint(x: CGFloat(s2.x), y: CGFloat(s2.y))
+        state = .twoFingerArming(id1: s1.id, id2: s2.id, anchor1: a1, anchor2: a2)
+        offset = .zero
+
+        let delay = Settings.shared.trackPoint.activationDelay
+        let work = DispatchWorkItem { [weak self] in self?.armTwoFingerReady(id1: s1.id, id2: s2.id) }
+        armTimer = work
+        if delay <= 0 {
+            work.perform()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    }
+
+    private func armTwoFingerReady(id1: Int32, id2: Int32) {
+        guard case .twoFingerArming(let armed1, let armed2, let a1, let a2) = state,
+              armed1 == id1, armed2 == id2 else { return }
+        armTimer = nil
+        state = .twoFingerArmed(id1: id1, id2: id2, anchor1: a1, anchor2: a2)
+        playHaptic(.softTick)
+        AppLogger.debug("[TrackPoint] Two-finger armed — awaiting lift of one finger")
+    }
 
     private func arm(_ sample: TrackPointSample) {
         cancelArmTimer()
@@ -228,20 +337,22 @@ final class TrackPointController {
     private func engageIfStillArming(id: Int32) {
         guard case .arming(let armedID, _) = state, armedID == id else { return }
         guard let sample = lastSample, sample.id == id else { return }
-        armTimer = nil
+        engage(with: sample)
+    }
 
-        // Anchor where the finger sits now, not where it landed: the small drift
-        // allowed during the delay would otherwise read as a standing push and
-        // creep the cursor the instant the stick engages.
+    private func engage(with sample: TrackPointSample) {
+        cancelArmTimer()
         let startMode = mode(forContacts: 1)
-        state = .engaged(id: id, anchor: CGPoint(x: CGFloat(sample.x), y: CGFloat(sample.y)), mode: startMode)
+        let anchor = CGPoint(x: CGFloat(sample.x), y: CGFloat(sample.y))
+        lastSample = sample
+        state = .engaged(id: sample.id, anchor: anchor, mode: startMode)
         offset = .zero
 
         prepareDriver(for: startMode)
         GestureEngine.shared.inputManager?.setTrackPointSuppression(true)
         startDriveTimer()
         playHaptic(.softTick)
-        AppLogger.debug("[TrackPoint] Engaged in \(Settings.shared.trackPoint.zone.rawValue)")
+        AppLogger.debug("[TrackPoint] Engaged with finger \(sample.id) at (\(sample.x), \(sample.y))")
     }
 
     /// Swaps what the stick drives without ending the session. Re-anchors so the

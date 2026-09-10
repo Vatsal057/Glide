@@ -20,7 +20,10 @@ struct TrackPointTab: View {
                 introCard
 
                 if settings.enabled {
-                    anchorSection
+                    activationModeSection
+                    if settings.activationMode == .cornerZone {
+                        anchorSection
+                    }
                     feelSection
                     scrollSection
                     engageSection
@@ -44,11 +47,37 @@ struct TrackPointTab: View {
 
     private var introCard: some View {
         TuningSection(title: "TrackPoint", icon: "dot.circle.and.hand.point.up.left.fill") {
-            Toggle("Use a corner of the trackpad as a pointing stick", isOn: binding(\.enabled))
+            Toggle("Use the trackpad as a pointing stick", isOn: binding(\.enabled))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
 
-            explainer("Rest one finger in the corner, hold for a moment, then push. How far you push sets how fast the cursor moves — so you can cross the whole screen from a patch of trackpad the size of your fingertip, without ever lifting your finger.\n\nPress the trackpad to click as usual.")
+            explainer("Displacement maps to cursor speed instead of position — so you can cross the whole screen from a single spot on the pad without ever lifting your finger.\n\nPress the trackpad to click as usual.")
+        }
+    }
+
+    // MARK: - Activation
+
+    private var activationModeSection: some View {
+        TuningSection(title: "Activation", icon: "hand.tap") {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker("Activation Method", selection: binding(\.activationMode)) {
+                    ForEach(TrackPointActivationMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+
+                switch settings.activationMode {
+                case .twoFingerHold:
+                    explainer("Rest two fingers still anywhere on the trackpad. You'll feel a subtle tick when armed — lift either finger, and the remaining finger becomes the pointing stick.")
+                case .cornerZone:
+                    explainer("Rest one finger in the designated corner, hold for a moment, then push.")
+                case .anywhere:
+                    explainer("Rest one finger still anywhere on the trackpad, hold for a moment, then push.")
+                }
+            }
         }
     }
 
@@ -149,14 +178,21 @@ struct TrackPointTab: View {
 
     private var engageSection: some View {
         TuningSection(title: "Engaging", icon: "timer") {
-            explainer("A short hold is what separates the stick from an ordinary drag. Move before the hold is up and Glide steps aside, letting macOS handle the touch normally.")
+            switch settings.activationMode {
+            case .twoFingerHold:
+                explainer("Hold two fingers motionless until armed. Moving earlier leaves the touch to macOS as an ordinary two-finger scroll.")
+            case .cornerZone, .anywhere:
+                explainer("A short hold is what separates the stick from an ordinary drag. Move before the hold is up and Glide steps aside, letting macOS handle the touch normally.")
+            }
 
             SliderRow(
                 label: "Hold to engage",
                 value: binding(\.activationDelay),
                 range: TrackPointSettings.activationDelayRange,
                 format: "%.2f s",
-                hint: "Zero engages the instant a finger lands in the corner — fastest, but it will hijack drags that start there."
+                hint: settings.activationMode == .twoFingerHold
+                    ? "Time both fingers must rest still before lifting one to engage."
+                    : "Zero engages instantly; longer leaves normal drags or swipes alone."
             )
 
             Divider().padding(.horizontal, 12)

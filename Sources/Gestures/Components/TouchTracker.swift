@@ -80,9 +80,8 @@ enum TouchTracker {
         _edgeMargin = edgeMargin
     }
 
-    // ── TrackPoint cache (read on the MT thread once per frame) ──
-
     fileprivate static var _trackPointEnabled: Bool = false
+    fileprivate static var _trackPointMode: TrackPointActivationMode = .twoFingerHold
     /// The single corner that anchors the stick. Scrolling is a second finger on
     /// the pad, not a second corner, so one zone covers both modes.
     fileprivate static var _trackPointZone: TrackpadZone = .bottomRight
@@ -94,10 +93,14 @@ enum TouchTracker {
     fileprivate static var _trackPointAnchoredID: Int32 = -1
     fileprivate static var _trackPointStreaming: Bool = false
 
-    static func updateTrackPointCache(enabled: Bool, zone: TrackpadZone, reach: Float) {
+    static func updateTrackPointCache(enabled: Bool,
+                                      mode: TrackPointActivationMode,
+                                      zone: TrackpadZone,
+                                      reach: Float) {
         stateLock.lock()
         defer { stateLock.unlock() }
         _trackPointEnabled = enabled
+        _trackPointMode = mode
         _trackPointZone = zone
         _trackPointReach = reach
         if !enabled {
@@ -343,45 +346,69 @@ let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
 /// when it's on but no finger is in the zone.
 private func feedTrackPoint(_ points: UnsafePointer<GLDTouchPoint>?, _ count: Int32) {
     TouchTracker.stateLock.lock()
-    let enabled    = TouchTracker._trackPointEnabled
-    let zone       = TouchTracker._trackPointZone
-    let reach      = TouchTracker._trackPointReach
-    let anchoredID = TouchTracker._trackPointAnchoredID
+    let enabled      = TouchTracker._trackPointEnabled
+    let mode         = TouchTracker._trackPointMode
+    let zone         = TouchTracker._trackPointZone
+    let reach        = TouchTracker._trackPointReach
+    let anchoredID   = TouchTracker._trackPointAnchoredID
     let wasStreaming = TouchTracker._trackPointStreaming
     TouchTracker.stateLock.unlock()
 
     guard enabled else { return }
 
     var contacts = 0
-    var lone: GLDTouchPoint?
-    var anchored: GLDTouchPoint?
+    var s1: TrackPointSample?
+    var s2: TrackPointSample?
+    var anchored: TrackPointSample?
     if let points, count > 0 {
         for index in 0..<Int(count) {
             let touch = points[index]
             guard touch.state >= 3 && touch.state <= 4 else { continue }
             contacts += 1
-            lone = touch
-            if touch.identifier == anchoredID { anchored = touch }
+            let sample = TrackPointSample(touch)
+            if contacts == 1 { s1 = sample }
+            else if contacts == 2 { s2 = sample }
+            if touch.identifier == anchoredID { anchored = sample }
         }
     }
 
-    // A candidate is a lone contact sitting in the zone — the only thing that
-    // may *start* a session. Extra fingers disqualify it, so resting a hand on
-    // the pad can never arm the stick.
     var candidate: TrackPointSample?
-    if contacts == 1, let lone, zone.contains(x: lone.x, y: lone.y, reach: reach) {
-        candidate = TrackPointSample(lone)
+    if contacts == 1, let s1 {
+        switch mode {
+        case .cornerZone:
+            if zone.contains(x: s1.x, y: s1.y, reach: reach) { candidate = s1 }
+        case .anywhere:
+            candidate = s1
+        case .twoFingerHold:
+            candidate = nil
+        }
     }
 
-    let streaming = candidate != nil || anchoredID >= 0
+    let streaming: Bool
+    if anchoredID >= 0 {
+        streaming = true
+    } else {
+        switch mode {
+        case .cornerZone, .anywhere:
+            streaming = candidate != nil
+        case .twoFingerHold:
+            streaming = contacts == 2 || (wasStreaming && contacts == 1)
+        }
+    }
+
     guard streaming || wasStreaming else { return }
 
     TouchTracker.stateLock.lock()
     TouchTracker._trackPointStreaming = streaming
     TouchTracker.stateLock.unlock()
 
-    let tracked = anchored.map(TrackPointSample.init)
     DispatchQueue.main.async {
-        TrackPointController.shared.ingest(candidate: candidate, tracked: tracked, contacts: contacts)
+        TrackPointController.shared.ingest(
+            candidate: candidate,
+            tracked: anchored,
+            sample1: s1,
+            sample2: s2,
+            contacts: contacts
+        )
     }
 }

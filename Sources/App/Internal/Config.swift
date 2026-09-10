@@ -42,9 +42,10 @@ struct GlideConfig {
 
     struct TrackPoint {
         var enabled: Bool = false
+        var activationMode: String = "two_finger_hold"
         var zone: String = "bottom_right"
         var zoneSize: Float = 0.16
-        var activationDelay: Double = 0.15
+        var activationDelay: Double = 0.35
         var activationMovement: Float = 0.012
         var deadZone: Float = 0.005
         var pushRange: Float = 0.055
@@ -166,6 +167,7 @@ extension GlideConfig {
         cfg.appSwitcher.animationsEnabled = s.appSwitcher.animationsEnabled
 
         cfg.trackPoint.enabled            = s.trackPoint.enabled
+        cfg.trackPoint.activationMode     = s.trackPoint.activationMode.rawValue
         cfg.trackPoint.zone               = s.trackPoint.zone.yamlValue ?? "bottom_right"
         cfg.trackPoint.zoneSize           = s.trackPoint.zoneSize
         cfg.trackPoint.activationDelay    = s.trackPoint.activationDelay
@@ -272,6 +274,7 @@ extension GlideConfig {
     func toTrackPoint() -> TrackPointSettings {
         var p = TrackPointSettings()
         p.enabled            = trackPoint.enabled
+        p.activationMode     = TrackPointActivationMode(rawValue: trackPoint.activationMode) ?? .twoFingerHold
         p.zone               = TrackpadZone(yamlValue: trackPoint.zone) ?? .bottomRight
         p.zoneSize           = trackPoint.zoneSize
         p.activationDelay    = trackPoint.activationDelay
@@ -455,9 +458,10 @@ enum GlideConfigSerializer {
             "    restore_minimized_on_commit: \(config.appSwitcher.restoreMinimizedOnCommit ? "true" : "false")",
             "    animations_enabled: \(config.appSwitcher.animationsEnabled ? "true" : "false")",
             "",
-            "  # ── TrackPoint (corner of the pad as a pointing stick) ──",
+            "  # ── TrackPoint (pointing stick on trackpad) ──",
             "  trackpoint:",
             "    enabled: \(config.trackPoint.enabled ? "true" : "false")",
+            "    activation_mode: \(config.trackPoint.activationMode)",
             "    zone: \(config.trackPoint.zone)",
             "    zone_size: \(fmt(config.trackPoint.zoneSize))",
             "    activation_delay: \(String(format: "%.2f", config.trackPoint.activationDelay))",
@@ -752,6 +756,7 @@ enum GlideConfigParser {
             if ind <= parentIndent { return }
             switch key {
             case "enabled":             point.enabled            = boolVal(val)   ?? point.enabled
+            case "activation_mode":     point.activationMode     = stringVal(val) ?? point.activationMode
             case "zone":                point.zone               = stringVal(val) ?? point.zone
             case "zone_size":           point.zoneSize           = floatVal(val)  ?? point.zoneSize
             case "activation_delay":    point.activationDelay    = doubleVal(val) ?? point.activationDelay

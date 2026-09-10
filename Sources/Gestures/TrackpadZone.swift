@@ -62,6 +62,7 @@ enum TrackpadZone: String, Codable, CaseIterable {
 
     init?(yamlValue: String?) {
         switch yamlValue?.lowercased() {
+        case "any":          self = .any
         case "top_left":     self = .topLeft
         case "top_right":    self = .topRight
         case "bottom_left":  self = .bottomLeft
@@ -76,7 +77,7 @@ enum TrackpadZone: String, Codable, CaseIterable {
 
     var yamlValue: String? {
         switch self {
-        case .any:         return nil
+        case .any:         return "any"
         case .topLeft:     return "top_left"
         case .topRight:    return "top_right"
         case .bottomLeft:  return "bottom_left"

@@ -636,9 +636,25 @@ enum TrackPointMode: String, Codable, CaseIterable {
     case scroll
 }
 
+enum TrackPointActivationMode: String, Codable, CaseIterable {
+    case twoFingerHold = "two_finger_hold"
+    case cornerZone    = "corner"
+    case anywhere      = "anywhere"
+
+    var displayName: String {
+        switch self {
+        case .twoFingerHold: return "Two-Finger Hold"
+        case .cornerZone:    return "Corner Hold"
+        case .anywhere:      return "One-Finger Hold"
+        }
+    }
+}
+
 struct TrackPointSettings: Codable, Equatable {
     var enabled: Bool = false
-    /// Which corner anchors the pointer stick.
+    /// How TrackPoint is initiated: 2-finger hold anywhere, 1-finger corner hold, or 1-finger anywhere.
+    var activationMode: TrackPointActivationMode = .twoFingerHold
+    /// Which corner anchors the pointer stick (when activationMode is .cornerZone).
     var zone: TrackpadZone = .bottomRight
     /// Resting a second finger anywhere on the pad turns the engaged stick into a
     /// scroller — the same role the middle button plays on a real TrackPoint.
@@ -652,9 +668,9 @@ struct TrackPointSettings: Codable, Equatable {
     var invertScroll: Bool = false
     /// Zone depth along each axis (normalized). 0.16 → outer 16% of both axes.
     var zoneSize: Float = 0.16
-    /// Motionless time in the zone before the stick engages. Keeps a normal
-    /// cursor drag that happens to start in the corner from being hijacked.
-    var activationDelay: TimeInterval = 0.15
+    /// Motionless time before the stick engages or arms. Keeps normal cursor
+    /// drags or scrolls from being hijacked.
+    var activationDelay: TimeInterval = 0.35
     /// Push distance the finger travels before it must have committed — exceed
     /// it during `activationDelay` and the touch is left to macOS.
     var activationMovement: Float = 0.012
@@ -675,13 +691,15 @@ struct TrackPointSettings: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled            = try c.decodeIfPresent(Bool.self,         forKey: .enabled)            ?? false
+        activationMode     = (try? c.decodeIfPresent(TrackPointActivationMode.self, forKey: .activationMode))
+                             .flatMap { $0 }                                                       ?? .cornerZone
         zone               = (try? c.decodeIfPresent(TrackpadZone.self, forKey: .zone))
                              .flatMap { $0 }                                                       ?? .bottomRight
         scrollEnabled      = try c.decodeIfPresent(Bool.self,         forKey: .scrollEnabled)      ?? true
         scrollSpeed        = try c.decodeIfPresent(Float.self,        forKey: .scrollSpeed)        ?? 1200
         invertScroll       = try c.decodeIfPresent(Bool.self,         forKey: .invertScroll)       ?? false
         zoneSize           = try c.decodeIfPresent(Float.self,        forKey: .zoneSize)           ?? 0.16
-        activationDelay    = try c.decodeIfPresent(TimeInterval.self, forKey: .activationDelay)    ?? 0.15
+        activationDelay    = try c.decodeIfPresent(TimeInterval.self, forKey: .activationDelay)    ?? 0.35
         activationMovement = try c.decodeIfPresent(Float.self,        forKey: .activationMovement) ?? 0.012
         deadZone           = try c.decodeIfPresent(Float.self,        forKey: .deadZone)           ?? 0.005
         pushRange          = try c.decodeIfPresent(Float.self,        forKey: .pushRange)          ?? 0.055
@@ -691,7 +709,7 @@ struct TrackPointSettings: Codable, Equatable {
     }
 
     static let zoneSizeRange:        ClosedRange<Float>        = 0.08...0.35
-    static let activationDelayRange: ClosedRange<TimeInterval> = 0.0...0.6
+    static let activationDelayRange: ClosedRange<TimeInterval> = 0.0...1.0
     static let deadZoneRange:        ClosedRange<Float>        = 0.0...0.02
     static let pushRangeRange:       ClosedRange<Float>        = 0.02...0.15
     static let maxSpeedRange:        ClosedRange<Float>        = 200...4000
@@ -700,7 +718,9 @@ struct TrackPointSettings: Codable, Equatable {
 
     static func normalized(_ s: TrackPointSettings) -> TrackPointSettings {
         var n = s
-        if !TrackpadZone.cornerCases.contains(n.zone) { n.zone = .bottomRight }
+        if n.activationMode == .cornerZone && !TrackpadZone.cornerCases.contains(n.zone) {
+            n.zone = .bottomRight
+        }
         n.scrollSpeed        = n.scrollSpeed.clamped(to: scrollSpeedRange)
         n.zoneSize           = n.zoneSize.clamped(to: zoneSizeRange)
         n.activationDelay    = n.activationDelay.clamped(to: activationDelayRange)
