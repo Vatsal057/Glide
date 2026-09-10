@@ -423,6 +423,17 @@ struct RuleEditor: View {
                 Divider()
             }
 
+            // ── Trackpad gesture animation preview ──
+            if !rule.isKeyboardBinding {
+                VStack(spacing: 0) {
+                    GestureAnimationView(rule: rule)
+                        .padding(.vertical, 12)
+                }
+                .frame(maxWidth: .infinity)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
+                Divider()
+            }
+
             // ── Main form ──
             Form {
 

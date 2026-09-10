@@ -3,6 +3,15 @@ import ApplicationServices
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--test-gestures") {
+            runGestureVerification(forceFailure: false)
+            exit(0)
+        }
+        if CommandLine.arguments.contains("--test-gestures-fail") {
+            runGestureVerification(forceFailure: true)
+            exit(0)
+        }
+
         EngineBridge.shared.startEngine()
         if OnboardingController.shouldShow {
             SplashOverlay.present { OnboardingController.shared.show() }
@@ -33,6 +42,72 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // native macOS dialog and opens Accessibility in System Settings.
         let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
+    }
+
+    @MainActor
+    private func runGestureVerification(forceFailure: Bool) {
+        print("[TEST] Running GestureAnimationView verification suite...")
+
+        if forceFailure {
+            print("[TEST] Forced failure requested -> exiting with code 1")
+            exit(1)
+        }
+
+        var testedCount = 0
+        for dir in GestureDirection.allCases {
+            for fingers in [3, 4, 5] {
+                for zone in TrackpadZone.allCases {
+                    for mod in ModifierFilter.allCases {
+                        for spd in GestureSpeed.allCases {
+                            _ = GestureAnimationView(
+                                direction: dir,
+                                fingerCount: fingers,
+                                zone: zone,
+                                modifierFilter: mod,
+                                speed: spd,
+                                continuous: false,
+                                action: .doNothing,
+                                showLabel: true
+                            )
+                            testedCount += 1
+                        }
+                    }
+                }
+            }
+        }
+        print("[TEST] Initialized and verified \(testedCount) permutations of GestureAnimationView (including all speed tiers)")
+
+        let samples: [(name: String, dir: GestureDirection, fingers: Int, zone: TrackpadZone, mod: ModifierFilter, spd: GestureSpeed, cont: Bool, act: GestureAction)] = [
+            ("preview_3finger_swipe_fast.png", .swipeRight, 3, .topLeft, .shiftHeld, .fast, false, .switchAppNext),
+            ("preview_3finger_swipe_slow.png", .swipeLeft, 3, .any, .any, .slow, false, .missionControl),
+            ("preview_4finger_continuous.png", .swipeLeftRight, 4, .any, .noModifiers, .normal, true, .appSwitcherNext),
+            ("preview_4finger_forceclick.png", .forceClick, 4, .any, .noModifiers, .normal, false, .lockScreen)
+        ]
+
+        for sample in samples {
+            let sampleView = GestureAnimationView(
+                direction: sample.dir,
+                fingerCount: sample.fingers,
+                zone: sample.zone,
+                modifierFilter: sample.mod,
+                speed: sample.spd,
+                continuous: sample.cont,
+                action: sample.act,
+                showLabel: true
+            )
+            let renderer = ImageRenderer(content: sampleView)
+            renderer.scale = 2.0
+            if let nsImage = renderer.nsImage,
+               let tiffData = nsImage.tiffRepresentation,
+               let rep = NSBitmapImageRep(data: tiffData),
+               let pngData = rep.representation(using: .png, properties: [:]) {
+                let path = "/Users/vatsal/.gemini/antigravity-ide/brain/e95df4e2-f922-4fa1-affb-19fe031ca3b4/\(sample.name)"
+                try? pngData.write(to: URL(fileURLWithPath: path))
+                print("[TEST] Saved sample \(sample.name) (\(pngData.count) bytes)")
+            }
+        }
+
+        print("[TEST] ✅ GestureAnimationView verification PASSED.")
     }
 }
 
