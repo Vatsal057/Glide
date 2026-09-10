@@ -18,12 +18,14 @@
 
 Glide turns your trackpad into a control surface. Swipe with three, four, or five fingers to switch apps, snap windows, take screenshots, or run a shortcut — no memorizing key combos, no digging through menus. It runs quietly in the menu bar and reacts to touches in real time.
 
-It also includes **TrackPoint**, which turns a corner of your trackpad into a pointing stick like the one on a ThinkPad, and a **visual App Switcher** you browse with a swipe instead of tapping ⌘Tab repeatedly.
+It also includes **Trackpad Edge Controls** that turn the outer physical rim of your trackpad into hardware sliders for volume and brightness, **TrackPoint** which turns a trackpad corner into a ThinkPad-style pointing stick, and a **visual App Switcher** you browse with a swipe instead of tapping ⌘Tab repeatedly.
 
 Everything is configurable: which gesture does what, which app it applies to, how sensitive it is, and how hard you have to swipe to trigger it. Free, open source, and everything stays on your Mac — no network access, no analytics.
 
 ## Highlights
 
+- 🎚️ **Trackpad Edge Controls** — slide a single finger along the physical rim of your trackpad to smoothly adjust Volume (right edge), Display Brightness (left edge), or custom actions (Keyboard Backlight, Mic Gain, Night Shift, App Switcher scrub) using native macOS OSD bezels with zero CPU overhead
+- 🎬 **Animated Gesture Previews** — macOS Trackpad Settings-style live animations for every gesture in Preferences, complete with speed tiers (slow, normal, fast) and directional ghost trails
 - 🖐️ **Swipes, clicks, and force-clicks** with 3, 4, or 5 fingers, each mappable to its own action
 - 🪟 **Window management** — snap, maximize, center, move between displays, enter/exit fullscreen
 - 🔄 **Visual App Switcher** — swipe to browse running apps and their windows, release to switch
@@ -65,18 +67,22 @@ Glide downloads the new version, verifies it against the checksum published with
 
 ## Quick start
 
-A few gestures come set up out of the box. Try them right away:
+A few gestures and edge controls come set up out of the box. Try them right away:
 
-| Gesture | Action |
+| Input | Action |
 |---|---|
+| **Slide 1 finger along right edge** | **System Volume up / down** |
+| **Slide 1 finger along left edge** | **Display Brightness up / down** |
 | Swipe up with 3 fingers | Mission Control |
 | Swipe down with 3 fingers | Minimize all windows |
 | Swipe up with 4 fingers | Maximize the active window |
 | Swipe up again, on that same maximized window | Enter fullscreen |
 
-That last pair is one gesture doing two things depending on the window's current state — a pattern the [usage manual](docs/02-filters-and-conditions.md) explains in full.
+> **Edge Controls tip:** Edge controls activate only when swiping directly along the outer physical rim of your trackpad. Normal cursor movements that cross or reach the edge are ignored, keeping your regular mouse navigation completely unaffected.
 
-Everything is editable. Click the hand icon in your menu bar and choose **Open Preferences…** (or press ⌘, once the app is focused), then go to the **Gestures** tab to change what any of them do, or add your own. The [usage manual](USAGE.md) covers every gesture type, action, filter, and setting in detail.
+Everything is editable. Click the hand icon in your menu bar and choose **Open Preferences…** (or press ⌘, once the app is focused):
+- Go to the **Edge Controls** tab to customize actions for the Top, Bottom, Left, and Right edges (including App Switcher scrub, Keyboard Backlight, Mic Gain, and Night Shift).
+- Go to the **Gestures** tab to change what multi-finger gestures do, preview animated demonstrations with speed tiers, or add your own custom rules.
 
 ## Documentation
 

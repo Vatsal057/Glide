@@ -15,5 +15,6 @@ Everything Glide can do, split into one file per topic. If you just want to get 
 9. [Your configuration file](docs/09-configuration-file.md) — config.yaml, export/import, reset to defaults.
 10. [Permissions Glide asks for](docs/10-permissions.md) — Accessibility, Screen Recording, Automation.
 11. [Troubleshooting](docs/11-troubleshooting.md) — common issues and fixes.
+12. [Trackpad Edge Controls](docs/12-edge-controls.md) — physical rim sliders for volume, brightness, backlight, and app switching.
 
 Each page links to the one before and after it, so you can also just start at [§1](docs/01-core-concepts.md) and read straight through.
