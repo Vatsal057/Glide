@@ -1,10 +1,40 @@
-# Glide — Trackpad Gesture Customizer for macOS
+<div align="center">
 
-Glide is a lightweight and powerful application for macOS that lets you control your computer using custom trackpad gestures. By sliding or clicking with three, four, or five fingers, you can manage windows, control media, launch apps, take screenshots, and trigger system shortcuts. 
+<img src="assets/hero.png" alt="Glide" width="640">
 
-Glide works in the background and intercepts your trackpad movements, translating them into actions instantly.
+# Glide
+
+**Trackpad gestures for macOS — swipe, click, and force-click your way through windows, apps, and system controls.**
+
+[![Release](https://img.shields.io/github/v/release/Vatsal057/Glide?label=release)](https://github.com/Vatsal057/Glide/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black)](#installation)
+
+[Download](https://github.com/Vatsal057/Glide/releases/latest) · [Usage Manual](USAGE.md) · [Report an Issue](https://github.com/Vatsal057/Glide/issues)
+
+</div>
 
 ---
+
+Glide turns your trackpad into a control surface. Swipe with three, four, or five fingers to switch apps, snap windows, take screenshots, or run a shortcut — no memorizing key combos, no digging through menus. It runs quietly in the menu bar and reacts to touches in real time.
+
+It also includes **TrackPoint**, which turns a corner of your trackpad into a pointing stick like the one on a ThinkPad, and a **visual App Switcher** you browse with a swipe instead of tapping ⌘Tab repeatedly.
+
+Everything is configurable: which gesture does what, which app it applies to, how sensitive it is, and how hard you have to swipe to trigger it. Free, open source, and everything stays on your Mac — no network access, no analytics.
+
+## Highlights
+
+- 🖐️ **Swipes, clicks, and force-clicks** with 3, 4, or 5 fingers, each mappable to its own action
+- 🪟 **Window management** — snap, maximize, center, move between displays, enter/exit fullscreen
+- 🔄 **Visual App Switcher** — swipe to browse running apps and their windows, release to switch
+- 📌 **TrackPoint** — a pointing stick in the corner of your trackpad, so you never have to lift your finger to reach the far side of the screen
+- ⚡ **Speed-aware gestures** — a slow swipe and a fast flick in the same direction can do two different things
+- 🎯 **Per-app rules, modifier keys, and window-state filters** — the same gesture can behave differently in Safari, when Shift is held, or when a window is already fullscreen
+- ⌨️ **Global keyboard shortcuts** for any action, gesture or not
+- 🎛️ **Deep tuning** — sensitivity, palm rejection, pinch/zoom conflict avoidance, all with a visual trackpad preview
+- 🔒 **Private by design** — no telemetry, no network calls except checking GitHub for updates
+
+Read the [full usage manual](USAGE.md) for every gesture, action, and setting Glide has.
 
 ## Installation
 
@@ -20,12 +50,12 @@ Glide works in the background and intercepts your trackpad movements, translatin
      xattr -cr /Applications/Glide.app
      ```
 
-4. Open Glide and grant Accessibility access when prompted (**System Settings → Privacy & Security → Accessibility**).
-5. The hand icon appears in your menu bar — you're ready to go.
+4. Open Glide and grant Accessibility access when prompted (**System Settings → Privacy & Security → Accessibility**). This is required — Glide reads trackpad touches and controls windows through it, and gestures won't fire without it.
+5. The hand icon appears in your menu bar. A short welcome tour walks you through the starter gestures — you're ready to go.
 
-**Requirements:** macOS 13 (Ventura) or later, Apple Silicon or Intel.
+**Requirements:** macOS 13 (Ventura) or later, Apple Silicon or Intel, a Multi-Touch trackpad (built-in or Magic Trackpad).
 
-**Building from source:** clone the repo and run `./build.sh` (needs Xcode Command Line Tools). Add `--dmg` to also produce a DMG.
+**Building from source:** clone the repo and run `./build.sh` (needs Xcode Command Line Tools). Add `--dmg` to also produce a DMG, or `--release` for a release build. Run `./build.sh --help` for the full list.
 
 ### Updating
 
@@ -33,165 +63,30 @@ You only do the steps above once. From then on Glide updates itself: open **Pref
 
 Glide downloads the new version, verifies it against the checksum published with the release, installs it over itself, and relaunches. Nothing to mount or drag, and no Gatekeeper warning to clear — that warning comes from the quarantine flag a browser attaches to downloads, and an in-app download doesn't get one.
 
----
+## Quick start
 
-## Table of Contents
-1. [Core Concepts](#1-core-concepts)
-2. [Smart Filters & Conditions](#2-smart-filters--conditions)
-3. [Every Feature & Action Explained](#3-every-feature--action-explained)
-4. [Tuning & Precision Controls](#4-tuning--precision-controls)
-5. [General App Preferences](#5-general-app-preferences)
-6. [Managing Your Configuration File](#6-managing-your-configuration-file)
+A few gestures come set up out of the box. Try them right away:
 
----
+| Gesture | Action |
+|---|---|
+| Swipe up with 3 fingers | Mission Control |
+| Swipe down with 3 fingers | Minimize all windows |
+| Swipe up with 4 fingers | Maximize the active window |
+| Swipe up again, on that same maximized window | Enter fullscreen |
 
-## 1. Core Concepts
+That last pair is one gesture doing two things depending on the window's current state — a pattern the [usage manual](docs/02-filters-and-conditions.md) explains in full.
 
-Instead of memorizing complex keyboard shortcuts, Glide lets you use natural trackpad movements. Every gesture you configure is built on a few simple elements:
+Everything is editable. Click the hand icon in your menu bar and choose **Open Preferences…** (or press ⌘, once the app is focused), then go to the **Gestures** tab to change what any of them do, or add your own. The [usage manual](USAGE.md) covers every gesture type, action, filter, and setting in detail.
 
-*   **Finger Count:** Glide supports gestures using **3**, **4**, or **5** fingers.
-*   **Gesture Types:** 
-    *   **Swipes:** Sliding your fingers in a specific direction (**Up**, **Down**, **Left**, or **Right**).
-    *   **Clicks:** Pressing down on the trackpad with all fingers in place.
-    *   **Force Clicks:** Pressing down harder on a Force Touch trackpad to trigger a deeper physical click.
-*   **Swipe Speed:** You can map different actions to the exact same swipe depending on how fast you move. Glide recognizes **Slow**, **Normal**, and **Fast** swipes. For example, a slow three-finger swipe right can switch to the next open window, while a fast flick right can launch your browser.
+## Documentation
 
----
+- **[Usage Manual](USAGE.md)** — every gesture type, action, filter, TrackPoint mode, tuning control, and config-file detail, explained.
+- **[Design System](DESIGN.md)** — the visual language behind Glide's interface, for anyone contributing UI.
 
-## 2. Smart Filters & Conditions
+## Contributing
 
-You don't have to use the same gestures for everything. Glide lets you restrict your gestures using rules so they only trigger under specific conditions:
+Issues and pull requests are welcome. If you're proposing a UI change, skim [DESIGN.md](DESIGN.md) first — Glide has a deliberately restrained visual style (native controls, one accent color, no glassmorphism) and PRs that drift from it will get bounced back for a pass.
 
-*   **Keyboard Modifiers:** You can set a gesture to only work when you are holding down a specific key on your keyboard—such as **Command (⌘)**, **Shift (⇧)**, **Option (⌥)**, or **Control (⌃)**—or only when no keys are held down at all.
-*   **App Filters:** You can restrict a gesture to a specific app. For example, a three-finger click might close a tab in Safari, but mute the audio in Spotify.
-*   **Window State Filters:** Gestures can change behavior depending on whether the window you are using is:
-    *   *Fullscreen* (filling the entire screen in macOS fullscreen mode).
-    *   *Not Fullscreen*.
-    *   *Maximized* (stretched to fill the desk space but still showing the top menu bar).
-    *   *Not Maximized*.
-*   **Reciprocal (Reverse) Gestures:** This feature allows you to "undo" a gesture by swiping in the opposite direction immediately afterward. For example, if swiping up maximizes a window, swiping down immediately afterward will restore it to its original size.
+## License
 
----
-
-## 3. Every Feature & Action Explained
-
-Below is the complete list of actions you can assign to your trackpad gestures, broken down by category:
-
-### Apps (Application Control)
-*   **Quit App Under Cursor:** Instantly closes the application whose window is directly under your mouse pointer, saving you from clicking the app menu.
-*   **Force Quit App Under Cursor:** Immediately shuts down the app under your mouse pointer. Use this if an application has frozen or stopped responding.
-*   **Quit Frontmost App:** Closes the application you are currently actively using.
-*   **Hide App Under Cursor:** Minimizes/hides the application under your mouse pointer from view without closing it.
-*   **Hide Other Apps:** Hides all other running apps except for the one under your mouse cursor, letting you focus on a single task.
-*   **Open App...:** Launches an application of your choice. When setting up this gesture, Glide opens a file picker so you can select any app in your Applications folder.
-*   **Next App (App Switcher) / Previous App (App Switcher):** Opens Glide’s custom application switcher. Slide horizontally to browse running apps, then release to switch. Window previews appear when Screen Recording access is already granted; otherwise Glide uses app icons.
-*   **Activate Next App / Activate Previous App:** Instantly cycles and switches focus to the next or previous running app on your system directly, without opening the app switcher screen.
-
-### Windows (Window Management)
-*   **Minimize Window:** Minimizes the active window down into your Dock.
-*   **Minimize All Apps:** Instantly hides all open windows on your screen so you can see your clean desktop.
-*   **Restore Minimized Apps:** Reopens and restores all the windows that you just hid using the "Minimize All Apps" command.
-*   **Maximize Window:** Resizes the active window to fill the entire visible screen area without entering macOS fullscreen mode.
-*   **Restore/Un-maximize Window:** Returns a maximized window back to its previous smaller size, or restores a minimized window.
-*   **Close Window:** Closes the active window (equivalent to clicking the red button in the window corner).
-*   **Enter Fullscreen / Exit Fullscreen / Toggle Fullscreen:** Puts the active window into native macOS fullscreen mode, exits it, or switches back and forth between the two states.
-*   **Cycle Windows (⌘`):** Cycles through different open windows belonging to the *same* application (for example, switching between two different Chrome windows).
-*   **Snap: Left Half / Right Half:** Resizes the active window to fill exactly the left or right half of your screen.
-*   **Snap: Top-Left / Top-Right / Bottom-Left / Bottom-Right:** Resizes the active window to fill exactly one quadrant (one-quarter) of your screen.
-*   **Center Window:** Centers the active window in the exact middle of your monitor while keeping its current size.
-*   **Move to Next Display:** If you have multiple monitors connected, this instantly sends the active window to your other display, placing it in the same relative position.
-
-### Screenshots
-*   **Screenshot (Area):** Opens the selective screenshot crosshair so you can click and drag a box around what you want to capture.
-*   **Screenshot (Full):** Instantly captures a screenshot of your entire screen.
-*   **Screenshot (Area → Clipboard):** Lets you select an area of the screen and copies the image directly to your clipboard so you can paste it immediately into a chat or document.
-*   **Screenshot (Full → Clipboard):** Takes a screenshot of your entire screen and copies it directly to your clipboard.
-*   **Screenshot Toolbar:** Opens the built-in macOS screenshot utility panel with options for recording your screen or setting a timer.
-
-### Editing
-*   **Copy / Paste / Cut:** Standard editing commands to duplicate, insert, or move selected text or files.
-*   **Undo / Redo:** Reverses your last action, or re-performs an action you just undid.
-*   **Select All:** Selects all text or items in the current window.
-*   **Find:** Opens the search bar inside your active app (useful for finding words on a webpage or document).
-*   **Emoji & Symbols:** Opens the macOS emoji keyboard pop-up.
-*   **Reload Page:** Refreshes the page inside your web browser or active app.
-*   **New Tab:** Opens a new tab in your web browser or supported app.
-
-### Media & Display
-*   **Volume Up / Volume Down / Mute:** Controls your Mac's system audio volume.
-*   **Play / Pause / Next Track / Previous Track:** Controls playback for media players (such as Spotify, Apple Music, YouTube in a browser, or video players).
-*   **Brightness Up / Brightness Down:** Adjusts your computer screen brightness.
-
-### System
-*   **Mission Control:** Opens macOS Mission Control to show an overview of all your open windows.
-*   **App Exposé:** Shows all open windows belonging to the application you are currently using.
-*   **Show Desktop:** Sweeps all open windows to the side to give you a clear view of your desktop files.
-*   **Launchpad:** Opens the macOS Launchpad to view and open your installed apps.
-*   **Spotlight:** Opens the Spotlight search bar in the middle of your screen.
-*   **Notification Center:** Slides out the macOS notification and widget panel from the right edge of your screen.
-*   **Lock Screen:** Instantly locks your computer, returning you to the password screen.
-*   **Sleep:** Puts your Mac to sleep to conserve power.
-*   **Empty Trash:** Safely empties your system Trash bin.
-*   **Open Finder:** Launches a new Finder window so you can browse your files.
-*   **Open Downloads:** Directly opens your user Downloads folder.
-
-### Other
-*   **Do Nothing:** This action does nothing. It is useful for disabling built-in system gestures that you find annoying, or reserving a gesture slot for future use.
-
----
-
-## 4. Tuning & Precision Controls
-
-Glide includes custom calibration options so you can fine-tune how sensitive your trackpad is to gestures:
-
-### Recognition (How swipes are detected)
-*   **Activation Threshold:** Adjusts how far your fingers must travel on the trackpad before Glide registers it as a swipe. Increase this if you find yourself triggering swipes accidentally, or decrease it for faster response times.
-*   **Switcher Step Distance:** Sets how far you need to slide your fingers horizontally to move from one app to the next when using the App Switcher gesture.
-*   **Switcher Debounce:** A small delay timer that prevents you from accidentally sliding through multiple apps too quickly in the App Switcher.
-
-### Speed Classification (Intent)
-*   **Fast Velocity Threshold:** The base movement threshold for flick intent. Glide also checks for a short gesture duration and sharp acceleration before calling a swipe Fast.
-*   **Slow Velocity Threshold:** The base movement threshold for controlled slow intent. Glide also checks hold time and travel distance before calling a swipe Slow.
-*   **Speed Sample Frames:** The number of movement frames Glide uses for smoothed velocity and acceleration. Increasing this can reduce noisy speed changes.
-
-### Direction Detection
-*   **Angle Tolerance:** Adjusts the quadrant size for directions. At 45°, the trackpad is split into four equal diagonal quarters (Up, Down, Left, Right). Lowering this number narrows the detection angle, creating "dead zones" along the diagonals so that diagonal movements are ignored unless they are clearly straight.
-
-### Pinch Veto (Preventing conflicts with Zoom/Pinch)
-*   **Candidate Frames:** The number of frames Glide analyzes at the very beginning of a touch before deciding if it's a swipe. Higher values help separate swipes from standard pinch-to-zoom gestures.
-*   **Pinch Spread Threshold:** The overall limit on how much your fingers can spread apart or come together during a gesture. If this limit is exceeded, Glide assumes you are pinching/zooming and cancels the swipe.
-*   **Pinch Frame Threshold:** The maximum amount of finger spreading allowed in a single frame. If you pinch your fingers together quickly, this instantly cancels any swipe detection.
-*   **Swipe Coherence:** Adjusts how closely your fingers must travel in the same direction. A value of 1.0 means all fingers must move in the exact same direction. Lowering this makes detection more lenient if your fingers drift apart slightly while swiping.
-
-### Trackpad Edge Margins
-*   **Enable Edge Margin:** Turns on boundary dead-zones.
-*   **Margins (Left, Right, Top, Bottom):** Allows you to shade off between 0% and 20% of each trackpad edge. Any touch starting inside these margins will be ignored. This is perfect for preventing accidental gestures if you rest your palms or thumbs on the edges of the trackpad.
-*   **Visual Trackpad Preview:** The preferences pane includes a physical trackpad simulator. When you touch your Mac trackpad, a dot appears on this visual simulator in real-time. If your finger lands in the margin zone, the dot turns **orange** (ignored); if it lands in the active area, it turns **green** (active).
-
----
-
-## 5. General App Preferences
-
-Glide's general settings menu lets you configure how the app behaves globally:
-
-*   **Accessibility Assistant:** A simple card showing whether Glide has the macOS security permissions it needs. If permissions are missing, a button is provided to open your Mac's System Settings directly to the correct page.
-*   **Window Targeting:** Choose where window actions are directed:
-    *   *Focused Window First:* Actions affect the window you are currently typing in.
-    *   *Window Under Cursor First:* Actions affect the window that your mouse pointer is hovering over, even if it is in the background.
-*   **Haptic Feedback:** Toggles trackpad vibrations. If enabled, your trackpad will give physical clicks and thumps to confirm when a gesture is recognized, when the app switcher steps, or when a reciprocal gesture is activated.
-*   **Debug Logging:** Prints technical details of your trackpad inputs to the system Console for troubleshooting.
-*   **Launch at Login:** Automatically opens Glide every time you boot up your Mac.
-*   **Stats Dashboard:** Displays live statistics, including how many gestures you have configured, how many finger sets are in use, and if any app-launch gestures are missing their target applications.
-*   **Updates:** The About card checks GitHub for a newer release and, when there is one, downloads and installs it in place — with a progress bar, a checksum check, and a **Relaunch Now** button when it's done. If Glide is somewhere it can't write to (so it can't replace itself), it hands you the disk image it already downloaded instead.
-
----
-
-## 6. Managing Your Configuration File
-
-All of your settings, gestures, and tuning parameters are saved in a simple text file:
-`~/Library/Application Support/Glide/config.yaml`
-
-Glide provides several tools in the **Configuration** section to manage this file:
-*   **Open folder button:** Instantly opens the folder containing your config file in Finder.
-*   **Export Copy...:** Saves a backup copy of your configuration file anywhere on your Mac. You can use this to keep backups or share your custom layout with other Glide users.
-*   **Import Config...:** Loads a previously exported `.yaml` file to restore your configuration instantly.
+[MIT](LICENSE) — do what you want with it.
