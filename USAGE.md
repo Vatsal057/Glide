@@ -1,20 +1,20 @@
 # Glide Usage Manual
 
-Everything Glide can do, split into one file per topic. If you just want to get moving, the [README](README.md#quick-start) has a two-minute quick start — come back here when you want to go deeper.
+Complete reference for all Glide capabilities, organized into topic guides. Start with the [README](README.md#default-gestures) for quick start defaults, and consult these guides for detailed configuration.
 
-## Table of contents
+## Table of Contents
 
-1. [Core concepts](docs/01-core-concepts.md) — finger count, gesture type, swipe speed, how rules are added and how conflicts resolve.
-2. [Smart filters & conditions](docs/02-filters-and-conditions.md) — modifier keys, app filters, window-state filters, reciprocal and continuous gestures.
-3. [Every action, explained](docs/03-actions.md) — the full action catalog, grouped by category.
-4. [Global keyboard shortcuts](docs/04-keyboard-shortcuts.md) — binding any action to a system-wide hotkey.
-5. [App Switcher](docs/05-app-switcher.md) — the hold-and-swipe app browser, Newer vs. Legacy presentation.
-6. [TrackPoint](docs/06-trackpoint.md) — turning a patch of trackpad into a pointing stick.
-7. [Tuning & precision controls](docs/07-tuning.md) — sensitivity, accident protection, edge margins, force-click zones.
-8. [General preferences](docs/08-general-preferences.md) — window targeting, haptics, native gesture conflicts, updates.
-9. [Your configuration file](docs/09-configuration-file.md) — config.yaml, export/import, reset to defaults.
-10. [Permissions Glide asks for](docs/10-permissions.md) — Accessibility, Screen Recording, Automation.
-11. [Troubleshooting](docs/11-troubleshooting.md) — common issues and fixes.
-12. [Trackpad Edge Controls](docs/12-edge-controls.md) — physical rim sliders for volume, brightness, backlight, and app switching.
+1. [Core concepts](docs/01-core-concepts.md): Finger count, gesture type, swipe speed, rule ordering, and conflict resolution.
+2. [Smart filters & conditions](docs/02-filters-and-conditions.md): Modifier keys, app filters, window-state filters, reciprocal actions, and continuous gestures.
+3. [Every action, explained](docs/03-actions.md): Complete action catalog organized by category.
+4. [Global keyboard shortcuts](docs/04-keyboard-shortcuts.md): Binding actions to system-wide hotkeys.
+5. [App Switcher](docs/05-app-switcher.md): Hold-and-swipe app and window deck navigation.
+6. [TrackPoint](docs/06-trackpoint.md): Pointer stick velocity mode for trackpads.
+7. [Tuning & precision controls](docs/07-tuning.md): Sensitivity thresholds, palm rejection, edge margins, and force-click zones.
+8. [General preferences](docs/08-general-preferences.md): Window targeting, haptic feedback, system gesture conflicts, and updates.
+9. [Your configuration file](docs/09-configuration-file.md): Editing, exporting, and importing `config.yaml`.
+10. [Permissions Glide asks for](docs/10-permissions.md): Accessibility, Screen Recording, and Automation requirements.
+11. [Troubleshooting](docs/11-troubleshooting.md): Common configuration issues and solutions.
+12. [Trackpad Edge Controls](docs/12-edge-controls.md): Physical rim sliders for volume, brightness, backlight, and app switching.
 
-Each page links to the one before and after it, so you can also just start at [§1](docs/01-core-concepts.md) and read straight through.
+Each guide links to the preceding and following topics for step-by-step reading.

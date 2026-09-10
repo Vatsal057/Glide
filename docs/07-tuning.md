@@ -2,24 +2,26 @@
 
 # Tuning & precision controls
 
-**Preferences → Tuning** has three presets (**Relaxed**, **Balanced**, **Precise**) that adjust several settings at once — start there, then fine-tune with the sliders below if needed. Everything is described in plain language first, with the raw numeric values available under **Advanced** for anyone who wants exact control.
+**Preferences → Tuning** provides three calibrated presets (**Relaxed**, **Balanced**, **Precise**) that adjust tracking parameters simultaneously. Fine-tuning is available via individual sliders, with numeric metrics accessible under **Advanced**.
 
 ### Recognition
-- **Sensitivity** — how far fingers must travel before a swipe registers. Lower it for a faster response, raise it if gestures trigger by accident.
-- **Diagonal strictness** — how close to perfectly horizontal/vertical a swipe must be. Stricter creates "dead zones" along the diagonals so a sloppy diagonal movement doesn't get mistaken for a straight one.
+- **Sensitivity:** Travel distance required before a swipe registers. Lower values yield faster response times; higher values require more deliberate movement.
+- **Diagonal strictness:** Angle threshold for horizontal and vertical swipes. Higher strictness establishes dead zones along diagonal vectors, ensuring clean separation between directional swipes.
 
-### Accident protection
-One combined **protection level** slider that scales several anti-false-positive checks together — how much finger spread cancels a swipe as a pinch, how uniformly your fingers have to move together, and how many initial frames Glide analyzes before committing to a swipe direction.
+### Accident Protection
+The **protection level** slider coordinates multiple validation checks: finger spread tolerance (distinguishing pinches from parallel swipes), movement coherence across contacts, and frame analysis delays prior to direction locking.
 
-### Swipe speed
-Only matters for gestures set to trigger specifically on a Slow or Fast swipe. Two sliders control how easily a swipe reads as fast (a flick) or as slow (a deliberate glide), plus a choice between two detection methods: **Simple** (one average-speed reading — predictable) or **Classic** (peak speed, acceleration, and timing together — snappier but less consistent).
+### Swipe Speed
+Applies to gestures configured with distinct Slow or Fast speed triggers. Two threshold sliders govern classification boundaries for deliberate glides and quick flicks. Two calculation engines are available:
+- **Simple:** Evaluates overall average velocity for predictable classification.
+- **Classic:** Evaluates peak velocity, acceleration curves, and timing dynamics.
 
-### Repeating gestures
-For continuous gestures (see [Smart filters & conditions](02-filters-and-conditions.md)): one slider sets how rapidly the action repeats as you keep swiping.
+### Repeating Gestures
+For continuous gestures (see [Smart filters & conditions](02-filters-and-conditions.md)), this setting adjusts the rate at which repeated actions fire as fingers continue moving.
 
-### Trackpad regions
-- **Edge margins** — shade off a strip along each edge (0–20%, each edge independent) where touches are ignored entirely. This is palm rejection: if your palm or thumb tends to rest near the bottom or side of the pad, widen that edge's margin so it can't start an accidental gesture. A **visual trackpad preview** shows a live dot as you touch the pad — green means active, orange means it landed in an ignored margin.
-- **Force-click zones** — the size of each corner/edge zone used by force-click gestures that check *where* on the pad you pressed (e.g. taking a full-screen screenshot from the top-left corner but an area screenshot from the top-right).
+### Trackpad Regions
+- **Edge margins:** Establish border zones along each edge (0 to 20%, configured independently) where touches are excluded from gesture processing. This provides palm and thumb rejection. A **live visual preview** displays touch coordinates in real time: green denotes active tracking, while orange indicates an excluded margin.
+- **Force-click zones:** Adjust the dimensional boundaries for corner and perimeter force-click triggers.
 
 ---
 [← Previous: TrackPoint](06-trackpoint.md) · [Back to manual](../USAGE.md) · [Next: General preferences →](08-general-preferences.md)

@@ -2,28 +2,31 @@
 
 # TrackPoint
 
-TrackPoint turns a patch of your trackpad into a pointing stick, like the red nub in the middle of a ThinkPad keyboard. Instead of your finger's *position* mapping directly to cursor position — the way a trackpad normally works — your finger's *displacement from where it landed* maps to cursor *velocity*. Lean left and the cursor moves left for as long as you hold the lean; ease back toward center and it slows down. That's why a fingertip-sized patch of trackpad can move the cursor across the entire screen without your finger ever having to lift and reset. Turn it on and configure it in **Preferences → TrackPoint**.
+TrackPoint turns a zone of your trackpad into a velocity-driven pointer, similar to the pointing stick found on classic laptop keyboards. TrackPoint maps your finger's displacement from its initial contact point directly to cursor velocity. Leaning in any direction moves the cursor continuously at a speed proportional to displacement. This enables smooth navigation across expansive desktop layouts and multi-monitor displays from a compact touch zone. Enable and configure it in **Preferences → TrackPoint**.
 
-**Why you'd want it:** reaching the far corner of a large or multi-monitor screen normally takes multiple relative swipes. With TrackPoint engaged, you just keep leaning your finger in a direction and the cursor keeps going.
+### Activation Modes
 
-**Activation modes** — how you tell Glide "I want to drive the cursor now" versus "I'm just using the trackpad normally":
+Specify how pointer velocity mode engages:
 
-| Mode | How you engage it |
+| Mode | How to engage |
 |---|---|
-| Double-Tap & Hold *(default)* | Tap once with one finger, tap again, and hold. The double tap is deliberate enough that you can't trigger it by accident just resting a finger on the pad.<br><img src="../assets/gestures/trackpoint_double_tap.svg" width="280"> |
-| One-Finger Hold | Rest one finger anywhere on the pad and hold still for a moment.<br><img src="../assets/gestures/trackpoint_one_finger_hold.svg" width="280"> |
-| Corner Hold | Rest one finger in a corner you pick, and hold still for a moment. Keeps the rest of the trackpad free for normal use.<br><img src="../assets/gestures/trackpoint_corner_hold.svg" width="280"> |
-| Two-Finger Hold | Rest two fingers anywhere and hold still; lift one and the remaining finger becomes the stick.<br><img src="../assets/gestures/trackpoint_two_finger_hold.svg" width="280"> |
+| Double-Tap & Hold *(default)* | Tap once, tap a second time, and hold. The deliberate double-tap sequence prevents accidental triggers during resting contacts.<br><img src="../assets/gestures/trackpoint_double_tap.svg" width="280"> |
+| One-Finger Hold | Rest one finger anywhere on the pad and remain still for a brief interval.<br><img src="../assets/gestures/trackpoint_one_finger_hold.svg" width="280"> |
+| Corner Hold | Rest one finger in a designated corner and hold briefly, preserving the remainder of the trackpad for standard pointer use.<br><img src="../assets/gestures/trackpoint_corner_hold.svg" width="280"> |
+| Two-Finger Hold | Rest two fingers in place; lifting one finger transitions the remaining contact into pointer mode.<br><img src="../assets/gestures/trackpoint_two_finger_hold.svg" width="280"> |
 
-Whichever mode you use, a short hold ("hold to engage") is what tells Glide you're committing to the stick rather than starting an ordinary drag or swipe — move too far before the hold completes and Glide steps aside, leaving the touch to macOS untouched.
+A brief hold confirms engagement. Moving significantly prior to hold completion yields control back to default macOS cursor handling.
 
-**Once engaged:**
-- Push your finger in a direction; the cursor accelerates that way. Ease off toward the anchor point and it decelerates. This continues as long as the finger stays down.
-- Rest a **second finger** anywhere on the pad (if scrolling is enabled) to turn the stick into a scroll wheel instead of a cursor — the same role the middle button plays on a real TrackPoint.<br><img src="../assets/gestures/trackpoint_scroll_mode.svg" width="280">
-- Lift the finger to disengage and hand control back to macOS.
-- A soft haptic tick confirms engagement and release, if haptics are enabled.
+### Pointer Interaction
 
-**Tunable feel:** top speed, how far the finger has to travel to reach it (push distance), a dead zone around the anchor so a resting finger doesn't drift, and an acceleration curve exponent (higher values keep small pushes slow for fine control while still reaching full speed on a bigger lean). Corner-mode users can also set which corner and how large its zone is, visually, in the preferences pane.
+- Push your finger outward from the anchor point to accelerate the cursor. Moving back toward the center decelerates motion. Movement continues for the duration of the touch.
+- Rest a **second finger** on the pad to transition the stick into high-speed directional scrolling.<br><img src="../assets/gestures/trackpoint_scroll_mode.svg" width="280">
+- Lift your fingers to disengage and return pointer handling to macOS.
+- Subtle haptic feedback confirms engagement and disengagement when haptics are enabled.
+
+### Tunable Parameters
+
+Adjust top speed, push distance (travel required for maximum velocity), center dead zone, and acceleration curves in **Preferences → TrackPoint**. Corner mode includes configurable zone dimensions and visual corner selection.
 
 ---
 [← Previous: App Switcher](05-app-switcher.md) · [Back to manual](../USAGE.md) · [Next: Tuning & precision controls →](07-tuning.md)

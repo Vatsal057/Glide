@@ -2,18 +2,18 @@
 
 # Your configuration file
 
-Every gesture, filter, and tuning value lives in one plain-text file:
+Every gesture, filter, and tuning value is stored in a single plain-text file:
 
 ```
 ~/Library/Application Support/Glide/config.yaml
 ```
 
-It's YAML, so it's readable and editable by hand if you're comfortable with that — Glide's loader is deliberately lenient about missing or reordered fields. **Preferences → Configuration** gives you tools to manage it without touching a text editor:
+The configuration uses YAML format, making it clean to read and edit directly. Glide's parser handles missing or reordered keys gracefully. **Preferences → Configuration** provides dedicated tools to manage this file:
 
-- **Open in Finder** — jumps straight to the file's folder.
-- **Export Copy…** — saves your current setup as a standalone `.yaml` file. Use this to back up your configuration, or to share your layout with another Glide user (send them the file, they use Import).
-- **Import Config…** — loads a previously exported file, replacing your current gestures and settings. If the incoming config has any gesture bound to a scripted action (Shell Command, AppleScript, or Run Shortcut — see [Every action, explained](03-actions.md)), Glide shows you exactly what it would run before you confirm the import.
-- **Reset to Defaults…** — restores Glide's built-in starter gestures, discarding your custom ones. This cannot be undone, and Glide asks you to confirm first.
+- **Open in Finder:** Navigates directly to the configuration directory.
+- **Export Copy…:** Saves the current setup as a standalone `.yaml` file for backup or sharing across machines.
+- **Import Config…:** Loads a previously exported configuration file. If the incoming configuration contains scripted actions (Shell Command, AppleScript, or Run Shortcut), Glide presents a security audit modal detailing the exact commands before applying them.
+- **Reset to Defaults…:** Restores the factory starter configuration. Glide prompts for explicit confirmation prior to resetting.
 
 ---
 [← Previous: General preferences](08-general-preferences.md) · [Back to manual](../USAGE.md) · [Next: Permissions Glide asks for →](10-permissions.md)

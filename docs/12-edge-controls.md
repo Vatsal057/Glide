@@ -2,27 +2,27 @@
 
 # Trackpad Edge Controls
 
-Trackpad Edge Controls turns the physical outer rim of your trackpad into physical hardware sliders. By sliding a single finger along any edge of the trackpad, you can smoothly adjust system volume, display brightness, keyboard backlight, microphone gain, Night Shift warmth, or scrub through your open apps.
+Trackpad Edge Controls turns the physical outer rim of your trackpad into precision hardware sliders. Sliding a single finger along any edge allows smooth adjustment of system volume, display brightness, keyboard backlight, microphone gain, Night Shift warmth, or application scrub.
 
-Configure it in **Preferences → Edge Controls**.
+Configure edge bindings in **Preferences → Edge Controls**.
 
 ## How It Works
 
-1. **Physical Rim Sliders**: Each of the four edges (Left, Right, Top, Bottom) can be mapped to an action:
-   - **Right Edge** *(default: System Volume)*: Slide up to raise volume, slide down to lower volume.
-   - **Left Edge** *(default: Display Brightness)*: Slide up to brighten the display, slide down to dim it.
-   - **Top / Bottom Edges** *(optional)*: Map to Keyboard Backlight, Microphone Input Gain, Night Shift, or App Switcher scrub.
-2. **Native OSD Bezels**: Glide triggers macOS's native system display bezels (the same overlay you see when pressing the physical F-keys). This requires 0% CPU overhead, has zero latency, and does not require running custom transparent HUD overlay processes.
-3. **Subtle Haptic Ticks**: Each step or notch triggers a gentle haptic tap on the trackpad's Taptic Engine, giving you tactile feedback as you adjust values.
+1. **Physical Rim Sliders:** Each of the four edges (Left, Right, Top, Bottom) can be mapped to a dedicated action:
+   - **Right Edge** *(default: System Volume):* Slide up to raise volume; slide down to lower volume.
+   - **Left Edge** *(default: Display Brightness):* Slide up to brighten the display; slide down to dim it.
+   - **Top / Bottom Edges** *(optional):* Assign to Keyboard Backlight, Microphone Input Gain, Night Shift, or App Switcher scrub.
+2. **Native OSD Bezels:** Glide triggers native macOS system display bezels (identical to the overlays displayed by physical media keys). This operates with 0.0% CPU overhead and zero latency.
+3. **Tactile Haptic Ticks:** Each adjustment increment delivers a subtle tactile tap via the trackpad Taptic Engine.
 
 ## Accidental Trigger Protection
 
-Edge Controls are designed so you never trigger them by accident during normal cursor work:
+Edge Controls incorporate multi-stage filtering to isolate rim gestures from standard pointer navigation:
 
-- **Edge-Origin Only**: A touch must *originate* directly on the outer rim of the trackpad. If a finger lands in the center and moves toward the edge during a normal cursor drag, it is permanently disqualified from triggering an edge control.
-- **Strict Rim Proximity**: The finger must remain touching the outer edge. If your finger moves inward into the trackpad surface beyond the edge zone width (configurable, default 8 mm), the control immediately disengages.
-- **Directional Gating**: Swiping must occur *along* the edge (e.g. vertically on the left/right edges). Inward perpendicular motions are ignored.
-- **Single-Contact Isolation**: Edge controls strictly monitor 1-finger touches. Placing 2 or more fingers on the trackpad immediately hands control back to macOS scrolling, pinching, or multi-finger gestures.
+- **Edge-Origin Only:** Touches must originate directly on the outer perimeter of the trackpad. Contacts originating within the primary trackpad surface are permanently excluded from edge actions.
+- **Strict Rim Proximity:** Fingers must stay within the outer border zone (configurable, default 10 mm). Moving inward disengages edge control immediately.
+- **Directional Gating:** Swipes must travel along the edge vector (vertically on left/right borders; horizontally on top/bottom borders). Inward perpendicular motions are filtered out.
+- **Single-Contact Isolation:** Edge detection tracks single-finger touches. Registering two or more fingers immediately returns touch handling to native macOS gestures.
 
 ---
 [← Previous: Troubleshooting](11-troubleshooting.md) · [Back to manual](../USAGE.md)

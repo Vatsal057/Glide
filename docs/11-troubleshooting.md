@@ -2,31 +2,32 @@
 
 # Troubleshooting
 
-**Gestures aren't doing anything.**
-Check the sidebar of the Preferences window — it shows whether gestures are active or paused, and whether Accessibility permission is granted. If permission shows as missing, grant it in **System Settings → Privacy & Security → Accessibility**, then toggle Glide off and back on in that list (a re-grant after an update sometimes needs a toggle to take effect).
+**Gestures are not registering:**
+Verify the status card in the Preferences sidebar. It indicates whether gesture recognition is active and whether Accessibility permission has been granted. If permission appears inactive, enable it under **System Settings → Privacy & Security → Accessibility**. Toggling the checkbox off and back on may be required following an application update.
 
-**A gesture triggers the wrong action, or nothing happens when two rules look similar.**
-Open **Preferences → Gestures** — a rule shadowed by a later, identical-trigger rule shows a warning icon. The rule lower in the list always wins.
+**A gesture triggers an unintended action or appears ignored:**
+Check the Gestures list in **Preferences → Gestures**. Rules sharing an identical trigger display a warning badge, indicating that a rule lower in the list takes precedence.
 
-**Swipes fire by accident when my palm rests on the trackpad.**
-Widen the **Edge Margins** in **Preferences → Tuning**, especially on whichever edge your palm tends to touch. The visual trackpad preview there shows exactly where your touches land in real time.
+**Swipes trigger inadvertently when palms contact the pad:**
+Increase the **Edge Margins** under **Preferences → Tuning** along the corresponding border. The real-time touch coordinate display indicates exact contact locations.
 
-**A gesture I use conflicts with a normal three/four-finger macOS gesture (like swiping between desktops).**
-Check **Preferences → General → macOS Gesture Conflicts** — Glide detects these and can disable the native one for you, without needing you to dig through System Settings yourself.
+**A custom gesture conflicts with native macOS multi-touch swipes:**
+Inspect **Preferences → General → macOS Gesture Conflicts**. Glide detects overlapping system gestures and can disable the native trigger directly, with options to re-enable at any time.
 
-**The app switcher shows app icons instead of window previews.**
-That means Screen Recording access hasn't been granted. It's optional — switching works fine without it — but if you want previews, **Preferences → App Switcher** has a direct link to the right System Settings page.
+**The app switcher displays application icons when window thumbnails are expected:**
+Screen Recording permission is required for live window thumbnails. To enable previews, grant permission via the link provided in **Preferences → App Switcher**.
 
-**"App can't be opened because it is from an unidentified developer" or "is damaged."**
-Neither is true — this is just Gatekeeper reacting to an unsigned, non-notarized open-source app. Right-click Glide in Applications and choose **Open**, or if macOS says it's "damaged," run:
+**Gatekeeper reports the application cannot be verified or is damaged:**
+This represents standard macOS Gatekeeper verification for independent open-source applications distributed outside the App Store. Right-click Glide in Applications and choose **Open**, or clear the quarantine attribute via Terminal:
 
 ```sh
 xattr -cr /Applications/Glide.app
 ```
 
-Full details in [Installation](../README.md#installation).
+Refer to the [Installation guide](../README.md#installation) for complete setup steps.
 
-**Still stuck?** [Open an issue](https://github.com/Vatsal057/Glide/issues) — include your macOS version and, if it's gesture-related, which fingers/direction/action you expected.
+**Assistance and reporting:**
+If an issue persists, [submit a report on GitHub](https://github.com/Vatsal057/Glide/issues) with your macOS version, trackpad model, and gesture configuration.
 
 ---
 [← Previous: Permissions Glide asks for](10-permissions.md) · [Back to manual](../USAGE.md)
