@@ -46,6 +46,7 @@ typedef void (*MTUnregisterContactFrameCallbackFunction)(MTDeviceRef, MTContactC
 typedef void (*MTDeviceStartFunction)(MTDeviceRef, int32_t);
 typedef void (*MTDeviceStopFunction)(MTDeviceRef);
 typedef void (*MTDeviceReleaseFunction)(MTDeviceRef);
+typedef bool (*MTDeviceIsRunningFunction)(MTDeviceRef);
 
 static const char *framework_path =
     "/System/Library/PrivateFrameworks/MultitouchSupport.framework/MultitouchSupport";
@@ -58,6 +59,7 @@ static void *client_context = NULL;
 static MTUnregisterContactFrameCallbackFunction unregister_callback = NULL;
 static MTDeviceStopFunction stop_device = NULL;
 static MTDeviceReleaseFunction release_device = NULL;
+static MTDeviceIsRunningFunction device_is_running = NULL;
 static bool forwarding_gesture = false;
 static double last_forwarded_timestamp = 0;
 static int32_t last_forwarded_active_count = 0;
@@ -253,6 +255,25 @@ bool GLDTIsAvailable(void) {
     return GLDTGetAvailabilityStatus() == GLDTStatusAvailable;
 }
 
+bool GLDTIsDeviceRunning(void) {
+    pthread_mutex_lock(&state_lock);
+    MTDeviceRef current_device = device;
+    MTDeviceIsRunningFunction current_is_running = device_is_running;
+    pthread_mutex_unlock(&state_lock);
+
+    if (current_device == NULL) {
+        return false;
+    }
+    // No predicate to ask means no grounds to tear a working device down, so the
+    // caller is told everything is fine. MTDeviceIsAlive is deliberately not
+    // consulted as a second opinion: measured on macOS 27, it reports false even
+    // for a device that is delivering frames, so it says nothing about health.
+    if (current_is_running == NULL) {
+        return true;
+    }
+    return current_is_running(current_device);
+}
+
 void GLDTSetMinimumContactCount(int32_t count) {
     if (count < 1) {
         count = 1;
@@ -327,6 +348,8 @@ bool GLDTStart(GLDTFrameCallback callback, void *context) {
         resolve_symbol(handle, "MTDeviceStop", (void **)&resolved_stop);
     resolve_symbol(handle, "MTUnregisterContactFrameCallback", (void **)&resolved_unregister);
     resolve_symbol(handle, "MTDeviceRelease", (void **)&resolved_release);
+    MTDeviceIsRunningFunction resolved_is_running = NULL;
+    resolve_symbol(handle, "MTDeviceIsRunning", (void **)&resolved_is_running);
 
     if (!resolved) {
         if (opened_here) dlclose(handle);
@@ -356,6 +379,7 @@ bool GLDTStart(GLDTFrameCallback callback, void *context) {
     unregister_callback = resolved_unregister;
     stop_device = resolved_stop;
     release_device = resolved_release;
+    device_is_running = resolved_is_running;
     last_start_status = GLDTStatusAvailable;
     pthread_mutex_unlock(&state_lock);
 
@@ -380,6 +404,7 @@ void GLDTStop(void) {
     unregister_callback = NULL;
     stop_device = NULL;
     release_device = NULL;
+    device_is_running = NULL;
     pthread_mutex_unlock(&state_lock);
 
     if (current_device != NULL) {

@@ -678,6 +678,32 @@ final class WindowTargeting {
 
     func activateSwitcherWindow(_ window: AppSwitcherWindow, in app: NSRunningApplication) {
         app.unhide()
+
+        // Activating a process is enough to reach a target on another Space, as long
+        // as the process has nothing on the Space in front of us: macOS then moves to
+        // where its windows actually are, full-screen Spaces included. An application
+        // holding windows on both Spaces is the case that breaks, because activating
+        // it just raises the window already here — which is how a full-screen window
+        // ends up unreachable while its ordinary sibling keeps coming forward.
+        //
+        // Accessibility is no help in resolving it: it stops describing a window
+        // while that window's Space is inactive, so the target arrives here with no
+        // element and every AX call below is a no-op. Nor can the Space be changed
+        // directly; the window manager refuses to show and hide Spaces for an
+        // ordinary connection, and doing half of it leaves the abandoned Space
+        // composited on screen. So macOS is asked to make the move itself, by the
+        // same shortcut the user would press.
+        if let windowID = window.windowID,
+           inactiveSpace(containing: windowID) != nil,
+           hasWindowOnCurrentSpace(app.processIdentifier),
+           let steps = spaceWalkSteps(toSpaceOf: windowID),
+           let shortcut = MissionControlShortcut.moveToSpace(next: steps > 0) {
+            walkSpaces(steps: steps, pressing: shortcut) { [weak self] in
+                self?.focusSwitcherWindow(window, in: app, attemptsRemaining: 6)
+            }
+            return
+        }
+
         if window.isMinimized, let element = window.element {
             _ = setAXBool(element, attribute: kAXMinimizedAttribute as CFString, value: false)
         }
@@ -713,6 +739,108 @@ final class WindowTargeting {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
                 focus(element)
             }
+        }
+    }
+
+    /// The Space owning a window, but only when it is not already on screen.
+    /// `nil` also covers the case where the window manager cannot answer, so an
+    /// unsupported macOS simply keeps the plain activation path.
+    private func inactiveSpace(containing windowID: CGWindowID) -> UInt64? {
+        let space = GLDWSpaceForWindow(windowID)
+        guard space != 0, !GLDWIsSpaceCurrent(space) else { return nil }
+        return space
+    }
+
+    /// Whether the process has any window on a Space that is on screen — the reason
+    /// activating it alone would not move anywhere.
+    private func hasWindowOnCurrentSpace(_ pid: pid_t) -> Bool {
+        guard let list = CGWindowListCopyWindowInfo(
+            [.optionAll, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return false }
+
+        for row in list {
+            guard (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
+                  (row[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  let idNumber = row[kCGWindowNumber as String] as? NSNumber else { continue }
+            let space = GLDWSpaceForWindow(CGWindowID(idNumber.uint32Value))
+            if space != 0, GLDWIsSpaceCurrent(space) { return true }
+        }
+        return false
+    }
+
+    /// Steps of the "move one Space" shortcut needed to bring a window's Space on
+    /// screen, or `nil` when there is no such route. Distant Spaces are refused
+    /// rather than animated through one transition at a time.
+    private func spaceWalkSteps(toSpaceOf windowID: CGWindowID) -> Int? {
+        let space = GLDWSpaceForWindow(windowID)
+        guard space != 0 else { return nil }
+        var steps: Int32 = 0
+        guard GLDWSpaceWalkSteps(space, &steps), steps != 0, abs(steps) <= 8 else { return nil }
+        return Int(steps)
+    }
+
+    /// Presses the user's own move-a-Space shortcut, one Space at a time, letting
+    /// each transition finish before the next. Every step goes the same direction,
+    /// so the shortcut is resolved once and reused.
+    private func walkSpaces(
+        steps: Int,
+        pressing shortcut: MissionControlShortcut,
+        then completion: @escaping () -> Void
+    ) {
+        guard steps != 0 else {
+            completion()
+            return
+        }
+        KeyboardEmulator.shared.sendKey(shortcut.keyCode, shortcut.flags)
+        let remaining = steps > 0 ? steps - 1 : steps + 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self else { return }
+            self.walkSpaces(steps: remaining, pressing: shortcut, then: completion)
+        }
+    }
+
+    /// Focuses a switcher target after its Space has been made current. The Space
+    /// changes immediately, but Accessibility only starts describing windows there
+    /// about a frame later, so the element is retried until it resolves — a
+    /// full-screen window cannot be raised without it.
+    private func focusSwitcherWindow(
+        _ window: AppSwitcherWindow,
+        in app: NSRunningApplication,
+        attemptsRemaining: Int
+    ) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self, !app.isTerminated else { return }
+
+            let element = window.element ?? window.windowID.flatMap { targetID in
+                self.windows(for: app.processIdentifier).first { candidate in
+                    self.cgWindowID(for: candidate) == targetID
+                }
+            }
+            guard element != nil || attemptsRemaining <= 1 else {
+                self.focusSwitcherWindow(window, in: app, attemptsRemaining: attemptsRemaining - 1)
+                return
+            }
+
+            let appElement = AXUIElementCreateApplication(app.processIdentifier)
+            func claim() {
+                guard let element else { return }
+                AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, element)
+                AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+            }
+
+            if let element,
+               self.axBool(element, attribute: kAXMinimizedAttribute as CFString) == true {
+                // Unminimizing had to wait for the Space too, for the same reason.
+                _ = self.setAXBool(element, attribute: kAXMinimizedAttribute as CFString, value: false)
+            }
+            claim()
+            app.activate(options: .activateIgnoringOtherApps)
+            if let windowID = window.windowID {
+                _ = GLDWFocusWindow(app.processIdentifier, windowID)
+            }
+            // Activation is asynchronous, so reassert the target afterwards or macOS
+            // can settle on the application's previously focused window instead.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { claim() }
         }
     }
 

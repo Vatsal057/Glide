@@ -34,6 +34,14 @@ enum {
 GLDTStatus GLDTGetAvailabilityStatus(void);
 GLDTStatus GLDTGetLastStartStatus(void);
 bool GLDTIsAvailable(void);
+
+// Whether the device Glide holds is still started. A sleep/wake cycle can leave the
+// handle in place while the hardware behind it has gone, and a handle acquired
+// before the trackpad finishes re-enumerating never delivers a frame; either way
+// this reports false and the device needs rebuilding. False also when nothing is
+// started. True when the state cannot be established, so a working device is never
+// torn down on a guess.
+bool GLDTIsDeviceRunning(void);
 bool GLDTStart(GLDTFrameCallback callback, void *context);
 void GLDTStop(void);
 

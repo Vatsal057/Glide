@@ -16,6 +16,9 @@ typedef CGError (*GLDWPostEventRecord)(GLDWProcessSerialNumber *, uint8_t *);
 typedef int (*GLDWMainConnectionID)(void);
 typedef CFArrayRef (*GLDWCopyManagedDisplaySpaces)(int);
 typedef CFArrayRef (*GLDWCopyWindowsWithOptionsAndTags)(int, uint32_t, CFArrayRef, uint32_t, uint64_t *, uint64_t *);
+typedef CFArrayRef (*GLDWCopySpacesForWindows)(int, int, CFArrayRef);
+typedef CFStringRef (*GLDWCopyManagedDisplayForSpace)(int, uint64_t);
+typedef CFStringRef (*GLDWCopyActiveMenuBarDisplayIdentifier)(int);
 
 static const char *skylight_path =
     "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight";
@@ -26,6 +29,9 @@ static GLDWPostEventRecord fn_post_event = NULL;
 static GLDWMainConnectionID fn_main_connection = NULL;
 static GLDWCopyManagedDisplaySpaces fn_copy_display_spaces = NULL;
 static GLDWCopyWindowsWithOptionsAndTags fn_copy_windows = NULL;
+static GLDWCopySpacesForWindows fn_spaces_for_windows = NULL;
+static GLDWCopyManagedDisplayForSpace fn_display_for_space = NULL;
+static GLDWCopyActiveMenuBarDisplayIdentifier fn_active_menubar_display = NULL;
 
 static pthread_once_t bridge_init_once = PTHREAD_ONCE_INIT;
 
@@ -40,6 +46,10 @@ static void init_bridge_symbols(void) {
     fn_main_connection = (GLDWMainConnectionID)dlsym(handle, "SLSMainConnectionID");
     fn_copy_display_spaces = (GLDWCopyManagedDisplaySpaces)dlsym(handle, "SLSCopyManagedDisplaySpaces");
     fn_copy_windows = (GLDWCopyWindowsWithOptionsAndTags)dlsym(handle, "SLSCopyWindowsWithOptionsAndTags");
+    fn_spaces_for_windows = (GLDWCopySpacesForWindows)dlsym(handle, "SLSCopySpacesForWindows");
+    fn_display_for_space = (GLDWCopyManagedDisplayForSpace)dlsym(handle, "SLSCopyManagedDisplayForSpace");
+    fn_active_menubar_display =
+        (GLDWCopyActiveMenuBarDisplayIdentifier)dlsym(handle, "SLSCopyActiveMenuBarDisplayIdentifier");
 }
 
 static bool post_key_window_event(
@@ -93,6 +103,15 @@ static void append_space_id(CFMutableArrayRef spaces, CFDictionaryRef space) {
     }
 }
 
+static uint64_t space_id_of(CFDictionaryRef space) {
+    if (space == NULL || CFGetTypeID(space) != CFDictionaryGetTypeID()) return 0;
+    CFNumberRef number = CFDictionaryGetValue(space, CFSTR("id64"));
+    if (number == NULL || CFGetTypeID(number) != CFNumberGetTypeID()) return 0;
+    uint64_t space_id = 0;
+    CFNumberGetValue(number, kCFNumberSInt64Type, &space_id);
+    return space_id;
+}
+
 CFArrayRef GLDWCopyWindowIDs(bool current_space_only, bool ordered_in_only) {
     pthread_once(&bridge_init_once, init_bridge_symbols);
     if (fn_main_connection == NULL || fn_copy_display_spaces == NULL || fn_copy_windows == NULL) {
@@ -142,3 +161,144 @@ CFArrayRef GLDWCopyWindowIDs(bool current_space_only, bool ordered_in_only) {
     return windows;
 }
 
+uint64_t GLDWSpaceForWindow(uint32_t window_id) {
+    if (window_id == 0) {
+        return 0;
+    }
+
+    pthread_once(&bridge_init_once, init_bridge_symbols);
+    if (fn_main_connection == NULL || fn_spaces_for_windows == NULL) {
+        return 0;
+    }
+
+    int connection = fn_main_connection();
+    if (connection == 0) {
+        return 0;
+    }
+
+    CFNumberRef id_number = CFNumberCreate(NULL, kCFNumberSInt32Type, &window_id);
+    if (id_number == NULL) {
+        return 0;
+    }
+    CFArrayRef window_ids = CFArrayCreate(NULL, (const void **)&id_number, 1, &kCFTypeArrayCallBacks);
+
+    // 0x7 reports every Space that references the window rather than only the
+    // visible ones, which is what makes an inactive or full-screen Space answer.
+    CFArrayRef spaces = fn_spaces_for_windows(connection, 0x7, window_ids);
+    uint64_t space_id = 0;
+    if (spaces != NULL) {
+        if (CFArrayGetCount(spaces) > 0) {
+            CFNumberRef first = (CFNumberRef)CFArrayGetValueAtIndex(spaces, 0);
+            if (first != NULL && CFGetTypeID(first) == CFNumberGetTypeID()) {
+                CFNumberGetValue(first, kCFNumberSInt64Type, &space_id);
+            }
+        }
+        CFRelease(spaces);
+    }
+
+    CFRelease(window_ids);
+    CFRelease(id_number);
+    return space_id;
+}
+
+bool GLDWIsSpaceCurrent(uint64_t space_id) {
+    if (space_id == 0) {
+        return false;
+    }
+
+    pthread_once(&bridge_init_once, init_bridge_symbols);
+    if (fn_main_connection == NULL || fn_copy_display_spaces == NULL) {
+        // Without the window manager there is no way to tell, and claiming the
+        // Space is elsewhere would trigger a pointless switch.
+        return true;
+    }
+
+    int connection = fn_main_connection();
+    if (connection == 0) {
+        return true;
+    }
+
+    CFArrayRef display_spaces = fn_copy_display_spaces(connection);
+    if (display_spaces == NULL) {
+        return true;
+    }
+
+    bool is_current = false;
+    CFIndex display_count = CFArrayGetCount(display_spaces);
+    for (CFIndex i = 0; i < display_count && !is_current; ++i) {
+        CFDictionaryRef display = (CFDictionaryRef)CFArrayGetValueAtIndex(display_spaces, i);
+        if (display == NULL || CFGetTypeID(display) != CFDictionaryGetTypeID()) continue;
+        // Every display shows one Space at a time, so a window is reachable
+        // without a switch when its Space is current on any of them.
+        if (space_id_of(CFDictionaryGetValue(display, CFSTR("Current Space"))) == space_id) {
+            is_current = true;
+        }
+    }
+    CFRelease(display_spaces);
+    return is_current;
+}
+
+// Whether a Space sits on the display that currently owns the menu bar, which is
+// the display the "move one Space left/right" shortcut acts on.
+static bool space_is_on_active_display(int connection, uint64_t space_id) {
+    if (fn_active_menubar_display == NULL || fn_display_for_space == NULL) {
+        // Undecidable, so assume it is: on a single display it always is, and the
+        // caller checks that the Space change actually happened either way.
+        return true;
+    }
+    CFStringRef active = fn_active_menubar_display(connection);
+    CFStringRef owner = fn_display_for_space(connection, space_id);
+    bool same = active != NULL && owner != NULL
+        && CFStringCompare(active, owner, 0) == kCFCompareEqualTo;
+    if (active != NULL) CFRelease(active);
+    if (owner != NULL) CFRelease(owner);
+    return same;
+}
+
+bool GLDWSpaceWalkSteps(uint64_t space_id, int *steps) {
+    if (space_id == 0 || steps == NULL) {
+        return false;
+    }
+
+    pthread_once(&bridge_init_once, init_bridge_symbols);
+    if (fn_main_connection == NULL || fn_copy_display_spaces == NULL) {
+        return false;
+    }
+
+    int connection = fn_main_connection();
+    if (connection == 0 || !space_is_on_active_display(connection, space_id)) {
+        return false;
+    }
+
+    CFArrayRef display_spaces = fn_copy_display_spaces(connection);
+    if (display_spaces == NULL) {
+        return false;
+    }
+
+    bool resolved = false;
+    CFIndex display_count = CFArrayGetCount(display_spaces);
+    for (CFIndex i = 0; i < display_count && !resolved; ++i) {
+        CFDictionaryRef display = (CFDictionaryRef)CFArrayGetValueAtIndex(display_spaces, i);
+        if (display == NULL || CFGetTypeID(display) != CFDictionaryGetTypeID()) continue;
+        CFArrayRef list = CFDictionaryGetValue(display, CFSTR("Spaces"));
+        if (list == NULL || CFGetTypeID(list) != CFArrayGetTypeID()) continue;
+
+        // This array is in Mission Control order, which is the order the shortcut
+        // steps through — full-screen Spaces included, each in the position it
+        // occupies on screen.
+        uint64_t showing = space_id_of(CFDictionaryGetValue(display, CFSTR("Current Space")));
+        CFIndex target_index = -1, current_index = -1;
+        CFIndex count = CFArrayGetCount(list);
+        for (CFIndex j = 0; j < count; ++j) {
+            uint64_t candidate = space_id_of((CFDictionaryRef)CFArrayGetValueAtIndex(list, j));
+            if (candidate == space_id) target_index = j;
+            if (candidate == showing) current_index = j;
+        }
+        if (target_index < 0 || current_index < 0) continue;
+
+        *steps = (int)(target_index - current_index);
+        resolved = true;
+    }
+    CFRelease(display_spaces);
+    return resolved;
+}

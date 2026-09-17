@@ -281,13 +281,16 @@ final class EngineBridge: ObservableObject {
     }
 
     private var sleepObserver: NSObjectProtocol?
-    private var wakeObserver:  NSObjectProtocol?
+    private var wakeObservers: [NSObjectProtocol] = []
     private var accessibilityActiveObserver: NSObjectProtocol?
     private var accessibilityPollTimer: Timer?
     private var tapHealthTimer: Timer?
     /// User's toggle state captured at sleep so wake can restore it instead of
     /// force-enabling gestures the user had switched off.
-    private var wasEnabledBeforeSleep = true
+    private var enabledBeforeSleep = true
+    /// Whether sleep is what disabled the engine, so `enabledBeforeSleep` is only
+    /// written once per sleep and still means the user's own choice on wake.
+    private var suspendedForSleep = false
     private var started = false
 
     func startEngine() {
@@ -312,25 +315,78 @@ final class EngineBridge: ObservableObject {
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                NSLog("[App] Sleep — stopping engine")
-                GlideConfigStore.shared.flushPendingSave()
-                self?.wasEnabledBeforeSleep = self?.isEnabled ?? true
-                GestureEngine.shared.stop()
-                self?.isEnabled = false
-            }
-        }
-        wakeObserver = ws.addObserver(
-            forName: NSWorkspace.didWakeNotification,
-            object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
                 guard let self else { return }
-                NSLog("[App] Wake — restoring engine (enabled: \(self.wasEnabledBeforeSleep))")
+                GlideConfigStore.shared.flushPendingSave()
+                // macOS can announce sleep more than once without a wake in between.
+                // Capturing the toggle again on the second announcement would record
+                // the suspended state as the user's preference, and the engine would
+                // then stay off for good after waking.
+                guard !self.suspendedForSleep else {
+                    NSLog("[App] Sleep — already suspended, keeping preference \(self.enabledBeforeSleep)")
+                    return
+                }
+                NSLog("[App] Sleep — stopping engine")
+                self.suspendedForSleep = true
+                self.enabledBeforeSleep = self.isEnabled
                 GestureEngine.shared.stop()
-                self.isEnabled = self.wasEnabledBeforeSleep
+                self.isEnabled = false
             }
         }
+        // Both notifications are observed because neither is guaranteed for a given
+        // wake, and a wake that goes unnoticed leaves the engine suspended for good.
+        // Handling is idempotent, so being told twice costs one extra rebuild.
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
+            let observer = ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.handleWake()
+                }
+            }
+            wakeObservers.append(observer)
+        }
+    }
 
+    @MainActor
+    private func handleWake() {
+        // The engine is only suspended when sleep suspended it; a wake with no sleep
+        // recorded still has to rebuild, because the device may have died anyway.
+        let shouldRun = suspendedForSleep ? enabledBeforeSleep : isEnabled
+        suspendedForSleep = false
+        NSLog("[App] Wake — restoring engine (enabled: \(shouldRun))")
+
+        guard shouldRun else {
+            if isEnabled { isEnabled = false }
+            return
+        }
+        if isEnabled {
+            // Already the right value, so `didSet` cannot be relied on to do this.
+            restartEngine()
+        } else {
+            isEnabled = true
+        }
+        verifyDeviceAfterWake(attemptsRemaining: 4)
+    }
+
+    @MainActor
+    private func restartEngine() {
+        GestureEngine.shared.stop()
+        GestureEngine.shared.start()
+        syncTapHealthTimer()
+    }
+
+    /// The wake notification arrives before the trackpad has necessarily come back,
+    /// and a device acquired too early reports as started while never delivering a
+    /// frame. So the device is checked over the seconds after a wake rather than
+    /// trusted once, and rebuilt whenever it is not running.
+    @MainActor
+    private func verifyDeviceAfterWake(attemptsRemaining: Int) {
+        guard attemptsRemaining > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.isEnabled, GestureEngine.shared.isRunning else { return }
+                GestureEngine.shared.checkHealth()
+                self.verifyDeviceAfterWake(attemptsRemaining: attemptsRemaining - 1)
+            }
+        }
     }
 
     /// Event taps get silently disabled by macOS (timeouts, permission churn). The
@@ -349,9 +405,7 @@ final class EngineBridge: ObservableObject {
             guard tapHealthTimer == nil else { return }
             let timer = Timer(timeInterval: 30.0, repeats: true) { _ in
                 Task { @MainActor in
-                    let engine = GestureEngine.shared
-                    guard engine.isRunning else { return }
-                    engine.inputManager.checkHealth()
+                    GestureEngine.shared.checkHealth()
                 }
             }
             timer.tolerance = 10.0
@@ -443,6 +497,6 @@ final class EngineBridge: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
         }
         if let o = sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(o) }
-        if let o = wakeObserver  { NSWorkspace.shared.notificationCenter.removeObserver(o) }
+        for o in wakeObservers { NSWorkspace.shared.notificationCenter.removeObserver(o) }
     }
 }

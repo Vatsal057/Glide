@@ -102,6 +102,17 @@ final class GestureEngine {
         AppLogger.debug("[Engine] Started")
     }
 
+    /// Backstop for the input paths macOS can take away without telling anyone: the
+    /// event taps, and the multitouch device, which a sleep/wake cycle can leave
+    /// stopped or holding a handle the hardware no longer answers.
+    func checkHealth() {
+        guard isRunning else { return }
+        inputManager.checkHealth()
+        guard !MultitouchBridge.shared.isDeviceRunning else { return }
+        AppLogger.debug("[Engine] Multitouch device not running — rebuilding")
+        MultitouchBridge.shared.restart(callback: glideMTCallback)
+    }
+
     func stop() {
         guard isRunning else { return }
 

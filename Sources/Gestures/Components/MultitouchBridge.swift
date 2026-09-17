@@ -32,6 +32,21 @@ final class MultitouchBridge {
         AppLogger.debug("[MT] Stopped C-Bridge")
     }
 
+    // MARK: Recovery
+
+    /// Whether the trackpad is still actually feeding the bridge. `isRunning` only
+    /// records that Glide asked for a device; this asks the device.
+    var isDeviceRunning: Bool { GLDTIsDeviceRunning() }
+
+    /// Acquires a new device. The old handle can outlive the hardware it stood for
+    /// across a sleep/wake cycle, so recovery means replacing it rather than
+    /// starting it again.
+    func restart(callback: @escaping GLDTFrameCallback) {
+        stop()
+        start(callback: callback)
+        AppLogger.debug("[MT] Rebuilt device (running: \(isDeviceRunning))")
+    }
+
     // MARK: Frame gating
 
     /// Fewest contacts a frame must carry to reach Swift. Defaults to 3 — every
