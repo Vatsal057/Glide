@@ -22,7 +22,7 @@ Written in pure Swift using low-level `MultitouchSupport` and `WindowServer` API
 
 ## Demo
 
-https://github.com/Vatsal057/Glide/raw/main/assets/demo.mp4
+https://github.com/user-attachments/assets/d9021004-81c0-4d8d-956f-e4a5051f9c3e
 
 <div align="center">
 <sub>Gestures · the 2D app switcher · edge sliders · TrackPoint mode · a gesture wired to a shell script</sub>
