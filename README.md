@@ -24,13 +24,16 @@ Written in pure Swift using low-level `MultitouchSupport` and `WindowServer` API
 
 <div align="center">
 
-<video src="https://github.com/Vatsal057/Glide/raw/main/assets/demo.mp4" controls muted playsinline width="840"></video>
+<video
+  src="https://github.com/Vatsal057/Glide/raw/main/assets/demo.mp4"
+  poster="https://raw.githubusercontent.com/Vatsal057/Glide/main/assets/demo-poster.png"
+  controls
+  playsinline
+  width="840"></video>
 
-<sub>Gestures, the 2D app switcher, edge sliders, TrackPoint mode, and a gesture wired to a shell script. 75 seconds, with narration.</sub>
+<sub>Gestures · the 2D app switcher · edge sliders · TrackPoint mode · a gesture wired to a shell script<br>75 seconds, with narration — <a href="https://github.com/Vatsal057/Glide/raw/main/assets/demo.mp4">open the video directly</a></sub>
 
 </div>
-
-> If the player above doesn't load, [watch the demo here](https://github.com/Vatsal057/Glide/raw/main/assets/demo.mp4).
 
 ## Default Gestures
 
