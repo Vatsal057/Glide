@@ -22,7 +22,9 @@ Written in pure Swift using low-level `MultitouchSupport` and `WindowServer` API
 
 ## Demo
 
-**[▶ Watch the 75-second demo](https://github.com/Vatsal057/Glide/releases/latest)** — gestures, the 2D app switcher, edge sliders, TrackPoint mode, and gestures wired to shell scripts.
+<video src="https://github.com/Vatsal057/Glide/raw/main/assets/demo.mp4" controls muted loop width="880"></video>
+
+*Gestures, the 2D app switcher, edge sliders, TrackPoint mode, and a gesture wired to a shell script. [Direct link](https://github.com/Vatsal057/Glide/raw/main/assets/demo.mp4) if the player doesn't load.*
 
 ## Default Gestures
 
