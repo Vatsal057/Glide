@@ -22,4 +22,11 @@ demo_production
 Demo Original.mp4
 Glide Demo.mp4
 Glide_Demo_Final.mp4
+# Screen recordings and renders are large (the raw capture is ~700MB) and should
+# never reach the repo. Patterns rather than names, so a new recording is covered.
+*.mp4
+*.mov
 website
+# Local-only tooling: the demo-edit TTS venv alone is ~1GB, and HandOverlay is a
+# separate build. Nothing here ships with the app.
+tools

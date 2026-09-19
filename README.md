@@ -20,6 +20,10 @@ Glide turns your Mac trackpad into a customizable control surface for window man
 
 Written in pure Swift using low-level `MultitouchSupport` and `WindowServer` APIs, Glide idles at 0.0% CPU, uses ~25 MB of RAM, and runs entirely event-driven with zero idle battery drain.
 
+## Demo
+
+**[▶ Watch the 75-second demo](https://github.com/Vatsal057/Glide/releases/latest)** — gestures, the 2D app switcher, edge sliders, TrackPoint mode, and gestures wired to shell scripts.
+
 ## Default Gestures
 
 Glide runs quietly in the menu bar (`hand.draw` icon). These inputs work out of the box:
