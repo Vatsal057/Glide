@@ -47,6 +47,9 @@ typedef void (*MTDeviceStartFunction)(MTDeviceRef, int32_t);
 typedef void (*MTDeviceStopFunction)(MTDeviceRef);
 typedef void (*MTDeviceReleaseFunction)(MTDeviceRef);
 typedef bool (*MTDeviceIsRunningFunction)(MTDeviceRef);
+/// `int MTDeviceGetSensorSurfaceDimensions(MTDeviceRef, int32_t *w, int32_t *h)`.
+/// Reports hundredths of a millimetre; a built-in trackpad answers e.g. 15780 x 9780.
+typedef int32_t (*MTDeviceGetSurfaceDimensionsFunction)(MTDeviceRef, int32_t *, int32_t *);
 
 static const char *framework_path =
     "/System/Library/PrivateFrameworks/MultitouchSupport.framework/MultitouchSupport";
@@ -60,6 +63,7 @@ static MTUnregisterContactFrameCallbackFunction unregister_callback = NULL;
 static MTDeviceStopFunction stop_device = NULL;
 static MTDeviceReleaseFunction release_device = NULL;
 static MTDeviceIsRunningFunction device_is_running = NULL;
+static MTDeviceGetSurfaceDimensionsFunction get_surface_dimensions = NULL;
 static bool forwarding_gesture = false;
 static double last_forwarded_timestamp = 0;
 static int32_t last_forwarded_active_count = 0;
@@ -350,6 +354,9 @@ bool GLDTStart(GLDTFrameCallback callback, void *context) {
     resolve_symbol(handle, "MTDeviceRelease", (void **)&resolved_release);
     MTDeviceIsRunningFunction resolved_is_running = NULL;
     resolve_symbol(handle, "MTDeviceIsRunning", (void **)&resolved_is_running);
+    // Optional: without it, callers fall back to a nominal trackpad size.
+    MTDeviceGetSurfaceDimensionsFunction resolved_dimensions = NULL;
+    resolve_symbol(handle, "MTDeviceGetSensorSurfaceDimensions", (void **)&resolved_dimensions);
 
     if (!resolved) {
         if (opened_here) dlclose(handle);
@@ -380,11 +387,33 @@ bool GLDTStart(GLDTFrameCallback callback, void *context) {
     stop_device = resolved_stop;
     release_device = resolved_release;
     device_is_running = resolved_is_running;
+    get_surface_dimensions = resolved_dimensions;
     last_start_status = GLDTStatusAvailable;
     pthread_mutex_unlock(&state_lock);
 
     register_callback(created_device, contact_frame_callback);
     start_device(created_device, 0);
+    return true;
+}
+
+bool GLDTGetSurfaceDimensions(double *width_mm, double *height_mm) {
+    if (width_mm == NULL || height_mm == NULL) return false;
+
+    pthread_mutex_lock(&state_lock);
+    MTDeviceRef current_device = device;
+    MTDeviceGetSurfaceDimensionsFunction current_get = get_surface_dimensions;
+    pthread_mutex_unlock(&state_lock);
+
+    if (current_device == NULL || current_get == NULL) return false;
+
+    int32_t raw_width = 0;
+    int32_t raw_height = 0;
+    if (current_get(current_device, &raw_width, &raw_height) != 0) return false;
+    if (raw_width <= 0 || raw_height <= 0) return false;
+
+    // Hundredths of a millimetre.
+    *width_mm = (double)raw_width / 100.0;
+    *height_mm = (double)raw_height / 100.0;
     return true;
 }
 

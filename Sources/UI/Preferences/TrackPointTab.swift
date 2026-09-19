@@ -142,6 +142,13 @@ struct TrackPointTab: View {
                 leftLabel: "Twitchy", rightLabel: "Planted",
                 value: mapped(\.deadZone, from: TrackPointSettings.deadZoneRange)
             )
+            Divider().padding(.horizontal, 12)
+            FriendlySlider(
+                title: "Smoothing",
+                subtitle: "Eases finger tremor out of the push. A stick works over a few millimetres, where a tiny wobble swings the aim a long way — smoothing trades a little immediacy for a cursor that goes where you point it.",
+                leftLabel: "Immediate", rightLabel: "Glassy",
+                value: mapped(\.smoothing, from: TrackPointSettings.smoothingRange)
+            )
         }
     }
 
@@ -244,6 +251,10 @@ struct TrackPointTab: View {
                           range: TrackPointSettings.scrollSpeedRange,
                           format: "%.0f pt/s",
                           hint: "Scroll speed at full push, with a second finger down.")
+                SliderRow(label: "Smoothing", value: binding(\.smoothing),
+                          range: TrackPointSettings.smoothingRange,
+                          format: "%.3f s",
+                          hint: "Time constant for easing the push. 0 disables it.")
                 SliderRow(label: "Acceleration Curve", value: binding(\.acceleration),
                           range: TrackPointSettings.accelerationRange,
                           format: "%.2f",

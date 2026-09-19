@@ -24,6 +24,10 @@ struct EdgeControlsTab: View {
                     edgeAssignmentsCard
                     tuningCard
 
+                    if settings.usesScroll {
+                        scrollCard
+                    }
+
                     HStack {
                         Spacer()
                         Button("Reset Edge Controls to Defaults") {
@@ -49,7 +53,7 @@ struct EdgeControlsTab: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
 
-            explainer("Slide a single finger along any outer edge of your trackpad to smoothly adjust volume, display brightness, or scrub through open apps.\n\nVolume and brightness use the native macOS bezel overlays with zero idle CPU overhead.")
+            explainer("Slide a single finger along any outer edge of your trackpad to smoothly adjust volume, display brightness, scroll the window under the cursor, or scrub through open apps.\n\nThe pointer holds still once an edge gesture takes over, and ordinary cursor movement near the rim is left alone until you clearly commit to sliding along it.\n\nVolume and brightness use the native macOS bezel overlays with zero idle CPU overhead.")
         }
     }
 
@@ -169,7 +173,86 @@ struct EdgeControlsTab: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
 
-                explainer("How far inward from each physical edge a swipe can begin. Moving more than 6 mm beyond this margin automatically yields back to standard cursor motion.")
+                explainer("How far inward from each physical edge a swipe can begin. Drifting past it before the gesture takes over hands control straight back to normal cursor motion.\n\nOnce a gesture has taken over it gets 10 mm more room than this, so ordinary finger wander partway through a slide doesn't drop it.")
+
+                Divider().padding(.horizontal, 12)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Activation Travel")
+                            .font(.body)
+                        Spacer()
+                        Text("\(String(format: "%.1f", settings.activationTravelMm)) mm")
+                            .font(.body.monospacedDigit())
+                            .foregroundColor(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { settings.activationTravelMm },
+                            set: { val in store.updateEdgeControls { $0.activationTravelMm = val } }
+                        ),
+                        in: EdgeControlsSettings.activationTravelMmRange,
+                        step: 0.5
+                    )
+                }
+                .padding(.horizontal, 12)
+
+                explainer("How far you must slide along an edge before it takes over. This is the main dial for accidental triggers: raise it if edge controls fire while you are just moving the pointer near the rim, lower it if they feel slow to engage.\n\nThe slide also has to run roughly parallel to the edge, so moving diagonally away from it keeps controlling the cursor no matter how far you go.")
+            }
+            .padding(.bottom, 6)
+        }
+    }
+
+    // MARK: - Scroll Card
+
+    private var scrollCard: some View {
+        TuningSection(title: "Edge Scrolling", icon: "arrow.up.arrow.down") {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Scroll Speed")
+                            .font(.body)
+                        Spacer()
+                        Text("\(String(format: "%.0f", settings.scrollSpeed)) pt/mm")
+                            .font(.body.monospacedDigit())
+                            .foregroundColor(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { settings.scrollSpeed },
+                            set: { val in store.updateEdgeControls { $0.scrollSpeed = val } }
+                        ),
+                        in: EdgeControlsSettings.scrollSpeedRange,
+                        step: 1
+                    )
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+
+                explainer("How much the page moves for each millimetre your finger travels along the edge. Lower is more precise, higher covers a long document in one slide.")
+
+                Divider().padding(.horizontal, 12)
+
+                Toggle("Glide after lifting your finger", isOn: binding(\.scrollMomentum))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+
+                explainer(settings.scrollMomentum
+                          ? "A flick keeps scrolling and coasts to a stop, the way two-finger scrolling does."
+                          : "Scrolling stops the moment you lift, for tighter control over exactly where you land.")
+
+                Divider().padding(.horizontal, 12)
+
+                Toggle("Reverse scroll direction", isOn: binding(\.invertScroll))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+
+                explainer(settings.invertScroll
+                          ? "Sliding up a side edge, or right along a top or bottom edge, moves up the page — the scrollbar convention."
+                          : "Sliding up a side edge, or right along a top or bottom edge, moves down the page, matching the system's natural scrolling.")
+
+                explainer("Every edge scrolls vertically, including the top and bottom. The pointer holds still while you scroll, so it always lands on the window it started over.")
+                    .padding(.bottom, 2)
             }
             .padding(.bottom, 6)
         }

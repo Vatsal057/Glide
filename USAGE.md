@@ -15,6 +15,6 @@ Complete reference for all Glide capabilities, organized into topic guides. Star
 9. [Your configuration file](docs/09-configuration-file.md): Editing, exporting, and importing `config.yaml`.
 10. [Permissions Glide asks for](docs/10-permissions.md): Accessibility, Screen Recording, and Automation requirements.
 11. [Troubleshooting](docs/11-troubleshooting.md): Common configuration issues and solutions.
-12. [Trackpad Edge Controls](docs/12-edge-controls.md): Physical rim sliders for volume, brightness, backlight, and app switching.
+12. [Trackpad Edge Controls](docs/12-edge-controls.md): Physical rim sliders for volume, brightness, backlight, scrolling, and app switching.
 
 Each guide links to the preceding and following topics for step-by-step reading.

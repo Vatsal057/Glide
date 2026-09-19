@@ -67,7 +67,7 @@ Glide provides deep trackpad and desktop control: advanced touchpad gestures, ed
 ## Core Features
 
 - **Multi-Finger Gestures:** 3, 4, and 5-finger swipes, clicks, force-clicks, and holds with configurable flick vs. glide speed classification.
-- **Physical Rim Sliders:** Slide along the trackpad's physical border to adjust volume, brightness, keyboard backlight, or scrub the App Switcher.
+- **Physical Rim Sliders:** Slide along the trackpad's physical border to adjust volume, brightness, keyboard backlight, scroll the window under the cursor, or scrub the App Switcher.
 - **TrackPoint (A First on macOS):** Brings ThinkPad-style pointing stick mechanics to the Mac trackpad. Rest or double-tap an anchor finger, then lean in any direction to steer the cursor with continuous, vector-based velocity across multi-monitor setups without lifting your hand. Place a second finger down for high-speed inertia scrolling.
 - **State-Aware Ladders & Reciprocals:** Swipes adapt to current window state (maximize → fullscreen), and opposite gestures reverse actions automatically.
 - **2D Spatial App Switcher:** Swipe horizontally across running applications and vertically through window decks with live thumbnails.

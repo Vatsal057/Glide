@@ -701,6 +701,23 @@ struct TrackPointSettings: Codable, Equatable {
     /// slow enough to land on a pixel, and the whole screen is still one lean
     /// away. A gentler curve at this top speed overshoots everything.
     var acceleration: Float = 1.39
+    /// Time constant, in seconds, for easing the push toward what the finger is
+    /// actually doing.
+    ///
+    /// A stick works at deflections of a few millimetres, where finger tremor is a
+    /// large fraction of the signal. It shows up as speed jitter and, more
+    /// noticeably, as direction wander: a small absolute wobble swings the angle a
+    /// long way when the push is short.
+    ///
+    /// Measured against simulated 0.3mm tremor on a 0.020 push, the default cuts
+    /// direction wander from about 2.1° to 0.9° and speed jitter by a bit over half,
+    /// for roughly 28 ms to reach 63% of speed from rest. Returns diminish sharply
+    /// past ~25 ms while the lag keeps growing, which is why the default sits here
+    /// rather than higher. The speed a held push *settles* at is unchanged, so this
+    /// does not affect the other Feel settings. 0 restores the unfiltered behaviour
+    /// exactly.
+    var smoothing: Float = 0.022
+
     /// Tap the Taptic Engine when the stick engages and releases.
     var hapticFeedback: Bool = true
 
@@ -724,6 +741,7 @@ struct TrackPointSettings: Codable, Equatable {
         pushRange          = try c.decodeIfPresent(Float.self,        forKey: .pushRange)          ?? 0.055
         maxSpeed           = try c.decodeIfPresent(Float.self,        forKey: .maxSpeed)           ?? 1500
         acceleration       = try c.decodeIfPresent(Float.self,        forKey: .acceleration)       ?? 2.2
+        smoothing          = try c.decodeIfPresent(Float.self,        forKey: .smoothing)          ?? 0.022
         hapticFeedback     = try c.decodeIfPresent(Bool.self,         forKey: .hapticFeedback)     ?? true
     }
 
@@ -735,6 +753,7 @@ struct TrackPointSettings: Codable, Equatable {
     static let maxSpeedRange:        ClosedRange<Float>        = 200...4000
     static let scrollSpeedRange:     ClosedRange<Float>        = 200...4000
     static let accelerationRange:    ClosedRange<Float>        = 1.0...4.0
+    static let smoothingRange:       ClosedRange<Float>        = 0.0...0.12
 
     static func normalized(_ s: TrackPointSettings) -> TrackPointSettings {
         var n = s
@@ -750,6 +769,7 @@ struct TrackPointSettings: Codable, Equatable {
         n.pushRange          = n.pushRange.clamped(to: pushRangeRange)
         n.maxSpeed           = n.maxSpeed.clamped(to: maxSpeedRange)
         n.acceleration       = n.acceleration.clamped(to: accelerationRange)
+        n.smoothing          = n.smoothing.clamped(to: smoothingRange)
         // The dead zone has to stay meaningfully inside the push range or every
         // push is either ignored or instantly at full speed.
         n.deadZone           = min(n.deadZone, n.pushRange * 0.6)
@@ -763,14 +783,43 @@ struct EdgeControlsSettings: Codable, Equatable {
     var bottomEdge: EdgeAction = .none
     var leftEdge: EdgeAction = .brightness
     var rightEdge: EdgeAction = .volume
-    var marginMm: Double = 8.0
+    var marginMm: Double = 12.0
+
+    /// How far a finger must travel along an edge before the gesture commits.
+    ///
+    /// The main defence against accidental triggers. Larger means edge controls
+    /// demand a more deliberate slide and leave ordinary cursor movement near the
+    /// rim alone; smaller makes them quicker to engage.
+    var activationTravelMm: Double = 4.0
+
+    /// Points of scroll produced per millimetre of finger travel along an edge.
+    /// An edge is only ~98 mm long on the short axis, so the gain has to be well
+    /// above 1:1 for a single slide to cover a useful amount of a document.
+    var scrollSpeed: Double = 26.0
+
+    /// Reverses the scroll axis. Off means natural scrolling — content follows the
+    /// finger — matching the system default; on gives the scrollbar convention.
+    var invertScroll: Bool = false
+
+    /// Whether an edge scroll keeps gliding after the finger lifts.
+    var scrollMomentum: Bool = true
 
     static let marginMmRange: ClosedRange<Double> = 3.0...30.0
+    static let scrollSpeedRange: ClosedRange<Double> = 5.0...80.0
+    static let activationTravelMmRange: ClosedRange<Double> = 2.0...15.0
 
     static func normalized(_ s: EdgeControlsSettings) -> EdgeControlsSettings {
         var n = s
-        n.marginMm = n.marginMm.clamped(to: marginMmRange)
+        n.marginMm           = n.marginMm.clamped(to: marginMmRange)
+        n.scrollSpeed        = n.scrollSpeed.clamped(to: scrollSpeedRange)
+        n.activationTravelMm = n.activationTravelMm.clamped(to: activationTravelMmRange)
         return n
+    }
+
+    /// Whether any edge is currently assigned to scrolling — drives whether the
+    /// scroll-specific tuning is worth showing.
+    var usesScroll: Bool {
+        topEdge == .scroll || bottomEdge == .scroll || leftEdge == .scroll || rightEdge == .scroll
     }
 }
 

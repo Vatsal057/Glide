@@ -35,6 +35,35 @@ final class CursorDriver {
         position = CGEvent(source: nil)?.location ?? .zero
     }
 
+    /// Places the cursor at an absolute location.
+    ///
+    /// Used to undo pointer drift that happened *before* a gesture was recognised.
+    /// The events that moved it have already been delivered, so suppression cannot
+    /// help retroactively — the only way back is to move the cursor again.
+    ///
+    /// Posted as a drag when a button is held, for the same reason `move` does it:
+    /// a plain `mouseMoved` mid-drag ends the drag.
+    func warp(to point: CGPoint) {
+        let current = CGEvent(source: nil)?.location ?? point
+        guard current != point else {
+            position = point
+            return
+        }
+        let (type, button) = Self.currentDragState()
+        guard let source = eventSource ?? CGEventSource(stateID: .hidSystemState),
+              let event = CGEvent(mouseEventSource: source,
+                                  mouseType: type,
+                                  mouseCursorPosition: point,
+                                  mouseButton: button) else { return }
+        event.setIntegerValueField(.mouseEventDeltaX, value: Int64((point.x - current.x).rounded()))
+        event.setIntegerValueField(.mouseEventDeltaY, value: Int64((point.y - current.y).rounded()))
+        event.setIntegerValueField(.eventSourceUserData, value: Self.syntheticMarker)
+        event.post(tap: .cghidEventTap)
+        // Keep the integrator in step, or a TrackPoint session that starts after
+        // this would drive from a position the cursor no longer occupies.
+        position = point
+    }
+
     /// Offsets the cursor in Core Graphics coordinates (y grows downward).
     func move(dx: CGFloat, dy: CGFloat) {
         let previous = position

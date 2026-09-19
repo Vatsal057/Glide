@@ -52,4 +52,12 @@ void GLDTStop(void);
 /// they are enabled. Clamped to 1...32; safe to call from any thread.
 void GLDTSetMinimumContactCount(int32_t count);
 
+/// Physical size of the sensor surface in millimetres, or false when the device or
+/// the symbol is unavailable.
+///
+/// Edge margins are configured in millimetres so the same number feels the same on
+/// any trackpad. Assuming a nominal size instead makes that a lie on every machine
+/// whose trackpad differs — the setting silently means something else.
+bool GLDTGetSurfaceDimensions(double *width_mm, double *height_mm);
+
 #endif

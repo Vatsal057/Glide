@@ -56,6 +56,7 @@ struct GlideConfig {
         var scrollEnabled: Bool = true
         var scrollSpeed: Float = 1200
         var invertScroll: Bool = false
+        var smoothing: Float = 0.022
     }
 
     struct EdgeControls {
@@ -64,7 +65,11 @@ struct GlideConfig {
         var bottomEdge: String = "none"
         var leftEdge: String = "brightness"
         var rightEdge: String = "volume"
-        var marginMm: Double = 10.0
+        var marginMm: Double = 12.0
+        var activationTravelMm: Double = 4.0
+        var scrollSpeed: Double = 26.0
+        var invertScroll: Bool = false
+        var scrollMomentum: Bool = true
     }
 
     struct Tuning {
@@ -192,13 +197,18 @@ extension GlideConfig {
         cfg.trackPoint.scrollEnabled      = s.trackPoint.scrollEnabled
         cfg.trackPoint.scrollSpeed        = s.trackPoint.scrollSpeed
         cfg.trackPoint.invertScroll       = s.trackPoint.invertScroll
+        cfg.trackPoint.smoothing          = s.trackPoint.smoothing
 
         cfg.edgeControls.enabled    = s.edgeControls.enabled
         cfg.edgeControls.topEdge    = s.edgeControls.topEdge.rawValue
         cfg.edgeControls.bottomEdge = s.edgeControls.bottomEdge.rawValue
         cfg.edgeControls.leftEdge   = s.edgeControls.leftEdge.rawValue
-        cfg.edgeControls.rightEdge  = s.edgeControls.rightEdge.rawValue
-        cfg.edgeControls.marginMm   = s.edgeControls.marginMm
+        cfg.edgeControls.rightEdge   = s.edgeControls.rightEdge.rawValue
+        cfg.edgeControls.marginMm    = s.edgeControls.marginMm
+        cfg.edgeControls.activationTravelMm = s.edgeControls.activationTravelMm
+        cfg.edgeControls.scrollSpeed = s.edgeControls.scrollSpeed
+        cfg.edgeControls.invertScroll = s.edgeControls.invertScroll
+        cfg.edgeControls.scrollMomentum = s.edgeControls.scrollMomentum
 
         cfg.tuning.appSwitcherStepThreshold  = t.appSwitcherStepThreshold
         cfg.tuning.appSwitcherDebounce       = t.appSwitcherDebounce
@@ -307,6 +317,7 @@ extension GlideConfig {
         p.scrollEnabled      = trackPoint.scrollEnabled
         p.scrollSpeed        = trackPoint.scrollSpeed
         p.invertScroll       = trackPoint.invertScroll
+        p.smoothing          = trackPoint.smoothing
         return TrackPointSettings.normalized(p)
     }
 
@@ -317,7 +328,11 @@ extension GlideConfig {
         e.bottomEdge = EdgeAction(rawValue: edgeControls.bottomEdge) ?? .none
         e.leftEdge   = EdgeAction(rawValue: edgeControls.leftEdge) ?? .brightness
         e.rightEdge  = EdgeAction(rawValue: edgeControls.rightEdge) ?? .volume
-        e.marginMm   = edgeControls.marginMm
+        e.marginMm    = edgeControls.marginMm
+        e.activationTravelMm = edgeControls.activationTravelMm
+        e.scrollSpeed = edgeControls.scrollSpeed
+        e.invertScroll = edgeControls.invertScroll
+        e.scrollMomentum = edgeControls.scrollMomentum
         return EdgeControlsSettings.normalized(e)
     }
 
@@ -508,6 +523,8 @@ enum GlideConfigSerializer {
             "    scroll_enabled: \(config.trackPoint.scrollEnabled ? "true" : "false")",
             "    scroll_speed: \(String(format: "%.0f", config.trackPoint.scrollSpeed))",
             "    invert_scroll: \(config.trackPoint.invertScroll ? "true" : "false")",
+            "    # Eases finger tremor out of the push. Seconds; 0 disables.",
+            "    smoothing: \(String(format: "%.3f", config.trackPoint.smoothing))",
             "",
             "  # ── Edge Controls ──────────────────────────────────",
             "  edge_controls:",
@@ -517,6 +534,13 @@ enum GlideConfigSerializer {
             "    left_edge: \(config.edgeControls.leftEdge)",
             "    right_edge: \(config.edgeControls.rightEdge)",
             "    margin_mm: \(String(format: "%.1f", config.edgeControls.marginMm))",
+            "    # Travel along an edge required before a gesture commits. Raise to",
+            "    # make accidental triggers less likely.",
+            "    activation_travel_mm: \(String(format: "%.1f", config.edgeControls.activationTravelMm))",
+            "    # Points of scroll per millimetre of travel, for edges set to `scroll`.",
+            "    scroll_speed: \(String(format: "%.1f", config.edgeControls.scrollSpeed))",
+            "    invert_scroll: \(config.edgeControls.invertScroll ? "true" : "false")",
+            "    scroll_momentum: \(config.edgeControls.scrollMomentum ? "true" : "false")",
             "",
             "  # ── Tuning ─────────────────────────────────────────",
             "  tuning:",
@@ -813,6 +837,7 @@ enum GlideConfigParser {
             case "scroll_enabled":      point.scrollEnabled      = boolVal(val)   ?? point.scrollEnabled
             case "scroll_speed":        point.scrollSpeed        = floatVal(val)  ?? point.scrollSpeed
             case "invert_scroll":       point.invertScroll       = boolVal(val)   ?? point.invertScroll
+            case "smoothing":           point.smoothing          = floatVal(val)  ?? point.smoothing
             default: break
             }
             i += 1
@@ -831,8 +856,12 @@ enum GlideConfigParser {
             case "top_edge":    edge.topEdge    = stringVal(val) ?? edge.topEdge
             case "bottom_edge": edge.bottomEdge = stringVal(val) ?? edge.bottomEdge
             case "left_edge":   edge.leftEdge   = stringVal(val) ?? edge.leftEdge
-            case "right_edge":  edge.rightEdge  = stringVal(val) ?? edge.rightEdge
-            case "margin_mm":   edge.marginMm   = doubleVal(val) ?? edge.marginMm
+            case "right_edge":   edge.rightEdge    = stringVal(val) ?? edge.rightEdge
+            case "margin_mm":    edge.marginMm     = doubleVal(val) ?? edge.marginMm
+            case "activation_travel_mm": edge.activationTravelMm = doubleVal(val) ?? edge.activationTravelMm
+            case "scroll_speed": edge.scrollSpeed  = doubleVal(val) ?? edge.scrollSpeed
+            case "invert_scroll": edge.invertScroll = boolVal(val)  ?? edge.invertScroll
+            case "scroll_momentum": edge.scrollMomentum = boolVal(val) ?? edge.scrollMomentum
             default: break
             }
             i += 1

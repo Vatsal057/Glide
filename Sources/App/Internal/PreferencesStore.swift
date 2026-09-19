@@ -223,12 +223,16 @@ final class PreferencesStore: ObservableObject {
         Settings.shared.trackPoint = copy       // TrackPointSettings.normalized runs here + saves
         trackPoint = Settings.shared.trackPoint // read back the clamped value
         TrackPointController.shared.applySettings()
+        // Edge Controls size their corner exclusion from the TrackPoint's zone, so
+        // they have to be rebuilt when it moves or the two can overlap again.
+        EdgeControlsController.shared.applySettings()
     }
 
     func resetTrackPoint() {
         Settings.shared.resetTrackPoint()
         trackPoint = Settings.shared.trackPoint
         TrackPointController.shared.applySettings()
+        EdgeControlsController.shared.applySettings()
     }
 
     func updateEdgeControls(_ mutate: (inout EdgeControlsSettings) -> Void) {

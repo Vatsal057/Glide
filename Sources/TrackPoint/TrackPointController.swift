@@ -127,6 +127,9 @@ final class TrackPointController {
     }
     private var lastSample: TrackPointSample?
     private var offset: CGPoint = .zero
+    /// Time-filtered view of `offset`, and what actually drives the cursor. Kept
+    /// separate so the raw push stays available for the dead-zone re-arm check.
+    private var smoothedOffset: CGPoint = .zero
     private var armTimer: DispatchWorkItem?
     /// Expires `awaitingSecondTap`. With nothing on the pad no frames arrive, so
     /// the way back to idle has to be driven by the clock.
@@ -431,6 +434,7 @@ final class TrackPointController {
         lastSample = sample
         state = .engaged(id: sample.id, anchor: anchor, mode: startMode)
         offset = .zero
+        smoothedOffset = .zero
 
         prepareDriver(for: startMode)
         GestureEngine.shared.inputManager?.setTrackPointSuppression(true)
@@ -445,6 +449,7 @@ final class TrackPointController {
     private func switchMode(to newMode: TrackPointMode, at sample: TrackPointSample, id: Int32) {
         state = .engaged(id: id, anchor: CGPoint(x: CGFloat(sample.x), y: CGFloat(sample.y)), mode: newMode)
         offset = .zero
+        smoothedOffset = .zero
         prepareDriver(for: newMode)
         // The mode is invisible on screen, so it gets its own confirmation.
         playHaptic(.softTick)
@@ -463,6 +468,7 @@ final class TrackPointController {
                          anchor: CGPoint(x: CGFloat(sample.x), y: CGFloat(sample.y)),
                          mode: mode(forContacts: 1))
         offset = .zero
+        smoothedOffset = .zero
     }
 
     /// Gives the cursor back to macOS. Leaves `state` to the caller, which knows
@@ -611,9 +617,19 @@ final class TrackPointController {
         guard elapsed > 0 else { return }
 
         let settings = Settings.shared.trackPoint
-        let pushX = Double(offset.x)
-        let pushY = Double(offset.y) * Self.verticalScale
-        let magnitude = Double(Self.correctedMagnitude(offset))
+
+        // Ease the push toward what the finger is actually doing rather than taking
+        // each frame at face value. Filtered on the clock instead of per frame, so
+        // the feel is the same whether frames arrive at 60 Hz or 125 Hz, and so a
+        // finger holding a steady deflection still converges on it.
+        let smoothing = Double(settings.smoothing)
+        let blend = smoothing > 0 ? 1 - exp(-elapsed / smoothing) : 1.0
+        smoothedOffset.x += (offset.x - smoothedOffset.x) * CGFloat(blend)
+        smoothedOffset.y += (offset.y - smoothedOffset.y) * CGFloat(blend)
+
+        let pushX = Double(smoothedOffset.x)
+        let pushY = Double(smoothedOffset.y) * Self.verticalScale
+        let magnitude = Double(Self.correctedMagnitude(smoothedOffset))
 
         let deadZone = Double(settings.deadZone)
         guard magnitude > deadZone else {

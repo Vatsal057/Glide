@@ -26,7 +26,13 @@ A brief hold confirms engagement. Moving significantly prior to hold completion 
 
 ### Tunable Parameters
 
-Adjust top speed, push distance (travel required for maximum velocity), center dead zone, and acceleration curves in **Preferences → TrackPoint**. Corner mode includes configurable zone dimensions and visual corner selection.
+Adjust top speed, push distance (travel required for maximum velocity), center dead zone, smoothing, and acceleration curves in **Preferences → TrackPoint**. Corner mode includes configurable zone dimensions and visual corner selection.
+
+**Smoothing** deserves a note, since it is what makes small pushes controllable. A stick operates over deflections of just a few millimetres, and at that scale ordinary finger tremor is a large fraction of the signal. It shows up partly as speed jitter, but mostly as *direction* wander: when the push is short, a small absolute wobble swings the aim a long way.
+
+Glide therefore eases the push toward what your finger is actually doing rather than taking each multitouch frame at face value. The filter runs on the clock rather than per frame, so the feel is the same whether frames arrive at 60 Hz or 125 Hz.
+
+At the 22 ms default this cuts direction wander from roughly 2.1° to 0.9° against simulated 0.3 mm tremor, costing about 28 ms to reach 63% of speed from rest. The speed a held push *settles* at is unchanged, so smoothing does not interact with the other Feel settings — it only affects how the cursor gets there. Raise it toward "Glassy" for steadier aim at the cost of immediacy; set it to zero to restore the completely unfiltered behaviour.
 
 ---
 [← Previous: App Switcher](05-app-switcher.md) · [Back to manual](../USAGE.md) · [Next: Tuning & precision controls →](07-tuning.md)

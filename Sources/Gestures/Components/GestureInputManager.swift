@@ -21,6 +21,16 @@ final class GestureInputManager {
     var trackPointSource: CFRunLoopSource?
     private(set) var trackPointSuppressionEnabled = false
 
+    /// Features that currently need native pointer motion swallowed. Held as a
+    /// set rather than a flag because two of them can overlap, and whichever
+    /// finished first would otherwise switch the tap off underneath the other.
+    private var pointerSuppressionOwners: Set<PointerSuppressionOwner> = []
+
+    enum PointerSuppressionOwner: Hashable {
+        case trackPoint
+        case edgeControls
+    }
+
     var interactionMonitors: [Any] = []
     var pressureMonitor: Any?
     var lastForceClickTime: TimeInterval = 0
@@ -168,6 +178,21 @@ final class GestureInputManager {
     }
 
     func setTrackPointSuppression(_ active: Bool) {
+        setPointerSuppression(active, owner: .trackPoint)
+    }
+
+    /// Claims or releases pointer suppression on behalf of one feature. The tap
+    /// stays on as long as any owner still holds it.
+    func setPointerSuppression(_ active: Bool, owner: PointerSuppressionOwner) {
+        if active {
+            pointerSuppressionOwners.insert(owner)
+        } else {
+            pointerSuppressionOwners.remove(owner)
+        }
+        applyPointerSuppression(!pointerSuppressionOwners.isEmpty)
+    }
+
+    private func applyPointerSuppression(_ active: Bool) {
         guard active != trackPointSuppressionEnabled else { return }
         // Create on demand: the tap only exists once the feature is used.
         if active && trackPointTap == nil { setupTrackPointTap() }
@@ -183,6 +208,7 @@ final class GestureInputManager {
         trackPointTap    = nil
         trackPointSource = nil
         trackPointSuppressionEnabled = false
+        pointerSuppressionOwners.removeAll()
     }
 
     func setupClickObservationTap() {
@@ -291,9 +317,13 @@ final class GestureInputManager {
         }
         if let tap = trackPointTap {
             if !CFMachPortIsValid(tap) {
-                let wasSuppressing = trackPointSuppressionEnabled
+                // Teardown clears the owner set, so carry it across the rebuild —
+                // otherwise a live TrackPoint or edge scroll loses its claim and
+                // the native pointer starts fighting the synthetic events again.
+                let owners = pointerSuppressionOwners
                 teardownTrackPointTap(); setupTrackPointTap()
-                if wasSuppressing { setTrackPointSuppression(true) }
+                pointerSuppressionOwners = owners
+                applyPointerSuppression(!owners.isEmpty)
             } else if !CGEvent.tapIsEnabled(tap: tap) && trackPointSuppressionEnabled {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
