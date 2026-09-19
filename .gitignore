@@ -20,7 +20,7 @@ glide_minimal.zip
 
 # Screen recordings and renders are large (the raw capture is ~700MB) and should
 # never reach the repo. Patterns rather than names, so a new recording is covered.
-
+*.mp4
 *.mov
 # Exception: the README embeds this one, so it has to be tracked. Web-encoded and
 # kept small on purpose — it is committed history, not a build artifact.
