@@ -339,6 +339,8 @@ struct GestureRule: Codable, Identifiable, Equatable {
     /// Per-gesture haptic override. nil → automatic (pattern assigned to the
     /// action's category in Preferences › General › Haptics).
     var hapticPattern: HapticPattern?
+    /// Allows turning individual gestures on/off without deleting or altering them.
+    var isEnabled: Bool             = true
     /// New rules start as drafts until configured in the editor.
     var isDraft: Bool               = false
     /// Marks this rule as triggered by a global keyboard shortcut instead of a
@@ -373,7 +375,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
     }
 
     var isActive: Bool {
-        if isDraft { return false }
+        if !isEnabled || isDraft { return false }
         if isKeyboardBinding && !triggerIsRegisterable { return false }
         if continuous {
             return Self.actionIsConfigured(action, shortcut: customShortcut, keyboard: advancedKeyboard)
@@ -463,6 +465,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
          continuousEndKeyboard: [KeyboardInputStep] = [],
          menuItemPath: [String]? = nil, customShortcut: KeyboardShortcut? = nil,
          shortcutName: String? = nil, script: String? = nil,
+         isEnabled: Bool = true,
          isDraft: Bool = false,
          isKeyboardBinding: Bool = false, triggerShortcut: KeyboardShortcut? = nil) {
         self.name                = name
@@ -492,6 +495,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
         self.customShortcut      = customShortcut
         self.shortcutName        = shortcutName
         self.script              = script
+        self.isEnabled           = isEnabled
         self.isDraft             = isDraft
         self.isKeyboardBinding   = isKeyboardBinding
         self.triggerShortcut     = triggerShortcut
@@ -528,6 +532,7 @@ struct GestureRule: Codable, Identifiable, Equatable {
         customShortcut    = try? c.decodeIfPresent(KeyboardShortcut.self, forKey: .customShortcut)
         shortcutName      = try? c.decodeIfPresent(String.self, forKey: .shortcutName)
         script            = try? c.decodeIfPresent(String.self, forKey: .script)
+        isEnabled         = (try? c.decodeIfPresent(Bool.self,  forKey: .isEnabled)) ?? true
         isDraft           = (try? c.decodeIfPresent(Bool.self,  forKey: .isDraft)) ?? false
         isKeyboardBinding = (try? c.decodeIfPresent(Bool.self,  forKey: .isKeyboardBinding)) ?? false
         triggerShortcut   = try? c.decodeIfPresent(KeyboardShortcut.self, forKey: .triggerShortcut)

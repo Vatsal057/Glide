@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.4.0
+
+### Gestures
+
+- Added individual enable/disable toggle switches for each gesture.
+- Disabled gestures are retained in configuration and YAML exports without matching trackpad events.
+- Integrated switches directly into the gesture list rows and the gesture detail editor in Preferences.
+
 ## 2.3.0
 
 Performance release. The app switcher used to be the most expensive thing Glide

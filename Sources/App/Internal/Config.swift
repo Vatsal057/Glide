@@ -131,6 +131,7 @@ struct GlideConfig {
         var continuousNegativeKeyboard: [String]?
         var continuousPositiveKeyboard: [String]?
         var continuousEndKeyboard: [String]?
+        var enabled: Bool = true
         var draft: Bool = false
         /// True when this rule is triggered by a global keyboard shortcut, not a trackpad gesture.
         var keyboardBinding: Bool = false
@@ -275,6 +276,7 @@ extension GlideConfig {
                 continuousNegativeKeyboard: rule.continuousNegativeAction == .advancedKeyboard ? rule.continuousNegativeKeyboard.map(\.token).nilIfEmpty : nil,
                 continuousPositiveKeyboard: rule.continuousPositiveAction == .advancedKeyboard ? rule.continuousPositiveKeyboard.map(\.token).nilIfEmpty : nil,
                 continuousEndKeyboard: rule.continuousEndAction == .advancedKeyboard ? rule.continuousEndKeyboard.map(\.token).nilIfEmpty : nil,
+                enabled:     rule.isEnabled,
                 draft:       rule.isDraft
             )
             if rule.isKeyboardBinding {
@@ -421,6 +423,7 @@ extension GlideConfig {
                                                      modifiers: g.shortcutModifiers),
                 shortcutName:      g.shortcutName,
                 script:            g.script,
+                isEnabled:         g.enabled,
                 isDraft:           g.draft,
                 isKeyboardBinding: g.keyboardBinding,
                 triggerShortcut:   KeyboardShortcut(yamlKeyCode: g.triggerShortcutKeyCode,
@@ -597,6 +600,7 @@ enum GlideConfigSerializer {
         if let d = g.direction { lines.append("      direction: \(d)") }
         lines.append("      fingers: \(g.fingers)")
         if let s = g.speed { lines.append("      speed: \(s)") }
+        lines.append("      enabled: \(g.enabled ? "true" : "false")")
         if g.draft { lines.append("      draft: true") }
         if g.keyboardBinding {
             lines.append("      keyboard_binding: true")
@@ -1088,6 +1092,7 @@ enum GlideConfigParser {
                 i += 1
                 g.continuousEndKeyboard = parseStringList(lines, from: &i, parentIndent: listIndent)
                 continue
+            case "enabled":         g.enabled         = boolVal(val) ?? g.enabled
             case "draft":           g.draft           = boolVal(val) ?? g.draft
             case "keyboard_binding": g.keyboardBinding = boolVal(val) ?? g.keyboardBinding
             case "trigger_shortcut_key_code": g.triggerShortcutKeyCode = intVal(val)

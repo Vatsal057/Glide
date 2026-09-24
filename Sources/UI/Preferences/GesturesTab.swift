@@ -307,8 +307,21 @@ struct RuleRow: View {
                     Image(systemName: "pause.circle.fill")
                         .foregroundStyle(.secondary)
                         .font(.caption)
-                        .help(rule.isDraft ? "Not configured yet" : "Inactive")
+                        .help(rule.isDraft ? "Not configured yet" : (!rule.isEnabled ? "Disabled" : "Inactive"))
                 }
+
+                Toggle("", isOn: Binding(
+                    get: { rule.isEnabled },
+                    set: { newValue in
+                        var updated = rule
+                        updated.isEnabled = newValue
+                        store.updateRule(updated)
+                    }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .controlSize(.small)
+                .help(rule.isEnabled ? "Disable gesture" : "Enable gesture")
             }
         }
         .padding(.vertical, 4)
@@ -390,6 +403,11 @@ struct RuleEditor: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
+
+                Toggle(rule.isEnabled ? "Enabled" : "Disabled", isOn: $rule.isEnabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help(rule.isEnabled ? "Disable gesture" : "Enable gesture")
 
                 Button { onDuplicate() } label: {
                     Image(systemName: "square.on.square")
