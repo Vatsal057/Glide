@@ -31,6 +31,7 @@ final class PreferencesStore: ObservableObject {
     @Published private(set) var appSwitcher: AppSwitcherSettings = .init()
     @Published private(set) var trackPoint: TrackPointSettings = .init()
     @Published private(set) var edgeControls: EdgeControlsSettings = .init()
+    @Published private(set) var surfaceFeel: SurfaceFeelSettings = .init()
     @Published private(set) var tuning: GestureTuning = .init()
     @Published private(set) var windowTargetingMode: WindowTargetingMode = .focusedThenCursor
     @Published private(set) var hapticFeedbackEnabled = true
@@ -54,6 +55,7 @@ final class PreferencesStore: ObservableObject {
         TrackPointController.shared.applySettings()
         edgeControls = s.edgeControls
         EdgeControlsController.shared.applySettings()
+        surfaceFeel = s.surfaceFeel
         tuning = s.tuning
         windowTargetingMode = s.windowTargetingMode
         hapticFeedbackEnabled = s.hapticFeedbackEnabled
@@ -247,6 +249,18 @@ final class PreferencesStore: ObservableObject {
         Settings.shared.resetEdgeControls()
         edgeControls = Settings.shared.edgeControls
         EdgeControlsController.shared.applySettings()
+    }
+
+    func updateSurfaceFeel(_ mutate: (inout SurfaceFeelSettings) -> Void) {
+        var copy = surfaceFeel
+        mutate(&copy)
+        Settings.shared.surfaceFeel = copy   // normalized + saved; refreshes the engine snapshot
+        surfaceFeel = Settings.shared.surfaceFeel
+    }
+
+    func resetSurfaceFeel() {
+        Settings.shared.resetSurfaceFeel()
+        surfaceFeel = Settings.shared.surfaceFeel
     }
 
     // ── YAML Config Export — copies live file to user-chosen location ──

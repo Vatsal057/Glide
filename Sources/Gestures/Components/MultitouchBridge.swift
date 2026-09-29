@@ -56,7 +56,8 @@ final class MultitouchBridge {
         GLDTSetMinimumContactCount(Int32(count))
     }
 
-    /// Coordinates TrackPoint and Edge Controls requirements so neither overrides the other.
+    /// Coordinates TrackPoint, Edge Controls, and surface-feel requirements so
+    /// none overrides the other.
     func updateMinimumContactCount() {
         let trackPointActive = Settings.shared.trackPoint.enabled
         let edgeControlsActive = Settings.shared.edgeControls.enabled && (
@@ -65,6 +66,7 @@ final class MultitouchBridge {
             Settings.shared.edgeControls.leftEdge != .none ||
             Settings.shared.edgeControls.rightEdge != .none
         )
-        setMinimumContactCount((trackPointActive || edgeControlsActive) ? 1 : 3)
+        let surfaceFeelActive = Settings.shared.surfaceFeel.enabled
+        setMinimumContactCount((trackPointActive || edgeControlsActive || surfaceFeelActive) ? 1 : 3)
     }
 }

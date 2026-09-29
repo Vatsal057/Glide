@@ -117,13 +117,58 @@ enum TouchTracker {
     fileprivate static var _edgeControlsEnabled: Bool = false
     fileprivate static var _edgeControlsStreaming: Bool = false
 
-    static func updateEdgeControlsCache(enabled: Bool) {
+    /// Which edges currently host an Edge Controls action, plus the
+    /// engagement margin. Lets the surface-feel engine tell a lone edge-band
+    /// contact (the slider's finger) apart from ordinary cursor work.
+    struct EdgeControlsZone: Equatable {
+        var marginMm: Double = 12
+        var top: Bool = false
+        var bottom: Bool = false
+        var left: Bool = false
+        var right: Bool = false
+    }
+
+    fileprivate static var _edgeControlsZone = EdgeControlsZone()
+
+    static func updateEdgeControlsCache(enabled: Bool,
+                                        marginMm: Double,
+                                        activeEdges: (top: Bool, bottom: Bool,
+                                                     left: Bool, right: Bool)) {
         stateLock.lock()
         defer { stateLock.unlock() }
         _edgeControlsEnabled = enabled
+        _edgeControlsZone = EdgeControlsZone(
+            marginMm: marginMm,
+            top: activeEdges.top, bottom: activeEdges.bottom,
+            left: activeEdges.left, right: activeEdges.right)
         if !enabled {
             _edgeControlsStreaming = false
         }
+    }
+
+    // MARK: Surface feel cache
+
+    fileprivate static var _surfaceFeelSnapshot = SurfaceFeelSnapshot()
+
+    /// Refreshes the MT-thread snapshot. Called from
+    /// `SurfaceFeelEngine.settingsDidChange()`.
+    static func updateSurfaceFeelCache(_ snapshot: SurfaceFeelSnapshot) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        _surfaceFeelSnapshot = snapshot
+    }
+
+    /// One-lock read of everything `SurfaceFeelEngine.feed` needs per frame.
+    static func surfaceFeelFrameContext()
+        -> (snapshot: SurfaceFeelSnapshot,
+            trackPointAnchoredID: Int32,
+            edgeControlsStreaming: Bool,
+            edgeZone: EdgeControlsZone)
+    {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return (_surfaceFeelSnapshot, _trackPointAnchoredID,
+                _edgeControlsStreaming, _edgeControlsZone)
     }
 
     static func updateDeviceFingerCount(device: UnsafeMutableRawPointer, count: Int) {
@@ -218,6 +263,7 @@ enum TouchTracker {
 let glideMTCallback: GLDTFrameCallback = { points, count, timestamp, context in
     feedTrackPoint(points, count)
     feedEdgeControls(points, count, timestamp)
+    feedSurfaceFeel(points, count, timestamp)
 
     var activeTouches: [GLDTouchPoint] = []
     if let points = points, count > 0 {
@@ -462,4 +508,13 @@ private func feedEdgeControls(_ points: UnsafePointer<GLDTouchPoint>?, _ count: 
             timestamp: timestamp
         )
     }
+}
+
+/// Feeds the surface-texture engine from raw contact frames, alongside the
+/// TrackPoint and Edge Controls feeds. Costs nothing when surface feel is
+/// off — `SurfaceFeelEngine.feed` early-outs on its cached snapshot.
+private func feedSurfaceFeel(_ points: UnsafePointer<GLDTouchPoint>?,
+                             _ count: Int32,
+                             _ timestamp: Double) {
+    SurfaceFeelEngine.feed(points: points, count: count, timestamp: timestamp)
 }

@@ -938,6 +938,10 @@ final class Settings {
     private var _windowTargeting: WindowTargetingMode = .focusedThenCursor
     private var _hapticFeedback:  Bool                = true
     private var _hapticAssignments: [HapticEvent: HapticPattern] = HapticEvent.defaultAssignments
+    /// Guards `_surfaceFeel` — the multitouch thread reads it through
+    /// TouchTracker's snapshot cache (same pattern as `_tuning`).
+    private let surfaceFeelLock = NSLock()
+    private var _surfaceFeel: SurfaceFeelSettings = SurfaceFeelSettings()
     private var _debugLogging:    Bool                = false
     private var _launchAtLogin:   Bool                = false
     private var _autoDisableNativeGestures: Bool      = false
@@ -980,7 +984,11 @@ final class Settings {
 
     var hapticFeedbackEnabled: Bool {
         get { _hapticFeedback }
-        set { _hapticFeedback = newValue; GlideConfigStore.shared.scheduleSave() }
+        set {
+            _hapticFeedback = newValue
+            GlideConfigStore.shared.scheduleSave()
+            SurfaceFeelEngine.settingsDidChange()
+        }
     }
 
     var hapticAssignments: [HapticEvent: HapticPattern] {
@@ -990,6 +998,38 @@ final class Settings {
 
     func hapticPattern(for event: HapticEvent) -> HapticPattern {
         _hapticAssignments[event] ?? event.defaultPattern
+    }
+
+    /// Surface-feel (trackpad texture) settings. The multitouch thread never
+    /// reads this directly — it uses TouchTracker's snapshot, refreshed via
+    /// `SurfaceFeelEngine.settingsDidChange()`.
+    var surfaceFeel: SurfaceFeelSettings {
+        get { surfaceFeelLock.lock(); defer { surfaceFeelLock.unlock() }; return _surfaceFeel }
+        set {
+            surfaceFeelLock.lock()
+            _surfaceFeel = SurfaceFeelSettings.normalized(newValue)
+            surfaceFeelLock.unlock()
+            GlideConfigStore.shared.scheduleSave()
+            SurfaceFeelEngine.settingsDidChange()
+        }
+    }
+
+    /// Resolves which material plays for a gesture key, or nil for off.
+    /// Absent key → the global material. The P0 engine uses the global
+    /// material for unclaimed contacts; per-claim overrides land in P1.
+    func surfaceMaterial(for gesture: String) -> Material? {
+        let s = surfaceFeel
+        guard s.enabled else { return nil }
+        if let override = s.gestureMaterials[gesture]?.lowercased() {
+            switch override {
+            case "off":    return nil
+            case "global": return s.resolvedGlobalMaterial()
+            default:
+                guard let base = Material.preset(named: override) else { return nil }
+                return s.materialOverrides[override] ?? base
+            }
+        }
+        return s.resolvedGlobalMaterial()
     }
 
     var debugLoggingEnabled: Bool {
@@ -1022,6 +1062,12 @@ final class Settings {
         edgeControls = fresh
     }
 
+    func resetSurfaceFeel() {
+        var fresh = SurfaceFeelSettings()
+        fresh.enabled = _surfaceFeel.enabled
+        surfaceFeel = fresh
+    }
+
     // MARK: Batch load — bypasses per-field saves (called by GlideConfigStore.load)
 
     func apply(_ config: GlideConfig) {
@@ -1046,6 +1092,10 @@ final class Settings {
         _debugLogging    = config.preferences.debugLogging
         _launchAtLogin   = config.preferences.launchAtLogin
         _autoDisableNativeGestures = config.preferences.autoDisableNativeGestures
+        surfaceFeelLock.lock()
+        _surfaceFeel = SurfaceFeelSettings.normalized(config.toSurfaceFeel())
+        surfaceFeelLock.unlock()
+        SurfaceFeelEngine.settingsDidChange()
     }
 
     // MARK: App Switcher ↔ gesture rules

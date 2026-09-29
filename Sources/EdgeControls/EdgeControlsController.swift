@@ -52,7 +52,13 @@ final class EdgeControlsController: ObservableObject {
             trackPointCornerZone: Self.trackPointCornerZone()
         )
 
-        TouchTracker.updateEdgeControlsCache(enabled: hasActiveEdgeControls)
+        TouchTracker.updateEdgeControlsCache(
+            enabled: hasActiveEdgeControls,
+            marginMm: settings.marginMm,
+            activeEdges: (top: settings.topEdge != .none,
+                         bottom: settings.bottomEdge != .none,
+                         left: settings.leftEdge != .none,
+                         right: settings.rightEdge != .none))
         MultitouchBridge.shared.updateMinimumContactCount()
         refreshSurfaceSize()
 
@@ -95,7 +101,13 @@ final class EdgeControlsController: ObservableObject {
             trackPointCornerZone: Self.trackPointCornerZone()
         )
 
-        TouchTracker.updateEdgeControlsCache(enabled: hasActiveEdgeControls)
+        TouchTracker.updateEdgeControlsCache(
+            enabled: hasActiveEdgeControls,
+            marginMm: marginMm,
+            activeEdges: (top: topEdge != .none,
+                         bottom: bottomEdge != .none,
+                         left: leftEdge != .none,
+                         right: rightEdge != .none))
         MultitouchBridge.shared.updateMinimumContactCount()
     }
 

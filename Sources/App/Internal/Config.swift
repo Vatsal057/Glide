@@ -140,6 +140,19 @@ struct GlideConfig {
         var triggerShortcutModifiers: [String]? = nil
     }
 
+    /// Raw `surface_feel:` section. Per-material field overrides are
+    /// field-name → value (e.g. ["tooth_mm": 2.5]).
+    struct SurfaceFeel {
+        var enabled: Bool = false
+        var material: String = "felt"
+        var intensity: Double = 0.8
+        var pressSizeScaling: Bool = true
+        /// gesture key → preset name | "global" | "off"
+        var gestures: [String: String] = [:]
+        /// preset name → field overrides
+        var materials: [String: [String: Double]] = [:]
+    }
+
     var speed: Speed = Speed()
     var preferences: Preferences = Preferences()
     var appSwitcher: AppSwitcher = AppSwitcher()
@@ -148,6 +161,7 @@ struct GlideConfig {
     var tuning: Tuning = Tuning()
     /// haptic event rawValue → pattern rawValue (see HapticEvent / HapticPattern)
     var haptics: [String: String] = [:]
+    var surfaceFeel: SurfaceFeel = SurfaceFeel()
     var gestures: [Gesture] = []
 }
 
@@ -172,6 +186,20 @@ extension GlideConfig {
         cfg.preferences.windowTargeting  = s.windowTargetingMode.rawValue
         cfg.preferences.hapticFeedback   = s.hapticFeedbackEnabled
         cfg.haptics = Dictionary(uniqueKeysWithValues: s.hapticAssignments.map { ($0.key.rawValue, $0.value.rawValue) })
+        let sf = s.surfaceFeel
+        cfg.surfaceFeel.enabled = sf.enabled
+        cfg.surfaceFeel.material = sf.material
+        cfg.surfaceFeel.intensity = sf.intensity
+        cfg.surfaceFeel.pressSizeScaling = sf.pressSizeScaling
+        cfg.surfaceFeel.gestures = sf.gestureMaterials
+        cfg.surfaceFeel.materials = Dictionary(uniqueKeysWithValues:
+            sf.materialOverrides.map { name, m in
+                (name, ["tooth_mm": m.toothMM,
+                        "max_tick_rate": m.maxTickRate,
+                        "jitter": m.jitter,
+                        "burst": Double(m.burst),
+                        "burst_gap_teeth": Double(m.burstGapTeeth)])
+            })
         cfg.preferences.debugLogging     = s.debugLoggingEnabled
         cfg.preferences.launchAtLogin    = s.launchAtLoginEnabled
         cfg.preferences.autoDisableNativeGestures = s.autoDisableNativeGestures
@@ -338,6 +366,28 @@ extension GlideConfig {
         return EdgeControlsSettings.normalized(e)
     }
 
+    func toSurfaceFeel() -> SurfaceFeelSettings {
+        var s = SurfaceFeelSettings()
+        s.enabled          = surfaceFeel.enabled
+        s.material         = surfaceFeel.material
+        s.intensity        = surfaceFeel.intensity
+        s.pressSizeScaling = surfaceFeel.pressSizeScaling
+        s.gestureMaterials = surfaceFeel.gestures
+        var overrides: [String: Material] = [:]
+        for (name, fields) in surfaceFeel.materials {
+            let key = name.lowercased()
+            guard var m = Material.preset(named: key) else { continue }
+            if let v = fields["tooth_mm"]        { m.toothMM = v }
+            if let v = fields["max_tick_rate"]   { m.maxTickRate = v }
+            if let v = fields["jitter"]          { m.jitter = v }
+            if let v = fields["burst"]           { m.burst = Int(v) }
+            if let v = fields["burst_gap_teeth"] { m.burstGapTeeth = Int(v) }
+            overrides[key] = m
+        }
+        s.materialOverrides = overrides
+        return SurfaceFeelSettings.normalized(s)
+    }
+
     func toTuning() -> GestureTuning {
         var t = GestureTuning()
         t.initialThreshold          = speed.swipeThreshold
@@ -496,6 +546,26 @@ enum GlideConfigSerializer {
             "  haptics:",
         ]
         lines += config.haptics.sorted { $0.key < $1.key }.map { "    \($0.key): \"\($0.value)\"" }
+        lines += [
+            "",
+            "  # ── Surface feel (FeelMyMac-style trackpad textures) ──",
+            "  surface_feel:",
+            "    enabled: \(config.surfaceFeel.enabled ? "true" : "false")",
+            "    material: \(config.surfaceFeel.material)",
+            "    intensity: \(String(format: "%.2f", config.surfaceFeel.intensity))",
+            "    press_size_scaling: \(config.surfaceFeel.pressSizeScaling ? "true" : "false")",
+            "    # Per-gesture overrides: preset name, \"global\", or \"off\".",
+            "    gestures:",
+        ]
+        lines += config.surfaceFeel.gestures.sorted { $0.key < $1.key }
+            .map { "      \($0.key): \($0.value)" }
+        lines += ["    # Per-material tuning overrides.", "    materials:"]
+        lines += config.surfaceFeel.materials.sorted { $0.key < $1.key }.map { name, fields in
+            let inner = fields.sorted { $0.key < $1.key }
+                .map { "\($0.key): \(String(format: "%.3f", $0.value))" }
+                .joined(separator: ", ")
+            return "      \(name): { \(inner) }"
+        }
         lines += [
             "",
             "  # ── App Switcher (hold + swipe to browse, release to confirm) ──",
@@ -738,6 +808,8 @@ enum GlideConfigParser {
             case "speed":       i += 1; parseSpeed(lines, from: &i, parentIndent: indent, into: &cfg.speed)
             case "preferences":  i += 1; parsePreferences(lines, from: &i, parentIndent: indent, into: &cfg.preferences)
             case "haptics":     i += 1; parseHaptics(lines, from: &i, parentIndent: indent, into: &cfg.haptics)
+            case "surface_feel", "surfacefeel":
+                i += 1; parseSurfaceFeel(lines, from: &i, parentIndent: indent, into: &cfg.surfaceFeel)
             case "app_switcher": i += 1; parseAppSwitcher(lines, from: &i, parentIndent: indent, into: &cfg.appSwitcher)
             case "trackpoint":   i += 1; parseTrackPoint(lines, from: &i, parentIndent: indent, into: &cfg.trackPoint)
             case "edge_controls", "edgecontrols": i += 1; parseEdgeControls(lines, from: &i, parentIndent: indent, into: &cfg.edgeControls)
@@ -796,6 +868,97 @@ enum GlideConfigParser {
             if let k = key, let v = stringVal(val) { haptics[k] = v }
             i += 1
         }
+    }
+
+    private static func parseSurfaceFeel(_ lines: [String], from i: inout Int, parentIndent: Int, into sf: inout GlideConfig.SurfaceFeel) {
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
+            // Note: the gestures/materials sub-parsers leave `i` on the first
+            // unconsumed line, so those cases must not advance it again.
+            switch key {
+            case "enabled":            sf.enabled          = boolVal(val)   ?? sf.enabled;          i += 1
+            case "material":           sf.material         = stringVal(val) ?? sf.material;         i += 1
+            case "intensity":          sf.intensity        = doubleVal(val) ?? sf.intensity;       i += 1
+            case "press_size_scaling": sf.pressSizeScaling = boolVal(val)   ?? sf.pressSizeScaling; i += 1
+            case "gestures":
+                i += 1
+                parseSurfaceFeelGestures(lines, from: &i, parentIndent: ind, into: &sf.gestures)
+            case "materials":
+                i += 1
+                parseSurfaceFeelMaterials(lines, from: &i, parentIndent: ind, into: &sf.materials)
+            default: i += 1
+            }
+        }
+    }
+
+    private static func parseSurfaceFeelGestures(_ lines: [String], from i: inout Int, parentIndent: Int, into gestures: inout [String: String]) {
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
+            if let k = key, let v = stringVal(val) { gestures[k] = v }
+            i += 1
+        }
+    }
+
+    private static func parseSurfaceFeelMaterials(_ lines: [String], from i: inout Int, parentIndent: Int, into materials: inout [String: [String: Double]]) {
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let (ind, key, val) = tokenize(line)
+            if ind <= parentIndent { return }
+            guard let name = key else { i += 1; continue }
+            if let v = val, v.trimmingCharacters(in: .whitespaces).hasPrefix("{") {
+                // Inline form:  felt: { tooth_mm: 2.5, max_tick_rate: 24 }
+                materials[name] = parseInlineDoubleMap(v)
+            } else {
+                // Block form:
+                //   felt:
+                //     tooth_mm: 2.5
+                var fields: [String: Double] = [:]
+                i += 1
+                while i < lines.count {
+                    let sub = lines[i]
+                    let subTrimmed = sub.trimmingCharacters(in: .whitespaces)
+                    if subTrimmed.isEmpty || subTrimmed.hasPrefix("#") { i += 1; continue }
+                    let (subInd, subKey, subVal) = tokenize(sub)
+                    if subInd <= ind { break }
+                    if let sk = subKey, let dv = doubleVal(subVal) {
+                        fields[sk] = dv
+                    }
+                    i += 1
+                }
+                if !fields.isEmpty { materials[name] = fields }
+                continue
+            }
+            i += 1
+        }
+    }
+
+    /// Parses `{ k: v, k: v }` into string → double. Defensive: anything that
+    /// doesn't look like a number is skipped.
+    private static func parseInlineDoubleMap(_ text: String) -> [String: Double] {
+        var out: [String: Double] = [:]
+        var t = text.trimmingCharacters(in: .whitespaces)
+        guard t.hasPrefix("{"), t.hasSuffix("}") else { return out }
+        t.removeFirst()
+        t.removeLast()
+        for pair in t.split(separator: ",") {
+            let kv = pair.split(separator: ":", maxSplits: 1)
+            guard kv.count == 2 else { continue }
+            let k = kv[0].trimmingCharacters(in: .whitespaces).lowercased()
+            let v = kv[1].trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if let d = Double(v) { out[k] = d }
+        }
+        return out
     }
 
     private static func parseAppSwitcher(_ lines: [String], from i: inout Int, parentIndent: Int, into switcher: inout GlideConfig.AppSwitcher) {

@@ -6,8 +6,10 @@ import IOKit
 // ─────────────────────────────────────────────
 
 /// One physical pulse strength on the Taptic Engine.
-enum HapticStrength {
-    case weak, medium, strong
+enum HapticStrength: String, CaseIterable, Codable {
+    case weak = "weak"
+    case medium = "medium"
+    case strong = "strong"
 
     /// MTActuator built-in actuation IDs (3 = weak, 4 = medium, 6 = strong).
     var actuationID: Int32 {
@@ -24,6 +26,20 @@ enum HapticStrength {
         case .weak:   return .alignment
         case .medium: return .generic
         case .strong: return .levelChange
+        }
+    }
+}
+
+extension HapticStrength: Comparable {
+    static func < (lhs: HapticStrength, rhs: HapticStrength) -> Bool {
+        lhs.rank < rhs.rank
+    }
+
+    private var rank: Int {
+        switch self {
+        case .weak:   return 0
+        case .medium: return 1
+        case .strong: return 2
         }
     }
 }
@@ -194,11 +210,34 @@ final class HapticEngine {
         }
     }
 
-    private func pulse(_ strength: HapticStrength) {
-        if let actuator, let actuate = fnActuate,
-           actuate(actuator, strength.actuationID, 0, 0, 0) == KERN_SUCCESS {
-            return
+    /// Serializes concurrent actuator calls — surface-feel pulses from the MT
+    /// thread can race discrete pattern pulses from main.
+    private let pulseLock = NSLock()
+
+    /// Fires one raw actuator pulse. Safe to call from the multitouch thread:
+    /// the private-actuator path runs inline on the caller, and only the
+    /// NSHapticFeedbackManager fallback hops to main.
+    ///
+    /// Callers gate on the master haptic toggle themselves — see
+    /// SurfaceFeelEngine, which snapshots it for the MT thread.
+    func pulse(_ strength: HapticStrength) {
+        pulseLock.lock()
+        let ok: Bool
+        if let actuator, let actuate = fnActuate {
+            ok = actuate(actuator, strength.actuationID, 0, 0, 0) == KERN_SUCCESS
+        } else {
+            ok = false
         }
-        NSHapticFeedbackManager.defaultPerformer.perform(strength.fallback, performanceTime: .now)
+        pulseLock.unlock()
+        guard !ok else { return }
+
+        let pattern = strength.fallback
+        if Thread.isMainThread {
+            NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: .now)
+        } else {
+            DispatchQueue.main.async {
+                NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: .now)
+            }
+        }
     }
 }
